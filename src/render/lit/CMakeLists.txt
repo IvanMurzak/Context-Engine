@@ -1,19 +1,23 @@
 # src/render/lit/ — the M4 PBR + real-time lighting/shadows path (R-REND-004 MUST) with the
 # R-REND-006 lightmap INPUT hooks (issue #135). Two halves, mirroring the sprite module's split:
 #
-#   * context_render_lit — the pure-CPU half: 3D math (lit_math.*), the CPU reference of the WGSL's
-#                          metallic-roughness shading (pbr.* — the analytic oracle the GPU proof
-#                          asserts against), and the reference scene (lit_scene.*: authored World
-#                          components -> extract -> uniform packing, WGSL generation, analytic
-#                          sample points). GPU-free, so it builds + is unit-tested under EVERY
-#                          toolchain including the local Ninja+Strawberry-GCC dev gate.
+#   * context_render_lit — the pure-CPU half: the CPU reference of the WGSL's metallic-roughness
+#                          shading (pbr.* — the analytic oracle the GPU proof asserts against), and
+#                          the reference scene (lit_scene.*: authored World components -> extract ->
+#                          uniform packing, WGSL generation, analytic sample points). GPU-free, so
+#                          it builds + is unit-tested under EVERY toolchain including the local
+#                          Ninja+Strawberry-GCC dev gate.
 #   * the GPU lit offscreen proof (lit_offscreen.h) — header-only, expressed entirely against the
 #                          RHI, drawn + read back by the parent module's wgpu offscreen executable
 #                          (`lit` mode) on the CI `render` job (Linux/lavapipe, like the triangle
 #                          and sprite proofs). Not built here; wired by the parent CMakeLists.
+#
+# The 3D math this module used to own (lit_math.*) was PROMOTED to context_render in M9 e11a
+# (context/render/math.h + src/math.cpp), so context/render/view.h can name a Mat4 without
+# context_render depending on this library. lit_math.h remains as a re-export; nothing here or in
+# lit's own call sites changed, and the lit-test_lit_math ctest below still covers that math.
 
 add_library(context_render_lit STATIC
-    src/lit_math.cpp
     src/pbr.cpp
     src/lit_scene.cpp)
 

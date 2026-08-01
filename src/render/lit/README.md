@@ -18,7 +18,10 @@ Two halves, mirroring the sprite module's split:
 
 - **`context_render_lit`** — the pure-CPU half; builds + unit-tests under every toolchain
   including the local Ninja+Strawberry-GCC dev gate (no GPU):
-  - `lit_math.*` — column-major Mat4/Vec3, `look_at`, WebGPU-clip `ortho`.
+  - `lit_math.h` — a re-export shim only. The column-major Mat4/Vec3, `look_at` and WebGPU-clip
+    `ortho` it used to define were promoted to `context/render/math.h` in M9 e11a so that
+    `context/render/view.h` can name a `Mat4` without `context_render` depending on this library;
+    every name stays reachable as `lit::<name>`, so no call site here changed.
   - `pbr.*` — the **CPU reference** of the WGSL shading (Lambert + GGX/Schlick Cook-Torrance,
     constant-ambient IBL stub): the analytic oracle the GPU proof asserts readbacks against.
     It mirrors the WGSL in `lit_scene.cpp` formula-for-formula — change only in lockstep.

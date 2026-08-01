@@ -66,7 +66,11 @@ void test_web_sprite_scene_inputs_pinned()
 
     // The per-sprite WGSL the web harness bakes: two entry points + a 6-vertex (two-triangle) quad
     // with the red tint — the same numbers the browser proof renders.
-    const Mat4 proj = scene.camera.projection();
+    // sprite::Mat4 explicitly: since M9 e11a promoted a Mat4 into context::render itself, this TU's
+    // two using-directives (context::render above, context::render::sprite here) both nominate the
+    // name, so an unqualified Mat4 becomes ambiguous the moment context/render/math.h enters this
+    // include closure -- which the viewport render pass will do.
+    const sprite::Mat4 proj = scene.camera.projection();
     const Sprite2D& red = scene.sprites[0];
     const std::array<Vec2, 4> corners = quad_clip_corners(
         proj, Vec2{red.position[0], red.position[1]}, Vec2{red.size[0], red.size[1]});

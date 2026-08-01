@@ -26,6 +26,8 @@
 add_library(context_render STATIC
     src/extract.cpp
     src/renderer.cpp
+    src/math.cpp               # e11a: shared 3D math, PROMOTED from lit/ (+ perspective/inverse)
+    src/view.cpp               # e11a: the D5 Camera/View type + unproject/pick_ray
     src/profile_hud.cpp        # a15: the L-47 GPU-free profiler HUD overlay (R-OBS-002)
     src/renderdoc_capture.cpp) # a15: the L-47 RenderDoc in-app capture hook (R-OBS-002)
 
@@ -49,6 +51,8 @@ set(_context_render_tests
     test_rhi            # RHI object model driven end-to-end (offscreen readback) via the fake backend
     test_light_extract  # R-REND-004: light/material extraction incl. the malformed/absent edges
     test_ui_panel_extract # M7 a9 (D4/L-39): world-space UiPanel extract incl. the no-Transform edge
+    test_math             # e11a: perspective / inverse / determinant / quaternion + degenerate finiteness
+    test_view             # e11a: the D5 View type, project<->unproject round trip (2D+3D), pick_ray
     test_profile_hud      # a15: L-47 HUD overlay rows + the zero-cost-when-disabled contract
     test_renderdoc_capture) # a15: L-47 RenderDoc hook — the not-attached no-op path (GPU-free)
 foreach(_t IN LISTS _context_render_tests)
