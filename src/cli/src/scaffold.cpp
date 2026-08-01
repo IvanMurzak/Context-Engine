@@ -117,6 +117,289 @@ bool read_file(const std::filesystem::path& path, std::string& out)
     return true;
 }
 
+bool write_text_file(const std::filesystem::path& path, const std::string& body)
+{
+    std::ofstream out(path, std::ios::binary | std::ios::trunc);
+    if (!out)
+        return false;
+    out << body;
+    return static_cast<bool>(out);
+}
+
+// ------------------------------------------------------- the `extension-panel` template (M9 e13e)
+
+// The `context-ext://` URL prefix a package panel's entry must carry. A THIRD mirror of the shell
+// tier's vocabulary (`editor::shell::kExtUrlPrefix`), on the same terms as the two in scaffold.h and
+// pinned by the same test: the scheme is the package's ORIGIN, so an entry spelled any other way is
+// refused by `read_package_manifest`'s rule (c).
+constexpr const char* kExtUrlPrefix = "context-ext://";
+
+bool is_lower_alnum_ascii(unsigned char c)
+{
+    return (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9');
+}
+
+// Does the id's LAST dot-separated label consist entirely of digits? The URL Standard's "ends in a
+// number" check hands such a host to the IPv4 parser rather than keeping it a domain, so the id
+// could never be named back by a request.
+bool last_label_all_digits(const std::string& id)
+{
+    const std::size_t dot = id.rfind('.');
+    const std::string last = dot == std::string::npos ? id : id.substr(dot + 1);
+    if (last.empty())
+        return false;
+    for (char ch : last)
+    {
+        const auto c = static_cast<unsigned char>(ch);
+        if (c < '0' || c > '9')
+            return false;
+    }
+    return true;
+}
+
+// The manifest a scaffolded package ships: R-EDIT-001 manifest v2, ONE iframe panel contribution.
+// Built as a JSON DOM so it is well-formed by construction, exactly as the default template's two
+// files are.
+Json extension_manifest_json(const std::string& package_id)
+{
+    Json dock = Json::object();
+    dock.set("zone", Json("right"));
+    // The task's own requirement AND the honest default for a panel of this shape: one instance,
+    // because a second copy of a hello panel says nothing a first does not.
+    dock.set("singleton", Json(true));
+    dock.set("minWidth", Json(std::int64_t{280}));
+    dock.set("minHeight", Json(std::int64_t{160}));
+
+    Json content = Json::object();
+    // `iframe` is the ONLY content type a package contribution may declare — `uitree` and `local`
+    // both mean "the editor renders this from its own code", which a third-party package does not
+    // have, and the store's rule (b) fails closed on anything else.
+    content.set("type", Json("iframe"));
+    content.set("entry", Json(std::string(kExtUrlPrefix) + package_id + "/" +
+                              std::string(kExtensionPanelEntryFileName)));
+
+    Json state = Json::object();
+    // The D6 state contract starts at 1; the store refuses 0 or negative.
+    state.set("schemaVersion", Json(std::int64_t{1}));
+
+    // The read/query baseline, from the closed manifest vocabulary. DECLARED, never granted — what a
+    // package is actually given comes from the install-consent surface, not from this file.
+    Json capabilities = Json::array();
+    capabilities.push_back(Json("read_query"));
+
+    Json contribution = Json::object();
+    // Every contribution id must be NAMESPACED to the package (the package id itself, or a
+    // `<package-id>.` prefix), or the store refuses the whole manifest.
+    contribution.set("id", Json(package_id + ".panel"));
+    contribution.set("kind", Json("panel"));
+    contribution.set("title", Json("Hello Panel"));
+    contribution.set("icon", Json("puzzle"));
+    contribution.set("contractVersion", Json(std::int64_t{kExtensionPanelContractVersion}));
+    contribution.set("dock", std::move(dock));
+    contribution.set("content", std::move(content));
+    contribution.set("state", std::move(state));
+    contribution.set("capabilities", std::move(capabilities));
+
+    Json contributions = Json::array();
+    contributions.push_back(std::move(contribution));
+
+    Json manifest = Json::object();
+    // The manifest's own id must equal the DIRECTORY NAME — the store refuses a disagreement rather
+    // than reconciling it, because the directory name is what the `context-ext://` origin will be.
+    manifest.set("id", Json(package_id));
+    manifest.set("version", Json("0.1.0"));
+    manifest.set("contributions", std::move(contributions));
+    return manifest;
+}
+
+// The hello panel document. NO inline <script> and NO inline style: a panel loads under a strict CSP
+// (`script-src 'self'`, `style-src 'self'` — no `'unsafe-inline'` on either), so both would be
+// refused and the template would teach a shape that cannot work. The stylesheet and the script are
+// this package's OWN same-origin assets, which is what that policy permits.
+std::string extension_panel_html(const std::string& package_id)
+{
+    return "<!doctype html>\n"
+           "<html lang=\"en\">\n"
+           "  <head>\n"
+           "    <meta charset=\"utf-8\" />\n"
+           "    <title>Hello Panel</title>\n"
+           "    <link rel=\"stylesheet\" href=\"panel.css\" />\n"
+           "  </head>\n"
+           "  <body>\n"
+           "    <main class=\"panel\">\n"
+           "      <h1>Hello from " +
+           package_id +
+           "</h1>\n"
+           "      <p id=\"status\">This panel's script has not run yet.</p>\n"
+           "    </main>\n"
+           "    <script src=\"panel.js\" defer></script>\n"
+           "  </body>\n"
+           "</html>\n";
+}
+
+std::string extension_panel_css()
+{
+    return "/* The panel's own stylesheet, served from its own origin (the panel CSP is\n"
+           "   `style-src 'self'` with no 'unsafe-inline', so a <style> block would be refused). */\n"
+           ".panel {\n"
+           "    color-scheme: light dark;\n"
+           "    font: 13px/1.5 system-ui, sans-serif;\n"
+           "    margin: 0;\n"
+           "    padding: 12px;\n"
+           "}\n"
+           ".panel h1 {\n"
+           "    font-size: 15px;\n"
+           "    margin: 0 0 8px;\n"
+           "}\n"
+           ".panel p {\n"
+           "    margin: 0;\n"
+           "    opacity: 0.8;\n"
+           "}\n";
+}
+
+std::string extension_panel_js(const std::string& package_id)
+{
+    return "// The panel's own script. The editor injects a port bootstrap as the FIRST script in\n"
+           "// every panel document, so by the time this deferred script runs the channel to the\n"
+           "// editor is already published on `window.contextPanelPort` -- unless the document was\n"
+           "// opened outside the editor, where nothing is minted and the panel must still render.\n"
+           "(function () {\n"
+           "    \"use strict\";\n"
+           "    var status = document.getElementById(\"status\");\n"
+           "    var port = window.contextPanelPort;\n"
+           "    if (!port) {\n"
+           "        status.textContent =\n"
+           "            \"Loaded, with no editor port (this document is not framed by the editor).\";\n"
+           "        return;\n"
+           "    }\n"
+           "    port.onmessage = function (event) {\n"
+           "        status.textContent = \"Editor said: \" + JSON.stringify(event.data);\n"
+           "    };\n"
+           "    port.start();\n"
+           "    port.postMessage({ type: \"hello\", from: \"" +
+           package_id +
+           "\" });\n"
+           "    status.textContent = \"Loaded, and connected to the editor over the panel port.\";\n"
+           "})();\n";
+}
+
+// The generated README. It states the THREE steps in the package's own terms, so the budget the
+// template exists to meet is documented where the person who ran `context new` will actually see it.
+std::string extension_readme(const std::string& package_id)
+{
+    return "# " + package_id +
+           "\n\n"
+           "A minimal Context editor package: one panel, rendered in an iframe on this package's own\n"
+           "`" +
+           std::string(kExtUrlPrefix) + package_id +
+           "` origin.\n\n"
+           "## Three steps from nothing to a panel\n\n"
+           "1. **Scaffold it into the package store.** A package's id IS its directory name, and the\n"
+           "   store is `~/.context/packages` (`%USERPROFILE%\\.context\\packages` on Windows), so\n"
+           "   scaffolding straight into the store is the install:\n\n"
+           "       context new --template extension-panel ~/.context/packages/" +
+           package_id +
+           "\n\n"
+           "2. **Start the editor.** It scans the store at boot, mounts every package it accepts, and\n"
+           "   refuses -- by name, never silently -- any it does not.\n\n"
+           "3. **Open the panel.** It is contributed as `" +
+           package_id +
+           ".panel`, docked right.\n\n"
+           // One table ROW per line: a markdown table cell may not contain a hard line break, so a
+           // wrapped row renders as literal text instead of a table.
+           "## What is here\n\n"
+           "| File | Why |\n"
+           "|---|---|\n"
+           "| `" +
+           std::string(kExtensionPanelManifestFileName) +
+           "` | The manifest. Its `id` must equal this directory's name, and `content.entry` must "
+           "name this package's own `" +
+           std::string(kExtUrlPrefix) +
+           "` origin -- the editor refuses a package that disagrees with either. |\n"
+           "| `" +
+           std::string(kExtensionPanelEntryFileName) +
+           "` | The panel document the manifest's `content.entry` points at. |\n"
+           "| `panel.css` | Styling. A separate file because the panel CSP is `style-src 'self'` "
+           "with no `'unsafe-inline'`. |\n"
+           "| `panel.js` | The panel's script -- likewise a separate file (`script-src 'self'`). It "
+           "talks to the editor over `window.contextPanelPort`. |\n\n"
+           "## Changing it\n\n"
+           "The manifest is what the editor reads; the three assets are yours. Keep `content.entry`\n"
+           "pointing at a document that exists, keep every contribution id namespaced to `" +
+           package_id +
+           "`,\nand keep `content.type` at `iframe` -- the other content types mean \"the editor\n"
+           "renders this from its own code\", which a package does not have.\n";
+}
+
+// The files the `extension-panel` template writes, in the order the plan and the envelope report
+// them. Sorted, so the report is stable and diffable.
+std::vector<std::string> extension_panel_files()
+{
+    return {"README.md", std::string(kExtensionPanelManifestFileName), "panel.css",
+            std::string(kExtensionPanelEntryFileName), "panel.js"};
+}
+
+// Write the `extension-panel` template into `directory`, then PROVE the result is loadable
+// (`verify_extension_package`) before reporting success — the same shape the default template's
+// R-QA-006 runnable proof takes, against the property that matters for a package.
+Envelope scaffold_extension_package(const std::string& directory)
+{
+    namespace fs = std::filesystem;
+    const std::string package_id = project_basename(directory);
+
+    // FAIL CLOSED, BEFORE ANYTHING IS WRITTEN. A package's id IS its directory name, so a directory
+    // the id grammar refuses yields a package the store refuses (`package.id_invalid`) — and a
+    // scaffold that emits an unloadable package is worse than no scaffold, because it teaches the
+    // wrong shape and the failure surfaces far from its cause.
+    if (!is_scaffold_package_id(package_id))
+        return Envelope::failure(
+            "usage.invalid",
+            "'" + package_id +
+                "' cannot be an editor-package id, so it cannot be a package directory name: an id "
+                "is 1-64 bytes of lower-case a-z, 0-9, '.', '-' or '_', must start and end "
+                "alphanumeric, may not contain '..', and its last dot-separated label may not be "
+                "all digits");
+
+    const fs::path root(directory);
+    std::error_code ec;
+    fs::create_directories(root, ec);
+    if (ec)
+        return Envelope::failure("internal.error",
+                                 "could not create the package directory: " + ec.message());
+
+    // A tool save canonicalizes the whole file it writes (R-FILE-001), and `context new` IS a tool
+    // save — so the manifest lands in THE canonical form from its first byte, exactly as the default
+    // template's project/scene files do.
+    const std::string manifest_body =
+        editor::serializer::canonicalize(extension_manifest_json(package_id).dump(2)).bytes;
+
+    if (!write_text_file(root / kExtensionPanelManifestFileName, manifest_body) ||
+        !write_text_file(root / kExtensionPanelEntryFileName, extension_panel_html(package_id)) ||
+        !write_text_file(root / "panel.css", extension_panel_css()) ||
+        !write_text_file(root / "panel.js", extension_panel_js(package_id)) ||
+        !write_text_file(root / "README.md", extension_readme(package_id)))
+    {
+        return Envelope::failure("internal.error", "template files failed to write cleanly");
+    }
+
+    Envelope loadable = verify_extension_package(directory);
+    if (!loadable.ok())
+        return loadable;
+
+    Json data = Json::object();
+    data.set("directory", Json(directory));
+    data.set("template", Json(kExtensionPanelTemplate));
+    Json files = Json::array();
+    for (const std::string& file : extension_panel_files())
+        files.push_back(Json(file));
+    data.set("files", std::move(files));
+    data.set("packageId", Json(package_id));
+    data.set("contributions", loadable.data().at("contributions"));
+    data.set("entry", loadable.data().at("entry"));
+    data.set("loadable", loadable.data().at("loadable"));
+    return Envelope::success(std::move(data));
+}
+
 // Auto-install the R-FILE-012 structural merge driver DEFINITION into the project's git config, when
 // a repo already exists. L-27: the ENGINE never invokes git — this is a client-side PLAIN-FILE write
 // of the `[merge "context"]` stanza git will later invoke (no shell-out, no libgit). Idempotent;
@@ -145,7 +428,7 @@ bool install_merge_driver(const std::filesystem::path& root)
 
 const std::vector<std::string>& template_names()
 {
-    static const std::vector<std::string> names = {"default"};
+    static const std::vector<std::string> names = {kDefaultTemplate, kExtensionPanelTemplate};
     return names;
 }
 
@@ -157,17 +440,135 @@ bool is_known_template(const std::string& name)
     return false;
 }
 
+bool is_scaffold_package_id(const std::string& name)
+{
+    // The grammar, and each clause's reason, is stated on the declaration (scaffold.h) and on
+    // `editor::shell::is_valid_package_id`, which this mirrors and is pinned against.
+    if (name.empty() || name.size() > 64)
+        return false;
+    if (!is_lower_alnum_ascii(static_cast<unsigned char>(name.front())) ||
+        !is_lower_alnum_ascii(static_cast<unsigned char>(name.back())))
+        return false;
+    for (char ch : name)
+    {
+        const auto c = static_cast<unsigned char>(ch);
+        if (is_lower_alnum_ascii(c) || c == '-' || c == '.' || c == '_')
+            continue;
+        return false;
+    }
+    if (name.find("..") != std::string::npos)
+        return false;
+    return !last_label_all_digits(name);
+}
+
 Json scaffold_plan(const std::string& directory, const std::string& template_name)
 {
     Json files = Json::array();
-    files.push_back(Json(".gitattributes"));
-    files.push_back(Json("project.json"));
-    files.push_back(Json("scenes/main.scene.json"));
+    if (template_name == kExtensionPanelTemplate)
+    {
+        for (const std::string& file : extension_panel_files())
+            files.push_back(Json(file));
+    }
+    else
+    {
+        files.push_back(Json(".gitattributes"));
+        files.push_back(Json("project.json"));
+        files.push_back(Json("scenes/main.scene.json"));
+    }
     Json plan = Json::object();
     plan.set("directory", Json(directory));
     plan.set("template", Json(template_name));
     plan.set("files", std::move(files));
     return plan;
+}
+
+Envelope verify_extension_package(const std::string& directory)
+{
+    namespace fs = std::filesystem;
+    const fs::path root(directory);
+    const std::string package_id = project_basename(directory);
+
+    std::string manifest_text;
+    if (!read_file(root / kExtensionPanelManifestFileName, manifest_text))
+        return Envelope::failure("file.not_found", std::string(kExtensionPanelManifestFileName) +
+                                                       " not found under " + directory);
+    Json manifest;
+    try
+    {
+        manifest = Json::parse(manifest_text);
+    }
+    catch (const std::exception& e)
+    {
+        return Envelope::failure("file.parse_error",
+                                 std::string("package manifest parse failed: ") + e.what());
+    }
+    if (!manifest.is_object())
+        return Envelope::failure("file.validation_failed",
+                                 "the package manifest's top level is not a JSON object");
+
+    // The store derives the id from the DIRECTORY NAME and refuses a manifest that disagrees, so a
+    // scaffold whose two halves disagree would produce a package the editor rejects.
+    if (!manifest.contains("id") || !manifest.at("id").is_string() ||
+        manifest.at("id").as_string() != package_id)
+        return Envelope::failure("file.validation_failed",
+                                 "the package manifest's `id` must equal the directory name '" +
+                                     package_id + "'");
+
+    if (!manifest.contains("contributions") || !manifest.at("contributions").is_array() ||
+        manifest.at("contributions").size() == 0)
+        return Envelope::failure("file.validation_failed",
+                                 "the package manifest declares no contributions");
+
+    const std::string own_origin = std::string(kExtUrlPrefix) + package_id + "/";
+    std::string first_entry;
+    const Json& contributions = manifest.at("contributions");
+    for (std::size_t i = 0; i < contributions.size(); ++i)
+    {
+        const Json& contribution = contributions.at(i);
+        const std::string at = "contributions[" + std::to_string(i) + "]";
+        if (!contribution.is_object() || !contribution.contains("id") ||
+            !contribution.at("id").is_string())
+            return Envelope::failure("file.validation_failed", at + " carries no `id`");
+        // Namespaced to the package: the id must BE the package id or start with `<package-id>.`.
+        const std::string id = contribution.at("id").as_string();
+        if (id != package_id && id.rfind(package_id + ".", 0) != 0)
+            return Envelope::failure("file.validation_failed",
+                                     at + "'s id '" + id + "' is not namespaced to '" + package_id +
+                                         "'");
+        if (!contribution.contains("content") || !contribution.at("content").is_object())
+            return Envelope::failure("file.validation_failed", at + " declares no `content`");
+        const Json& content = contribution.at("content");
+        if (!content.contains("type") || !content.at("type").is_string() ||
+            content.at("type").as_string() != "iframe")
+            return Envelope::failure("file.validation_failed",
+                                     at + "'s content.type must be 'iframe'");
+        if (!content.contains("entry") || !content.at("entry").is_string())
+            return Envelope::failure("file.validation_failed", at + " declares no content.entry");
+        const std::string entry = content.at("entry").as_string();
+        if (entry.rfind(own_origin, 0) != 0)
+            return Envelope::failure("file.validation_failed",
+                                     at + "'s content.entry '" + entry + "' must name this "
+                                     "package's own origin (" + own_origin + "...)");
+        // THE CHECK THE STORE ITSELF DOES NOT MAKE. `read_package_manifest` validates the entry's
+        // URL GRAMMAR — it never opens the file — so a manifest naming a document that does not
+        // exist is ACCEPTED there and fails only at load, as an empty panel with nothing saying
+        // why. Scaffolding is the one moment both halves are in hand, so it is checked here.
+        const std::string relative = entry.substr(own_origin.size());
+        if (relative.empty() || !std::filesystem::exists(root / relative))
+            return Envelope::failure("file.not_found",
+                                     at + "'s content.entry names '" + relative +
+                                         "', which does not exist in the package");
+        if (first_entry.empty())
+            first_entry = entry;
+    }
+
+    Json data = Json::object();
+    data.set("directory", Json(directory));
+    data.set("packageId", Json(package_id));
+    data.set("contributions", Json(static_cast<std::uint64_t>(contributions.size())));
+    data.set("entry", Json(first_entry));
+    data.set("loadable", Json(true));
+    return Envelope::success(std::move(data));
 }
 
 Envelope verify_runnable(const std::string& directory)
@@ -254,6 +655,9 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
         return Envelope::failure("usage.missing_argument", "a target directory is required");
     if (!is_known_template(template_name))
         return Envelope::failure("usage.invalid", "unknown template: " + template_name);
+
+    if (template_name == kExtensionPanelTemplate)
+        return scaffold_extension_package(directory);
 
     const fs::path root(directory);
     std::error_code ec;

@@ -1099,3 +1099,37 @@ if(CONTEXT_TSAN)
         PROPERTIES ENVIRONMENT
         "TSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/js/tsan-suppressions.txt")
 endif()
+
+# ===================================================================================================
+# The M9 e13e SCAFFOLD-THEN-LOAD proof (issue #467) — ctest `editor-shell-ext-package-scaffold`.
+# `context new --template extension-panel` writes a package, and the REAL editor load path
+# (scan_package_store -> package_mounts -> ExtAssetResolver::mount -> resolve) accepts and serves it.
+#
+# IT LIVES HERE BECAUSE IT SPANS TWO TIERS. The scaffolder is in src/cli/ and the package store +
+# `context-ext://` scheme are in src/editor/shell/, which sits ABOVE the CLI in the link order — so
+# neither module's own suite can link the other half, and a scaffold test confined to either one could
+# only assert on the template's TEXT (which passes just as well against a template the store rejects).
+# This target links both, which is also what lets it pin the CLI's three mirrors of shell-tier
+# vocabulary (the manifest file name, the contract major, the package-id grammar) against the live
+# shell-tier values.
+#
+# context_serializer is linked DIRECTLY for the canonical-fixpoint assertion: it is PRIVATE in
+# context_cli, so its include path does not propagate through it (the same pattern as
+# context_cli_test_scaffold). A plain `editor-shell-` ctest, so the build job's general step auto-runs
+# it on all three OS legs with NO ci.yml `--target` bookkeeping.
+add_executable(context_test_e13e_ext_scaffold test_e13e_ext_scaffold.cpp)
+target_link_libraries(context_test_e13e_ext_scaffold
+    PRIVATE context_cli context_editor_shell context_serializer context_warnings)
+target_link_options(context_test_e13e_ext_scaffold PRIVATE ${_m1_exit_static_runtime})
+add_test(NAME editor-shell-ext-package-scaffold COMMAND context_test_e13e_ext_scaffold)
+# Pure in-process filesystem work (no daemon, no browser, no subprocess); the cap exists so a
+# regression surfaces its diagnostics rather than hanging the job.
+set_tests_properties(editor-shell-ext-package-scaffold PROPERTIES TIMEOUT 120)
+# Sanitize preset only: context_cli links context_js (the M6 X1 `context profile gc` path), so on the
+# V8-capable legs this executable bakes in the uninstrumented rusty_v8 archive and inherits the same
+# benign demangler/symbolizer LSan reports every context_cli-linking test does. The narrow
+# suppressions can never mask a `context::` leak; inert on the stub (non-V8) build.
+if(CONTEXT_SANITIZE)
+    set_tests_properties(editor-shell-ext-package-scaffold PROPERTIES ENVIRONMENT
+        "LSAN_OPTIONS=suppressions=${CMAKE_CURRENT_SOURCE_DIR}/../../runtime/ts/lsan-suppressions.txt")
+endif()

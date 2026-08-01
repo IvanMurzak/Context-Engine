@@ -54,7 +54,8 @@
         "dry-run",
         "idempotency-key",
         "after-hash",
-        "atomic-plan"
+        "atomic-plan",
+        "template"
       ]
     },
     {

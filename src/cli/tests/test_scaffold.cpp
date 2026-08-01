@@ -172,5 +172,204 @@ int main()
         CHECK(e.error()->code == "file.not_found");
     }
 
+    // ============================================================================================
+    // The M9 e13e `extension-panel` template (issue #467). What is asserted HERE is the CLI's own
+    // half: the files land, the manifest says what it must, and the refusals refuse. That the
+    // result is a package the EDITOR accepts is asserted where both tiers can be linked —
+    // src/tests/integration/test_e13e_ext_scaffold.cpp (ctest editor-shell-ext-package-scaffold),
+    // which takes the scaffold through the real store scan + `context-ext://` resolve. Neither
+    // suite substitutes for the other: this one cannot see the store, and asserting on the
+    // template's TEXT would pass just as well against a template the store rejects.
+    // ============================================================================================
+
+    // --- extension-panel writes a complete package and PROVES it loadable -----------------------
+    {
+        const std::filesystem::path dir = unique_temp_dir("extpanel");
+        const Envelope e = scaffold_project(dir.string(), kExtensionPanelTemplate);
+        CHECK(e.ok());
+        CHECK(e.data().at("loadable").as_bool() == true);
+        CHECK(e.data().at("packageId").as_string() == dir.filename().string());
+        CHECK(e.data().at("contributions").as_int() == 1);
+        CHECK(e.data().at("files").size() == 5);
+
+        // Every file the envelope reports actually exists — a report is not evidence of a write.
+        for (std::size_t i = 0; i < e.data().at("files").size(); ++i)
+        {
+            CHECK(std::filesystem::exists(dir / e.data().at("files").at(i).as_string()));
+        }
+        CHECK(std::filesystem::exists(dir / kExtensionPanelManifestFileName));
+        CHECK(std::filesystem::exists(dir / kExtensionPanelEntryFileName));
+
+        // The manifest is canonical from its first byte (R-FILE-001: `context new` is a tool save)
+        // and says what the store requires of it.
+        {
+            std::ifstream manifest_in(dir / kExtensionPanelManifestFileName, std::ios::binary);
+            std::string manifest_text((std::istreambuf_iterator<char>(manifest_in)),
+                                      std::istreambuf_iterator<char>());
+            CHECK(context::editor::serializer::canonicalize(manifest_text).bytes == manifest_text);
+
+            const Json manifest = Json::parse(manifest_text);
+            const std::string package_id = dir.filename().string();
+            CHECK(manifest.at("id").as_string() == package_id);
+            CHECK(manifest.at("contributions").size() == 1);
+            const Json& c = manifest.at("contributions").at(0);
+            // Namespaced to the package, iframe content on the package's OWN origin, v2, and the
+            // dock/state members the R-EDIT-001 manifest v2 shape carries.
+            CHECK(c.at("id").as_string() == package_id + ".panel");
+            CHECK(c.at("kind").as_string() == "panel");
+            CHECK(c.at("contractVersion").as_int() == kExtensionPanelContractVersion);
+            CHECK(c.at("content").at("type").as_string() == "iframe");
+            CHECK(c.at("content").at("entry").as_string() ==
+                  "context-ext://" + package_id + "/" + kExtensionPanelEntryFileName);
+            CHECK(c.at("dock").at("singleton").as_bool() == true);
+            CHECK(c.at("state").at("schemaVersion").as_int() == 1);
+            CHECK(c.at("capabilities").size() == 1);
+            CHECK(c.at("capabilities").at(0).as_string() == "read_query");
+        }
+
+        // The panel document loads under a strict CSP (`script-src 'self'` / `style-src 'self'`,
+        // neither carrying 'unsafe-inline'), so the template must not teach an inline script or an
+        // inline style block — both would be refused and the panel would come up blank.
+        {
+            std::ifstream html_in(dir / kExtensionPanelEntryFileName, std::ios::binary);
+            std::string html((std::istreambuf_iterator<char>(html_in)),
+                             std::istreambuf_iterator<char>());
+            CHECK(html.find("<script src=\"panel.js\"") != std::string::npos);
+            CHECK(html.find("panel.css") != std::string::npos);
+            CHECK(html.find("<script>") == std::string::npos);
+            CHECK(html.find("<style") == std::string::npos);
+        }
+
+        // The README states the three-step budget where the person who ran `context new` sees it.
+        {
+            std::ifstream readme_in(dir / "README.md", std::ios::binary);
+            std::string readme((std::istreambuf_iterator<char>(readme_in)),
+                               std::istreambuf_iterator<char>());
+            CHECK(readme.find("Three steps") != std::string::npos);
+            CHECK(readme.find("context new --template extension-panel") != std::string::npos);
+        }
+
+        remove_quiet(dir);
+    }
+
+    // --- the documented invocation: `context new --template extension-panel <dir>` --------------
+    {
+        const std::filesystem::path dir = unique_temp_dir("extflag");
+        const Envelope e = run({"new", "--template", kExtensionPanelTemplate, dir.string()});
+        CHECK(e.ok());
+        CHECK(e.exit_code() == 0);
+        CHECK(e.data().at("template").as_string() == kExtensionPanelTemplate);
+        CHECK(std::filesystem::exists(dir / kExtensionPanelManifestFileName));
+        remove_quiet(dir);
+    }
+
+    // --- the M1 positional spelling still works, and the FLAG wins when both are given ----------
+    {
+        const std::filesystem::path positional = unique_temp_dir("extpos");
+        CHECK(run({"new", positional.string(), kExtensionPanelTemplate}).ok());
+        CHECK(std::filesystem::exists(positional / kExtensionPanelManifestFileName));
+        remove_quiet(positional);
+
+        const std::filesystem::path both = unique_temp_dir("extboth");
+        const Envelope e =
+            run({"new", both.string(), "default", "--template", kExtensionPanelTemplate});
+        CHECK(e.ok());
+        CHECK(e.data().at("template").as_string() == kExtensionPanelTemplate);
+        // The DEFAULT template's marker file is absent — proof the flag decided, not the positional.
+        CHECK(std::filesystem::exists(both / kExtensionPanelManifestFileName));
+        CHECK(!std::filesystem::exists(both / "project.json"));
+        remove_quiet(both);
+    }
+
+    // --- --dry-run reports the extension-panel plan and does NO I/O -----------------------------
+    {
+        const Envelope e =
+            run({"new", "some-package-dir", "--template", kExtensionPanelTemplate, "--dry-run"});
+        CHECK(e.ok());
+        CHECK(e.data().at("template").as_string() == kExtensionPanelTemplate);
+        CHECK(e.data().at("files").size() == 5);
+        CHECK(e.data().at("files").at(1).as_string() == kExtensionPanelManifestFileName);
+        CHECK(!std::filesystem::exists(std::filesystem::path("some-package-dir")));
+    }
+
+    // --- failure path: a directory name that cannot be a package id is refused, and NOTHING is
+    //     written. A package's id IS its directory name, so scaffolding into such a directory would
+    //     produce a package the store refuses (`package.id_invalid`) — worse than no scaffold. The
+    //     agreement between this refusal and the store's is pinned in the integration tier.
+    {
+        const std::filesystem::path parent = unique_temp_dir("extbadid");
+        const std::filesystem::path dir = parent / "Upper";
+        const Envelope e = scaffold_project(dir.string(), kExtensionPanelTemplate);
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "usage.invalid");
+        CHECK(!std::filesystem::exists(dir));
+        remove_quiet(parent);
+    }
+    {
+        // The whole refused class, at the CLI's own predicate — every clause of the grammar.
+        CHECK(is_scaffold_package_id("hello-panel"));
+        CHECK(is_scaffold_package_id("acme.hello-panel"));
+        CHECK(!is_scaffold_package_id(""));
+        CHECK(!is_scaffold_package_id("Upper"));
+        CHECK(!is_scaffold_package_id(".hidden"));
+        CHECK(!is_scaffold_package_id("trailing-"));
+        CHECK(!is_scaffold_package_id("a..b"));
+        CHECK(!is_scaffold_package_id("pkg.2"));
+        CHECK(!is_scaffold_package_id("12345"));
+        CHECK(!is_scaffold_package_id("has space"));
+    }
+
+    // --- failure path: verify_extension_package refuses what the store would refuse -------------
+    {
+        // The check the STORE cannot make: `read_package_manifest` validates the entry's URL
+        // grammar and never opens the file, so a manifest naming a missing document is accepted
+        // there and fails only at load, as a blank panel with nothing saying why.
+        const std::filesystem::path dir = unique_temp_dir("extnoentry");
+        CHECK(scaffold_project(dir.string(), kExtensionPanelTemplate).ok());
+        std::error_code ec;
+        std::filesystem::remove(dir / kExtensionPanelEntryFileName, ec);
+        const Envelope e = verify_extension_package(dir.string());
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "file.not_found");
+        remove_quiet(dir);
+    }
+    {
+        // The manifest's id must equal the directory name — the store refuses a disagreement rather
+        // than reconciling it.
+        const std::filesystem::path dir = unique_temp_dir("extmismatch");
+        CHECK(scaffold_project(dir.string(), kExtensionPanelTemplate).ok());
+        {
+            std::ofstream out(dir / kExtensionPanelManifestFileName,
+                              std::ios::binary | std::ios::trunc);
+            out << "{\"id\":\"somebody-else\",\"contributions\":[]}";
+        }
+        const Envelope e = verify_extension_package(dir.string());
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "file.validation_failed");
+        remove_quiet(dir);
+    }
+    {
+        // ...and a manifest that is not JSON at all is a parse failure, not a crash.
+        const std::filesystem::path dir = unique_temp_dir("extbadjson");
+        CHECK(scaffold_project(dir.string(), kExtensionPanelTemplate).ok());
+        {
+            std::ofstream out(dir / kExtensionPanelManifestFileName,
+                              std::ios::binary | std::ios::trunc);
+            out << "{{{";
+        }
+        const Envelope e = verify_extension_package(dir.string());
+        CHECK(!e.ok());
+        CHECK(e.error()->code == "file.parse_error");
+        remove_quiet(dir);
+    }
+
+    // --- both templates are offered, and only they -----------------------------------------------
+    {
+        CHECK(template_names().size() == 2);
+        CHECK(is_known_template(kDefaultTemplate));
+        CHECK(is_known_template(kExtensionPanelTemplate));
+        CHECK(!is_known_template("extension"));
+    }
+
     CLI_TEST_MAIN_END();
 }
