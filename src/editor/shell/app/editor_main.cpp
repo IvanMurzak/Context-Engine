@@ -911,10 +911,7 @@ int main(int argc, char** argv)
         [project = options.project](std::string& error) -> std::unique_ptr<client::Client>
         { return client::Client::connect_to_project(project, 5000, error); },
         [&package_grants](const std::string& package_id) -> std::string
-        {
-            return shell::attach_scope_spec(
-                shell::granted_scope_set(package_grants.grants().granted_capabilities(package_id)));
-        });
+        { return package_grants.attach_scope_spec_for(package_id); });
     if (!package_sessions.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the package daemon-session surface\n");

@@ -129,8 +129,8 @@ export const packageGrantsTests: readonly TestCase[] = [
             // laxer assertion; `null` is what proves the discard is total.
             //
             // ⚠ EVERY BROKEN ENTRY CARRIES A VALID `requested` AND `granted` EXCEPT THE ONE MEMBER
-            // UNDER TEST, AND THAT IS LOAD-BEARING RATHER THAN TIDINESS. Measured by this task's plant
-            // round: the fixtures originally OMITTED `requested` on four of these, so the absent
+            // UNDER TEST, AND THAT IS LOAD-BEARING RATHER THAN TIDINESS. MEASURED: the fixtures
+            // originally OMITTED `requested` on four of these, so the absent
             // member decided every one of them and the plant "make `isStringArray` accept a non-string
             // element" scored GREEN — four sub-cases that could not fail on the rule they name. A
             // one-member mutation of an otherwise-valid entry is the only shape that discriminates.
@@ -338,7 +338,7 @@ export const packageGrantsTests: readonly TestCase[] = [
 
             fanout.subscribe("ext.hello", [UI_TOPIC_FOCUS]);
             // ⚠ THE SECOND SUBSCRIBE NAMES ONLY THE NEW TOPIC, AND THAT IS WHAT MAKES THIS CASE
-            // DISCRIMINATE. Measured by this task's plant round: it originally re-sent
+            // DISCRIMINATE. MEASURED: it originally re-sent
             // `[LAYOUT, FOCUS]`, so a fan-out that REPLACED the held set instead of merging it
             // produced the identical result and the plant scored GREEN — an assertion that could not
             // fail on the rule it names. A merge is only observable when the second request omits
@@ -402,16 +402,62 @@ export const packageGrantsTests: readonly TestCase[] = [
             const empty = fanout.subscribe("ext.hello", []);
             assert(empty.diagnostic !== "", "an empty topic list is refused");
 
-            // The per-package cap. Sized to the vocabulary, so it can only bind on a package asking
-            // for a topic twice over the whole built-in set.
+            // ⚠ THE REQUEST-LENGTH CAP. EVERY ENTRY IS A VALID BUILT-IN TOPIC, AND THAT IS WHAT MAKES
+            // THIS CASE DISCRIMINATE RATHER THAN TIDINESS. A fixture carrying one NON-built-in entry
+            // (the shape this case originally used) is refused by the VOCABULARY loop one step
+            // earlier, so it passes identically with the cap deleted — and the cap it was written to
+            // cover was itself unreachable, because the vocabulary loop already bounds the MERGED set
+            // to the vocabulary's own size. The diagnostic is asserted BY CONTENT for the same reason:
+            // `!== ""` is satisfied by either refusal, so it cannot tell them apart.
             const over = fanout.subscribe(
                 "ext.greedy",
-                Array.from({ length: PACKAGE_UI_TOPIC_LIMIT + 1 }, (_unused, i) =>
-                    i < BUILTIN_UI_TOPICS.length ? BUILTIN_UI_TOPICS[i] ?? "" : "editor.ui.extra",
-                ),
+                Array.from({ length: PACKAGE_UI_TOPIC_LIMIT + 1 }, () => UI_TOPIC_FOCUS),
             );
-            assert(over.diagnostic !== "", "a request past the cap is refused");
+            assert(
+                over.diagnostic.includes("may name at most"),
+                "a request naming more topics than the cap is refused BY THE CAP, not by the vocabulary",
+            );
             assertEqual(fanout.topicsFor("ext.greedy"), [], "…and subscribes nothing");
+        },
+    },
+    {
+        // ⚠ PLANT: in `subscribe`, delete the `#busSubscriptions.has(topic)` arm that delivers the
+        //     retained snapshot to a JOINING package (leaving only the `#attach` else-arm) -> the
+        //     second package's assertions go RED while the first package's stay green.
+        name: "packageui: the SECOND package to subscribe to a topic also gets the retained snapshot",
+        run: () => {
+            const bus = new EditorUiBus({ origin: "9" });
+            const spy = deliverySpy();
+            const fanout = new PackageUiFanout(bus, spy.targets);
+
+            // Published BEFORE anyone subscribes, so the only way it can reach a package is as the
+            // RETAINED snapshot replayed at subscribe time.
+            const report = bus.publish(UI_TOPIC_THEME_CHANGED, { variant: "dark" });
+            assert(report.published, "the bus really published (the fixture is not vacuous)");
+
+            fanout.subscribe("ext.first", [UI_TOPIC_THEME_CHANGED]);
+            assertEqual(spy.deliveries.length, 1, "the FIRST subscriber gets the retained snapshot");
+            assertEqual(spy.deliveries[0]?.packageId, "ext.first", "…addressed to it");
+
+            // ⚠ THE DISCRIMINATOR, AND WHY THE FIRST PACKAGE ABOVE CANNOT STAND IN FOR IT. The bus
+            // listener for this topic is already attached for `ext.first`, so `EditorUiBus.subscribe`
+            // — the only thing that replays a retained envelope — does NOT run again. A fan-out that
+            // relied on it alone leaves every package after the first blank until the next publish:
+            // the stale-until-something-happens failure snapshot-on-subscribe exists to prevent, and
+            // it is invisible to any single-package case.
+            fanout.subscribe("ext.second", [UI_TOPIC_THEME_CHANGED]);
+            assertEqual(spy.deliveries.length, 2, "the SECOND subscriber gets it too");
+            assertEqual(spy.deliveries[1]?.packageId, "ext.second", "…addressed to the joiner");
+            assertEqual(
+                spy.deliveries[1]?.event,
+                { seq: report.seq, topic: UI_TOPIC_THEME_CHANGED, origin: "9", payload: { variant: "dark" } },
+                "the same retained envelope, whole",
+            );
+
+            // AND NOT ON EVERY CALL: a re-subscribe to a topic already held replays nothing, so the
+            // snapshot arm cannot be pumped into a per-call redelivery by a package that keeps asking.
+            fanout.subscribe("ext.second", [UI_TOPIC_THEME_CHANGED]);
+            assertEqual(spy.deliveries.length, 2, "an idempotent re-subscribe replays nothing");
         },
     },
     {

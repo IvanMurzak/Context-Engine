@@ -81,6 +81,7 @@
 #include "context/editor/shell/package_store.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <string>
 #include <vector>
@@ -310,6 +311,20 @@ public:
     [[nodiscard]] BridgeResult decide(const std::string& package_id,
                                       const std::vector<std::string>& capabilities);
 
+    // THE `AttachOptions::scope` SPEC FOR `package_id` — the ONE value that confers daemon authority,
+    // and the reason it lives HERE rather than in the composition root. The store answers with the
+    // RAW recorded grant: `PackageGrantStore::load` has no scan, so it can validate the closed
+    // vocabulary and the id syntax but CANNOT clamp to a manifest. Clamping is therefore the caller's
+    // duty, and a caller that forgets it hands the daemon a scope the package never declared — with
+    // no surface reporting the difference, since the consent listing and `sandbox.granted_scopes` are
+    // both clamped and would still read as granting nothing. Only this class holds both halves (the
+    // scan and the store), so this is where R-SEC-007 can actually be enforced for the attach path.
+    //
+    // An UNINSTALLED package yields an EMPTY spec, which `PackageSessionHost::attach_scope_for` maps
+    // onto `kPackageSessionScope` — a grant left in the document for a package that is gone stays
+    // unusable rather than becoming a pre-authorization for the next directory of that name.
+    [[nodiscard]] std::string attach_scope_spec_for(const std::string& package_id) const;
+
     [[nodiscard]] const PackageGrantStore& grants() const { return grants_; }
     /** Everything load/record/save refused, oldest first — the diagnosability channel. */
     [[nodiscard]] const std::vector<GrantDiagnostic>& diagnostics() const { return diagnostics_; }
@@ -324,8 +339,8 @@ private:
     // DECLARATION order, not in member-initializer-list order. With `grants_` first, that load ran
     // against a `std::vector` whose constructor had not run yet: undefined behaviour that the plain
     // `dev` build survived by luck and ASan aborted deterministically
-    // (`allocation-size-too-big` out of `push_back`, MEASURED on this task's local `sanitize` gate —
-    // it would have redded both CI sanitizer legs). No warning catches this class: `-Wreorder` only
+    // (`allocation-size-too-big` out of `push_back`, MEASURED under the `sanitize` preset — it would
+    // have redded both CI sanitizer legs). No warning catches this class: `-Wreorder` only
     // fires when the initializer LIST disagrees with the declaration order, which it did not.
     // The constructor now also builds `grants_` in its BODY rather than in the list, so the ordering
     // is belt AND braces rather than the only thing standing between this and the same UB.

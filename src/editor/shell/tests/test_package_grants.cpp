@@ -372,9 +372,10 @@ void test_a_bad_entry_drops_only_its_own_package()
     // ⚠ THE LINE ABOVE IS DEFENCE-IN-DEPTH, NOT THE DISCRIMINATOR, AND IT IS RECORDED RATHER THAN
     // OVERSTATED. Two independent mechanisms drop an unknown token - `read_entry`'s
     // `capability_supported` guard and `canonical_capabilities`' vocabulary re-order - so removing
-    // either alone leaves the VALUE unchanged and that assertion cannot fail. (MEASURED: this task's
-    // plant P02 removes the guard and the value assertion stayed green; the line below is the one that
-    // reddened.) The guard's own contribution is the NAMED DIAGNOSTIC, so that is what pins it.
+    // either alone leaves the VALUE unchanged and that assertion cannot fail. (MEASURED: with
+    // `read_entry`'s guard removed, the value assertion above stays GREEN and the diagnostic
+    // assertion below is the one that fails.) The guard's own contribution is the NAMED
+    // DIAGNOSTIC, so that is what pins it.
     CHECK(has_code(diagnostics, shell::kErrGrantsUnknownCapability));
 
     // A key no package could ever be named is ignored: `is_valid_package_id` is the SAME predicate the
@@ -467,7 +468,8 @@ void test_the_clamp_and_the_registry_refusal()
     CHECK(scan.packages.size() == 1);
 
     // BEFORE: least privilege on every contribution - `read_package_manifest` grants nothing, which is
-    // the property that makes the AFTER below attributable to this task rather than to the parser.
+    // the property that makes the AFTER below attributable to `apply_package_grants` rather than to
+    // the parser.
     const gc::Contribution* panel = contribution_for(scan, "hello-panel.panel");
     const gc::Contribution* viewer = contribution_for(scan, "hello-panel.viewer");
     CHECK(panel != nullptr && viewer != nullptr);
@@ -689,6 +691,64 @@ void test_the_grant_host_records_clamps_and_persists()
     // ...and the SECOND install is refused, which is what proves the first one actually bound rather
     // than silently no-op'd: an `install` that registered nothing would answer true twice.
     CHECK(!host.install(router));
+    // ⚠ EACH ROUTE IS PINNED BY NAME, AND THE `install()` BOOLEAN ABOVE CANNOT SUBSTITUTE FOR IT.
+    // `install` answers false on the FIRST refused registration, so a build that bound `list` and
+    // never reached `decide` returns exactly the same true/false pair as a correct one - the whole
+    // consent-WRITE route could be unroutable with every assertion above still green, and an
+    // operator's answer would go nowhere. Naming both is what makes this the wiring claim it says.
+    CHECK(router.has_method(shell::kPackageGrantsListMethod));
+    CHECK(router.has_method(shell::kPackageGrantsDecideMethod));
+
+    shelltest::cleanup(root);
+}
+
+// ⚠ THE STALE DOCUMENT: a grant that EXCEEDS the manifest must not reach the attach path.
+//
+// `PackageGrantStore::load` has no scan, so it validates the closed vocabulary and the id syntax and
+// CANNOT clamp - the raw recorded answer is exactly what the store reports. That is reachable without
+// anyone acting in bad faith: a package UPDATE that drops a capability leaves the operator's older,
+// broader answer on disk. Every OTHER consumer clamps (`apply_package_grants` per contribution,
+// `decide` before recording), so this case exists for the one that confers real daemon authority.
+//
+// It is written against a document ON DISK rather than through `record`, DELIBERATELY: `decide`
+// clamps before recording, so a grant built in-process can never carry the excess this pins.
+void test_a_grant_exceeding_the_manifest_is_clamped_off_the_attach_path()
+{
+    const std::filesystem::path root = shelltest::make_temp_project("ce-grants", "stale");
+    const std::filesystem::path store_root = root / "packages";
+    const std::filesystem::path file = root / ".context" / shell::kPackageGrantsFileName;
+    // `quiet-panel` declares NOTHING beyond the baseline; `writer-panel` declares `file_write`.
+    stage_package(store_root, "quiet-panel", bare_manifest("quiet-panel"));
+    stage_package(store_root, "writer-panel", two_contribution_manifest("writer-panel"));
+    // The stale answer: BOTH packages recorded as holding `file_write`. Only one ever declared it.
+    shelltest::write_file(file, R"({"version": 1, "grants": {)"
+                                R"("quiet-panel": ["file_write"], )"
+                                R"("writer-panel": ["file_write"]}})");
+    shell::PackageStoreScan scan = shell::scan_package_store(store_root);
+    PackageGrantHost host(scan, file);
+
+    // PRECONDITION, and the reason this case is not vacuous: the RAW store really does hold the
+    // excess. Without this the assertion below would pass just as well against a store that had
+    // dropped the entry at load, which is a different mechanism entirely.
+    CHECK(host.grants().granted_capabilities("quiet-panel") ==
+          (std::vector<std::string>{gc::kCapabilityFileWrite}));
+
+    // THE NEGATIVE: undeclared, so it is clamped OFF the wire - byte-identical to the deny-all floor.
+    CHECK(host.attach_scope_spec_for("quiet-panel") == std::string(shell::kPackageSessionScope));
+    CHECK(!bridge::ScopeSet::parse(host.attach_scope_spec_for("quiet-panel"))
+               .has(bridge::Scope::file_write));
+
+    // THE POSITIVE COUNTERPART, in the same fixture family: `writer-panel` DECLARED `file_write` and
+    // was granted it, so it reaches the wire. Without this line the negative above is satisfied for
+    // free by a clamp that strips everything from everyone - which is the failure mode a
+    // deny-by-default module is most likely to ship.
+    CHECK(bridge::ScopeSet::parse(host.attach_scope_spec_for("writer-panel"))
+              .has(bridge::Scope::file_write));
+
+    // AN UNINSTALLED id yields an EMPTY spec, which `PackageSessionHost::attach_scope_for` maps onto
+    // the baseline: a grant left behind for a package that is gone is not a pre-authorization for the
+    // next directory to claim that name.
+    CHECK(host.attach_scope_spec_for("never-installed").empty());
 
     shelltest::cleanup(root);
 }
@@ -861,6 +921,7 @@ int main()
     test_the_clamp_and_the_registry_refusal();
     test_the_consent_surface_lists_the_requested_scopes();
     test_the_grant_host_records_clamps_and_persists();
+    test_a_grant_exceeding_the_manifest_is_clamped_off_the_attach_path();
     test_the_derived_scope_through_the_real_dispatcher();
     test_the_derived_scope_reaches_the_wire();
     SHELL_TEST_MAIN_END();

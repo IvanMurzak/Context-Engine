@@ -71,13 +71,18 @@ import { BUILTIN_UI_TOPICS } from "./uibus.js";
 export const PANEL_UI_DELIVER_VERB = "ui.deliver";
 
 /**
- * How many topic subscriptions ONE package may hold.
+ * How many `editor.ui` topics ONE `bridge.ui.subscribe` REQUEST may name.
  *
  * The built-in vocabulary is closed and small, so this can never bind on a well-behaved package — it
  * exists because `subscribe` is reachable from untrusted code in a process that stays up for days, and
- * a per-call `Set` insertion with no ceiling is an unbounded allocation an attacker chooses. Sized to
- * the vocabulary rather than to a round number, so widening the vocabulary without revisiting this
- * cannot silently make it binding.
+ * a per-call array with no ceiling is an unbounded allocation an attacker chooses. Sized to the
+ * vocabulary rather than to a round number, so widening the vocabulary without revisiting this cannot
+ * silently make it binding.
+ *
+ * ⚠ IT BOUNDS THE REQUEST, NOT THE HELD SET, AND THAT IS THE ONLY VERSION THAT BOUNDS ANYTHING. Every
+ * requested topic is checked against the closed vocabulary, so the MERGED set is already bounded by
+ * that vocabulary's size and a ceiling over it can never be reached — it would read as a protection
+ * while admitting the very allocation this names. `subscribe` states the ordering that makes it real.
  */
 export const PACKAGE_UI_TOPIC_LIMIT = BUILTIN_UI_TOPICS.length;
 
@@ -158,6 +163,22 @@ export class PackageUiFanout {
             this.#refused += 1;
             return { topics: [], diagnostic: "bridge.ui.subscribe requires at least one topic" };
         }
+        // ⚠ THE REQUEST IS BOUNDED HERE, BEFORE ANYTHING IS ALLOCATED FROM IT, AND THAT ORDER IS THE
+        // WHOLE PROTECTION. The vocabulary loop below is total, so a surviving request names only
+        // built-in topics — but it may name ARBITRARILY MANY COPIES of one, and merging spreads every
+        // entry into a fresh array before a `Set` collapses them. Bounding the MERGED set instead
+        // bounds a value the vocabulary loop already bounds to the closed vocabulary's size, so it can
+        // never refuse anything: it reads as a ceiling while admitting the allocation it names.
+        // A legitimate request cannot exceed the vocabulary, since it names DISTINCT built-in topics.
+        if (topics.length > PACKAGE_UI_TOPIC_LIMIT) {
+            this.#refused += 1;
+            return {
+                topics: [],
+                diagnostic:
+                    `a bridge.ui.subscribe request may name at most ` +
+                    `${String(PACKAGE_UI_TOPIC_LIMIT)} editor.ui topics`,
+            };
+        }
         for (const topic of topics) {
             if (!isSubscribableUiTopic(topic)) {
                 this.#refused += 1;
@@ -173,17 +194,31 @@ export class PackageUiFanout {
             }
         }
         const held = this.#byPackage.get(packageId) ?? new Set<string>();
-        const merged = new Set<string>([...held, ...topics]);
-        if (merged.size > PACKAGE_UI_TOPIC_LIMIT) {
-            this.#refused += 1;
-            return {
-                topics: [],
-                diagnostic: `a package may hold at most ${String(PACKAGE_UI_TOPIC_LIMIT)} editor.ui subscriptions`,
-            };
-        }
-        this.#byPackage.set(packageId, merged);
-        for (const topic of topics) {
-            this.#attach(topic);
+        const added = topics.filter((topic) => !held.has(topic));
+        this.#byPackage.set(packageId, new Set<string>([...held, ...topics]));
+        for (const topic of added) {
+            if (this.#busSubscriptions.has(topic)) {
+                // ⚠ ALREADY ATTACHED FOR ANOTHER PACKAGE, so the bus listener this package would have
+                // inherited its RETAINED SNAPSHOT from is already installed and `EditorUiBus.subscribe`
+                // — the only thing that replays that snapshot — will not run again. Deliver it here, to
+                // the JOINING package alone, or the second and every later subscriber to a topic draws
+                // nothing until the next publish: exactly the stale-until-something-happens failure the
+                // header's snapshot-on-subscribe property exists to prevent.
+                const snapshot = this.#bus.snapshot(topic);
+                if (snapshot !== undefined) {
+                    try {
+                        this.#delivered += this.#targets.deliver(packageId, snapshot);
+                    } catch {
+                        // A dead port is an ordinary outcome, exactly as in `#fanOut`.
+                    }
+                }
+            } else {
+                // FIRST holder of this topic — `#byPackage` was written above, so the bus's own
+                // snapshot replay reaches this package through `#fanOut`. Delivering here as well
+                // would double it. (`dispose` drops a bus subscription exactly when no package holds
+                // the topic, so "not attached" really does mean "nobody holds it".)
+                this.#attach(topic);
+            }
         }
         return { topics: [...topics], diagnostic: "" };
     }

@@ -8,6 +8,7 @@
 
 #include <algorithm>
 #include <optional>
+#include <system_error>
 #include <utility>
 
 namespace context::editor::shell
@@ -105,8 +106,8 @@ bool read_entry(const std::string& package_id, const contract::Json& value,
             // narrowed it again would otherwise revoke every grant on the same document, and the
             // surviving tokens were each consented to on their own.
             //
-            // ⚠ THE VALUE-LEVEL PROTECTION HERE IS REDUNDANT, AND SAYING SO IS THE POINT (MEASURED by
-            // this task's plant round, plant P02): `canonical_capabilities` below re-orders through
+            // ⚠ THE VALUE-LEVEL PROTECTION HERE IS REDUNDANT, AND SAYING SO IS THE POINT (MEASURED
+            // against this file's own suite): `canonical_capabilities` below re-orders through
             // `kCapabilityVocabulary` and therefore ALSO drops anything outside it, so deleting this
             // guard does NOT change what any caller reads — the suite's exact-list assertion cannot
             // fail on it, and a plant that only removed this branch would have scored a misleading
@@ -123,6 +124,28 @@ bool read_entry(const std::string& package_id, const contract::Json& value,
     }
     out = canonical_capabilities(tokens);
     return true;
+}
+
+// The union of every contribution's DECLARED capabilities — "what this package asked for", and the
+// one value a grant is clamped against at PACKAGE granularity.
+//
+// ⚠ NOT FOR `apply_package_grants`. That clamp is deliberately per-CONTRIBUTION, against each
+// contribution's OWN declaration, so a package whose panel declares `file_write` cannot have its
+// viewer ride that declaration. Reusing this there would widen exactly what decision 3 narrows.
+std::vector<std::string> declared_capabilities(const InstalledPackage& package)
+{
+    std::vector<std::string> declared;
+    for (const gc::Contribution& contribution : package.contributions)
+    {
+        for (const std::string& capability : contribution.capabilities)
+        {
+            if (!contains_token(declared, capability))
+            {
+                declared.push_back(capability);
+            }
+        }
+    }
+    return declared;
 }
 
 } // namespace
@@ -369,18 +392,7 @@ std::vector<PackageConsentRequest> package_consent_requests(const PackageStoreSc
     requests.reserve(scan.packages.size());
     for (const InstalledPackage& package : scan.packages)
     {
-        std::vector<std::string> requested;
-        for (const gc::Contribution& contribution : package.contributions)
-        {
-            for (const std::string& capability : contribution.capabilities)
-            {
-                if (!contains_token(requested, capability))
-                {
-                    requested.push_back(capability);
-                }
-            }
-        }
-        requested = canonical_capabilities(requested);
+        std::vector<std::string> requested = canonical_capabilities(declared_capabilities(package));
         PackageConsentRequest request;
         request.id = package.id;
         request.version = package.version;
@@ -508,6 +520,23 @@ BridgeResult PackageGrantHost::list() const
     return BridgeResult::ok(std::move(result));
 }
 
+std::string PackageGrantHost::attach_scope_spec_for(const std::string& package_id) const
+{
+    const auto installed = std::find_if(scan_.packages.begin(), scan_.packages.end(),
+                                        [&](const InstalledPackage& package)
+                                        { return package.id == package_id; });
+    if (installed == scan_.packages.end())
+    {
+        return {};
+    }
+    // THE CLAMP THE ATTACH PATH OWES (R-SEC-007, decision 3). The recorded answer can legitimately
+    // exceed the manifest without anyone acting in bad faith: a package UPDATE that drops a capability
+    // leaves the operator's older, broader answer on disk, which is the stale-document case decision 3
+    // exists for. Clamped here, that answer narrows silently; unclamped, it reaches the daemon.
+    return attach_scope_spec(granted_scope_set(
+        clamp_to_declared(grants_.granted_capabilities(package_id), declared_capabilities(*installed))));
+}
+
 BridgeResult PackageGrantHost::decide(const std::string& package_id,
                                       const std::vector<std::string>& capabilities)
 {
@@ -530,18 +559,8 @@ BridgeResult PackageGrantHost::decide(const std::string& package_id,
     // CLAMPED TO THE MANIFEST BEFORE IT IS RECORDED (decision 3): a consent surface that recorded more
     // than the manifest declared would hand the registry a contribution `manifest_defect` refuses, and
     // the user would see their answer turn a working package into a broken one.
-    std::vector<std::string> declared;
-    for (const gc::Contribution& contribution : installed->contributions)
-    {
-        for (const std::string& capability : contribution.capabilities)
-        {
-            if (!contains_token(declared, capability))
-            {
-                declared.push_back(capability);
-            }
-        }
-    }
-    grants_.record(package_id, clamp_to_declared(capabilities, declared), diagnostics_);
+    grants_.record(package_id, clamp_to_declared(capabilities, declared_capabilities(*installed)),
+                   diagnostics_);
     ++decisions_recorded_;
     apply_package_grants(scan_, grants_);
 
