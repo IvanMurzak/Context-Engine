@@ -152,9 +152,10 @@ struct GrantDiagnostic
 // asserts rather than the string's exact bytes.
 [[nodiscard]] std::string attach_scope_spec(const bridge::ScopeSet& scopes);
 
-// `granted` intersected with `declared` — decision 3's clamp. Order follows `granted`; duplicates are
-// collapsed. A capability outside the closed vocabulary is dropped by BOTH sides, so it can never
-// survive the intersection.
+// `granted` intersected with `declared` — decision 3's clamp. The result is emitted in the CLOSED
+// VOCABULARY's order (the intersection is re-canonicalised on the way out), NOT in `granted`'s order,
+// and duplicates are collapsed. A capability outside the closed vocabulary is dropped by BOTH sides,
+// so it can never survive the intersection.
 [[nodiscard]] std::vector<std::string> clamp_to_declared(const std::vector<std::string>& granted,
                                                          const std::vector<std::string>& declared);
 
@@ -205,8 +206,10 @@ public:
     // create-parent, stage to a unique temp, rename over), so a crash mid-write never leaves a
     // half-written grant document behind. False + `error` on any failure, including an EMPTY `file`.
     //
-    // Package ids and capability tokens are both emitted SORTED, so two stores holding the same
-    // grants produce byte-identical documents and a diff of this file is reviewable.
+    // Package ids are emitted SORTED and capability tokens in the closed vocabulary's fixed order
+    // (they are already canonical by the time they are stored, so a second sort would be a competing
+    // opinion). Both are deterministic, which is the property that matters: two stores holding the
+    // same grants produce byte-identical documents and a diff of this file is reviewable.
     [[nodiscard]] bool save(const std::filesystem::path& file, std::string& error) const;
 
     /** How many packages have a recorded decision (granted or refused). */
@@ -322,7 +325,16 @@ public:
     //
     // An UNINSTALLED package yields an EMPTY spec, which `PackageSessionHost::attach_scope_for` maps
     // onto `kPackageSessionScope` — a grant left in the document for a package that is gone stays
-    // unusable rather than becoming a pre-authorization for the next directory of that name.
+    // unusable WHILE IT IS GONE.
+    //
+    // ⚠ THAT IS NOT THE SAME AS "never a pre-authorization", and the difference is the id-reuse case.
+    // `Entry` is keyed by package id ALONE — no version, no manifest hash, no root identity — so if a
+    // directory of that name appears again, `load` restores the entry, `decided` is already true, the
+    // L-49 prompt is therefore SKIPPED (`pending_consent_requests` filters on `decided`), and the new
+    // bundle inherits the previous occupant's answer up to its own declaration. Nothing here prunes or
+    // re-validates on reinstall. Closing it means binding the record to package IDENTITY (version
+    // and/or a manifest hash) and reporting `decided = false` when the identity changed — a shape
+    // change to the document, so it is tracked as a follow-up on the PR rather than done here.
     [[nodiscard]] std::string attach_scope_spec_for(const std::string& package_id) const;
 
     [[nodiscard]] const PackageGrantStore& grants() const { return grants_; }
@@ -334,16 +346,20 @@ public:
 private:
     PackageStoreScan& scan_;
     std::filesystem::path grants_file_;
-    // ⚠ `diagnostics_` IS DECLARED BEFORE `grants_`, AND THE ORDER IS LOAD-BEARING. The constructor
-    // loads the document, which APPENDS to `diagnostics_` — and members are initialized in
-    // DECLARATION order, not in member-initializer-list order. With `grants_` first, that load ran
-    // against a `std::vector` whose constructor had not run yet: undefined behaviour that the plain
+    // ⚠ DO NOT MOVE THE DOCUMENT LOAD BACK INTO THE MEMBER-INITIALIZER LIST. The constructor loads
+    // the document, which APPENDS to `diagnostics_`. When that load ran from the initializer LIST,
+    // members were initialized in DECLARATION order — and with `grants_` declared first it pushed
+    // into a `std::vector` whose constructor had not run yet: undefined behaviour that the plain
     // `dev` build survived by luck and ASan aborted deterministically
     // (`allocation-size-too-big` out of `push_back`, MEASURED under the `sanitize` preset — it would
     // have redded both CI sanitizer legs). No warning catches this class: `-Wreorder` only
     // fires when the initializer LIST disagrees with the declaration order, which it did not.
-    // The constructor now also builds `grants_` in its BODY rather than in the list, so the ordering
-    // is belt AND braces rather than the only thing standing between this and the same UB.
+    //
+    // THE FIX IS THE BODY LOAD (see the .cpp), not the field order. Running in the body means every
+    // member is already constructed, so declaration order is IRRELEVANT to the hazard as the code now
+    // stands. `diagnostics_` is nonetheless kept ahead of `grants_` as a second line of defence for
+    // whoever reintroduces a list initializer — but preserving the order is NOT by itself sufficient,
+    // and reading it as the fix is how this UB comes back.
     std::vector<GrantDiagnostic> diagnostics_;
     PackageGrantStore grants_;
     std::size_t decisions_recorded_ = 0;

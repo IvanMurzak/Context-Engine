@@ -57,6 +57,7 @@
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_grants.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -359,6 +360,21 @@ int main(int argc, char** argv)
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
     SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
+
+    // --- the package capability-grant read surface (e13c-4) -------------------------------------
+    // editor-core's boot reads the operator's install-consent answers with `package.grants.list`
+    // before any panel mounts (boot.ts, `ShellPackageGrants.load`) — the same deny-by-default
+    // `unknown_method` REFUSAL trap as every surface above, and the same consequence for this
+    // scenario's strict `bridge.refused() == 0` assertion, which that loader's own deny-all fallback
+    // does NOT avert. Bound to an EMPTY scan (this smoke installs no package, so there is nothing a
+    // grant could apply to) and an EMPTY grants path (deterministic regardless of the CI host's own
+    // `~/.context/package-grants.json`; `save` REFUSES an empty path, so a `decide` arriving here can
+    // never write to a developer's real consent document). The served answer is therefore the same
+    // deny-all state a refusal produces — nothing gains authority. `package_scan` is declared FIRST so
+    // it outlives the host holding a reference to it. Same lifetime tier as the bridges above.
+    shell::PackageStoreScan package_scan;
+    shell::PackageGrantHost package_grants(package_scan, std::filesystem::path{});
+    SMOKE_CHECK(package_grants.install(bridge), "the package.grants.* bridge surface installed");
 
     // Drive the pump until the browser has hydrated AND the settings-driven change has been PERSISTED
     // by the Shell. The 30s deadline bounds it: a scenario that selected nothing runs the clock out and

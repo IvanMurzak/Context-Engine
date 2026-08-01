@@ -130,8 +130,23 @@ bool read_entry(const std::string& package_id, const contract::Json& value,
 // one value a grant is clamped against at PACKAGE granularity.
 //
 // ⚠ NOT FOR `apply_package_grants`. That clamp is deliberately per-CONTRIBUTION, against each
-// contribution's OWN declaration, so a package whose panel declares `file_write` cannot have its
-// viewer ride that declaration. Reusing this there would widen exactly what decision 3 narrows.
+// contribution's OWN declaration, so the `Contribution::sandbox` it rewrites is never wider than the
+// contribution that carries it. Reusing this there would widen exactly what decision 3 narrows on
+// that value.
+//
+// ⚠ BUT DO NOT READ THE PER-CONTRIBUTION CLAMP AS A LIVE CROSS-CONTRIBUTION BOUNDARY — it is not one
+// today, and stating otherwise would be a security claim this file cannot honour. Both paths that
+// currently CONSUME a grant are package-UNION by construction, because both resources are per-package:
+// `attach_scope_spec_for` clamps against THIS function's union (the daemon session is keyed by package
+// id), and the `ui_events` gate reaches editor-core through `package_consent_requests`, whose
+// `granted` is likewise clamped against the union — and `capabilityDenial` (panelverbs.ts) returns
+// "granted" as soon as the PACKAGE holds the capability, using the contribution's own `declared` list
+// only to word the diagnostic. So a package whose panel declares `file_write` DOES today reach the
+// daemon with it from any of its contributions. The per-contribution clamp's real job is to keep
+// `manifest_defect` satisfiable when e13f finally registers these contributions; it is not a second
+// enforcement point, and there is no live consumer of `Contribution::sandbox.granted_scopes` yet.
+// Making it a real boundary means keying the grant lookup on contribution id, which is a design
+// question, not a rewording — tracked as a follow-up on the PR rather than changed here.
 std::vector<std::string> declared_capabilities(const InstalledPackage& package)
 {
     std::vector<std::string> declared;

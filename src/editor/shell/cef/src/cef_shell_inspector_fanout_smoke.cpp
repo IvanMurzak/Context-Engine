@@ -121,6 +121,7 @@
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_grants.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
@@ -293,6 +294,19 @@ struct WindowSurfaces
     // REFUSAL that would trip this smoke's `refused() == 0` invariant. Unbound serves the honest
     // `edit` / `attached:false` baseline; the daemon-driven play state is e08d's own smoke's subject.
     shell::SessionBridge session_bridge;
+    // e13c-4: editor-core's boot reads the operator's install-consent answers with
+    // `package.grants.list` before any panel mounts (boot.ts, `ShellPackageGrants.load`), for the
+    // same deny-by-default reason as every surface above — uninstalled it is an `unknown_method`
+    // REFUSAL that trips this smoke's `refused() == 0` invariant on EVERY window. Bound to an EMPTY
+    // scan (no package is installed here, so no contribution can carry a grant) and an EMPTY grants
+    // path (deterministic regardless of the host's own `~/.context/package-grants.json`, and
+    // `PackageGrantStore::save` REFUSES an empty path, so a `decide` can never write a developer's
+    // real consent document), so the served answer is the same deny-all state a refusal produces and
+    // NO package gains authority. `package_scan` is declared BEFORE the host that references it, so
+    // it outlives it; the host is built in `install` for the same reason `window_bridge` is — it has
+    // no default constructor.
+    shell::PackageStoreScan package_scan;
+    std::unique_ptr<shell::PackageGrantHost> package_grants;
     std::unique_ptr<shell::WindowBridge> window_bridge;
 
     // All the empty per-user paths are deliberate — a permanently-absent per-user file makes the boot
@@ -324,6 +338,9 @@ struct WindowSurfaces
         config.bind_path(std::filesystem::path{});
         ok = config.install(router) && ok;
         ok = session_bridge.install(router) && ok;
+        package_grants =
+            std::make_unique<shell::PackageGrantHost>(package_scan, std::filesystem::path{});
+        ok = package_grants->install(router) && ok;
         window_bridge = std::make_unique<shell::WindowBridge>(window_id, store);
         ok = window_bridge->install(router) && ok;
         return ok;

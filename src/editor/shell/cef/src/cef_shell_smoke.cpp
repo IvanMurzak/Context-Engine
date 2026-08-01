@@ -56,6 +56,7 @@
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_grants.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -485,6 +486,32 @@ int main(int argc, char** argv)
     shell::UserConfigStore user_config;
     user_config.bind_path(std::filesystem::path{});
     SMOKE_CHECK(user_config.install(bridge), "the config.* bridge surface installed");
+
+    // --- the package capability-grant read surface (e13c-4) -------------------------------------
+    // editor-core's boot reads the operator's install-consent answers with `package.grants.list`
+    // BEFORE any panel mounts (boot.ts, `ShellPackageGrants.load`), for exactly the same reason and
+    // with exactly the same failure mode as `keybindings.get` / `themes.get` / `welcome.state` /
+    // `config.get` above: unserved, it is an `unknown_method` REFUSAL and the "no envelope refusals"
+    // assertion below fails. `ShellPackageGrants.load` itself degrades gracefully — a refused call is
+    // the deny-all floor, which is the direction it must fail in — but, as the welcome and config
+    // bridges' notes already spell out, the strict `bridge.refused() == 0` invariant does not
+    // tolerate even a gracefully handled refusal.
+    //
+    // BOUND TO NOTHING, and both halves of that are load-bearing:
+    //   * an EMPTY `PackageStoreScan` — this smoke installs no third-party package, so there is no
+    //     contribution to carry a grant, and `list()` answers the empty consent table;
+    //   * an EMPTY grants path — the permanently-absent-document idiom the four bridges above use, so
+    //     the smoke is deterministic regardless of whether the host happens to have a
+    //     `~/.context/package-grants.json`. `PackageGrantStore::load` documents the empty path as
+    //     "no grants" (not a diagnostic), and `save` REFUSES on it, so a `package.grants.decide`
+    //     arriving here can never write to a developer's real consent document.
+    // Together those make the served answer byte-for-byte the deny-all state the renderer already
+    // reaches by refusal — the method is served, nothing is refused, and NO package gains authority.
+    // `package_scan` is declared FIRST so it outlives the host that holds a reference to it; same
+    // lifetime tier as the bridges above.
+    shell::PackageStoreScan package_scan;
+    shell::PackageGrantHost package_grants(package_scan, std::filesystem::path{});
+    SMOKE_CHECK(package_grants.install(bridge), "the package.grants.* bridge surface installed");
 
     // Drive the integrated pump until the browser has painted, the bridge handshake completed,
     // every hostable panel has hydrated, AND the composed surface has ACTUALLY REPAINTED with the

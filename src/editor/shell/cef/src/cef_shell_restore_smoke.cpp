@@ -126,6 +126,7 @@
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_grants.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -382,10 +383,22 @@ SessionOutcome run_session(const std::filesystem::path& project,
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
 
+    // e13c-4: editor-core's boot reads the operator's install-consent answers with
+    // `package.grants.list` before any panel mounts (boot.ts, `ShellPackageGrants.load`), for the same
+    // deny-by-default reason as every surface above. Bound to an EMPTY scan (this smoke installs no
+    // package, so no contribution can carry a grant) and an EMPTY grants path (deterministic
+    // regardless of the CI host's own ~/.context/package-grants.json; `save` REFUSES an empty path,
+    // so a `decide` arriving here can never write to a developer's real consent document) — the
+    // served answer is the same deny-all state a refusal produces, so nothing gains authority.
+    // `package_scan` is declared FIRST so it outlives the host holding a reference to it.
+    shell::PackageStoreScan package_scan;
+    shell::PackageGrantHost package_grants(package_scan, std::filesystem::path{});
+
     if (!handshake.install(bridge) || !panel_host.install(bridge) ||
         !editor_state_bridge.install(bridge) || !keybindings_bridge.install(bridge) ||
         !themes_bridge.install(bridge) || !banner_bridge.install(bridge) ||
-        !session_bridge.install(bridge) || !window_move_bridge.install(bridge))
+        !session_bridge.install(bridge) || !window_move_bridge.install(bridge) ||
+        !package_grants.install(bridge))
     {
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;

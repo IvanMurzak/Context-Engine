@@ -292,7 +292,7 @@ export function capabilityDenial(
     }
     return declared.includes(capability)
         ? `the package "${packageId}" declared the "${capability}" capability but has not been ` +
-              "granted it (install consent is not wired in this build)"
+              "granted it (the operator has not consented to it)"
         : `the package "${packageId}" holds no "${capability}" grant and its manifest does not ` +
               "declare one";
 }

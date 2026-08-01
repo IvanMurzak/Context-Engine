@@ -461,11 +461,22 @@ export const packageGrantsTests: readonly TestCase[] = [
         },
     },
     {
-        // ⚠ PLANT: make `dispose` clear `#byPackage` but leave the bus subscriptions attached -> the
-        // "the bus listener is released" assertion goes RED. Nothing else would notice: delivery stops
-        // either way, so only the bus's own listener count can tell a released listener from a
-        // retained one that delivers to nobody.
-        name: "packageui: dispose releases the package AND its bus listener, and is re-subscribable",
+        // ⚠ PLANT: make `dispose` skip the `#byPackage.delete` -> `fanout.packages` and the
+        //     "nobody subscribed, nothing delivered" assertions go RED.
+        //
+        // ⚠ THE LISTENER-RELEASE HALF OF THIS CASE'S NAME IS NOT ASSERTED, and that is recorded here
+        // rather than left to be rediscovered. An earlier annotation claimed the plant "leave the bus
+        // subscriptions attached" would redden a "the bus listener is released" assertion — there is
+        // no such assertion, and that plant scores GREEN: with the listener retained, `#fanOut`
+        // iterates an EMPTY `#byPackage` (0 deliveries, same as released), and the re-subscribe below
+        // takes the `#busSubscriptions.has(topic)` snapshot arm, which replays the SAME retained
+        // envelope the `#attach` arm would have. Released and retained-but-orphaned are
+        // indistinguishable through `EditorUiBus`'s public surface, which exposes `mirrorCount` but no
+        // listener count. Closing it needs a `listenerCount(topic)` accessor on `EditorUiBus` (an
+        // out-of-diff module) or a counting decorator around `bus.subscribe` — tracked as a follow-up
+        // on the PR. What this case DOES prove is everything below: the package is dropped, delivery
+        // to it stops, a sibling package is unaffected, and a re-subscribe works and replays.
+        name: "packageui: dispose releases the package and is re-subscribable (listener release NOT asserted)",
         run: () => {
             const bus = new EditorUiBus({ origin: "0" });
             const spy = deliverySpy();
@@ -535,11 +546,93 @@ export const packageGrantsTests: readonly TestCase[] = [
             fanout.subscribe("ext.polite", [UI_TOPIC_FOCUS]);
 
             const report = bus.publish(UI_TOPIC_FOCUS, { panelId: "x" });
-            assert(report.published, "the publisher completed despite the throwing target");
+            // FIXTURE SANITY ONLY — deliberately NOT the discriminator, and saying so because it
+            // reads like one. `EditorUiBus.publish` returns `published:true` for any KNOWN topic
+            // regardless of listeners, and `EditorUiBus.#invoke` already try/catches every listener,
+            // so this line stays green even with `#fanOut`'s own catch deleted. The two assertions
+            // BELOW are what redden under this case's plant.
+            assert(report.published, "the bus really published (the fixture is not vacuous)");
             // BOTH were attempted, and the polite one's delivery COUNTED — the positive artifact that
             // distinguishes "the throw was contained" from "the fan-out stopped at the first target".
             assertEqual(reached, ["ext.hostile", "ext.polite"], "every subscriber was attempted");
             assertEqual(fanout.delivered, 1, "only the successful delivery is counted");
+        },
+    },
+    {
+        // ⚠ PLANT: in `subscribe`, derive `added` from the RAW request again
+        //     (`const added = topics.filter((topic) => !held.has(topic));`) -> copies 2..N re-enter
+        //     the joining-package arm and re-deliver the SAME retained snapshot, so the "exactly
+        //     once" assertion below goes RED at 3.
+        name: "packageui: a topic named MANY TIMES in one request subscribes and delivers ONCE",
+        run: () => {
+            const bus = new EditorUiBus({ origin: "d" });
+            const spy = deliverySpy();
+            const fanout = new PackageUiFanout(bus, spy.targets);
+
+            // Retained BEFORE the subscribe, so the snapshot replay IS the delivery under test.
+            const report = bus.publish(UI_TOPIC_THEME_CHANGED, { variant: "dark" });
+            assert(report.published, "the bus really published (the fixture is not vacuous)");
+
+            // A duplicated request is not malformed — the cap bounds the request's LENGTH, not its
+            // distinctness — so this is an ACCEPTED request that must still subscribe exactly once.
+            const outcome = fanout.subscribe("ext.greedy", [
+                UI_TOPIC_THEME_CHANGED,
+                UI_TOPIC_THEME_CHANGED,
+                UI_TOPIC_THEME_CHANGED,
+            ]);
+            assertEqual(outcome.diagnostic, "", "a duplicated but in-vocabulary request is accepted");
+            assertEqual(
+                outcome.topics,
+                [UI_TOPIC_THEME_CHANGED],
+                "the reply reports the ACCEPTED set, deduplicated — not the raw request",
+            );
+            assertEqual(
+                fanout.topicsFor("ext.greedy"),
+                [UI_TOPIC_THEME_CHANGED],
+                "…and the package holds it exactly once",
+            );
+            // THE POSITIVE ARTIFACT, not an absence: the exact envelope, counted.
+            assertEqual(spy.deliveries.length, 1, "the retained snapshot is delivered exactly ONCE");
+            assertEqual(spy.deliveries[0]?.packageId, "ext.greedy", "…addressed to the subscriber");
+            assertEqual(fanout.delivered, 1, "…and counted once");
+        },
+    },
+    {
+        // ⚠ PLANT: move `parsePackageGrants(reply)` and the `new ShellPackageGrants(records)` back
+        //     OUTSIDE the `try` in `ShellPackageGrants.load` -> reading the hostile reply throws past
+        //     the guard, `load` REJECTS, and the case fails on the escaping error.
+        name: "packagegrants: load NEVER rejects — a reply that THROWS while being read denies instead",
+        run: async () => {
+            // `bridge.call` RESOLVES; the reply then throws when the parse reads it. Only a guard
+            // around the PARSE can contain this — which is the difference between landing on the
+            // deny-all floor and `startPanels` catching a rejection and mounting NO panels at all.
+            const hostile = {
+                get packages(): unknown {
+                    throw new Error("the reply fought back");
+                },
+            };
+            const { bridge } = stubBridge(() => Promise.resolve(hostile));
+            const denied = await ShellPackageGrants.load(bridge);
+            assertEqual(denied.records, [], "a reply that throws while being read yields NO records");
+            assert(
+                !denied.granted("ext.hello", CAPABILITY_UI_EVENTS),
+                "…and the source grants nothing",
+            );
+
+            // THE POSITIVE COUNTERPART, same fixture family: without it, "it denied" would be
+            // satisfied by a `load` that denies unconditionally.
+            const { bridge: healthy } = stubBridge(() =>
+                Promise.resolve(
+                    listReply([
+                        { id: "ext.hello", requested: ["ui_events"], granted: ["ui_events"] },
+                    ]),
+                ),
+            );
+            const ok = await ShellPackageGrants.load(healthy);
+            assert(
+                ok.granted("ext.hello", CAPABILITY_UI_EVENTS),
+                "the SAME path grants a well-formed reply",
+            );
         },
     },
 ];

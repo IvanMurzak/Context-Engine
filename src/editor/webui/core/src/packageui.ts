@@ -163,8 +163,13 @@ export class PackageUiFanout {
             this.#refused += 1;
             return { topics: [], diagnostic: "bridge.ui.subscribe requires at least one topic" };
         }
-        // ⚠ THE REQUEST IS BOUNDED HERE, BEFORE ANYTHING IS ALLOCATED FROM IT, AND THAT ORDER IS THE
-        // WHOLE PROTECTION. The vocabulary loop below is total, so a surviving request names only
+        // ⚠ THE REQUEST IS BOUNDED ON ITS RAW LENGTH, BEFORE THIS METHOD ALLOCATES ANYTHING FROM IT,
+        // AND BOUNDING IT HERE RATHER THAN AFTER THE MERGE IS THE WHOLE PROTECTION. Stated precisely,
+        // because the stronger phrasing would be false: `readUiTopicsParam` (panelverbs.ts) has
+        // already copied the caller's array by the time we are reached, so this is not the first
+        // allocation derived from the request — it is the first one THIS module makes, and the cap is
+        // what keeps every later step (the vocabulary loop, the dedupe, the merge) linear in a bounded
+        // value. The vocabulary loop below is total, so a surviving request names only
         // built-in topics — but it may name ARBITRARILY MANY COPIES of one, and merging spreads every
         // entry into a fresh array before a `Set` collapses them. Bounding the MERGED set instead
         // bounds a value the vocabulary loop already bounds to the closed vocabulary's size, so it can
@@ -193,9 +198,20 @@ export class PackageUiFanout {
                 };
             }
         }
+        // ⚠ DEDUPLICATED BEFORE `added` IS DERIVED, and that is a correctness fix, not tidiness. The
+        // request is untrusted and MAY name the same topic several times (the cap above bounds the
+        // request's LENGTH, not its distinctness). Filtering the raw list leaves every copy in
+        // `added`, and the loop below then treats copies 2..N as a package JOINING an
+        // already-attached topic — so each one re-delivers the SAME retained snapshot through the
+        // `#busSubscriptions.has(topic)` arm, and `#delivered` counts them. MEASURED before this
+        // fix: a single request naming `editor.ui.theme-changed` 7 times (the cap) produced SEVEN
+        // identical `{seq:1}` deliveries where one copy produced one. Collapsing here — rather than
+        // in the loop — is what keeps the method's stated "IDEMPOTENT PER TOPIC" contract true
+        // WITHIN a call as well as across calls.
+        const requested = [...new Set(topics)];
         const held = this.#byPackage.get(packageId) ?? new Set<string>();
-        const added = topics.filter((topic) => !held.has(topic));
-        this.#byPackage.set(packageId, new Set<string>([...held, ...topics]));
+        const added = requested.filter((topic) => !held.has(topic));
+        this.#byPackage.set(packageId, new Set<string>([...held, ...requested]));
         for (const topic of added) {
             if (this.#busSubscriptions.has(topic)) {
                 // ⚠ ALREADY ATTACHED FOR ANOTHER PACKAGE, so the bus listener this package would have
@@ -220,7 +236,10 @@ export class PackageUiFanout {
                 this.#attach(topic);
             }
         }
-        return { topics: [...topics], diagnostic: "" };
+        // The ACCEPTED set, not the raw request: `PackageUiSubscribeResult.topics` is documented as
+        // "the topics now subscribed for this package", and echoing the request back would report a
+        // duplicated entry as though it had been subscribed twice.
+        return { topics: requested, diagnostic: "" };
     }
 
     /**

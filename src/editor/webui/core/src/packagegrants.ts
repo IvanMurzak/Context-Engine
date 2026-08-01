@@ -159,16 +159,23 @@ export class ShellPackageGrants implements PanelCapabilityGrants {
      * could not learn of any grant" — because there is no third behaviour that is safe.
      */
     static async load(bridge: ShellBridge): Promise<ShellPackageGrants> {
-        let reply: unknown;
+        // ⚠ THE PARSE IS INSIDE THE `try`, AND THAT IS WHAT MAKES "NEVER REJECTS" STRUCTURAL RATHER
+        // THAN AN ARGUMENT ABOUT TODAY'S TRANSPORT. With only `bridge.call` guarded, any THROW from
+        // reading the reply escaped — and a reply is `unknown`, so a member access on it is a throw
+        // site in general even though `bridge.call`'s `JSON.parse` result happens to be inert data
+        // today. The consequence of one escaping was severe and silent: the rejection propagates into
+        // `startPanels`' outer catch, so the window mounts NO panels at all, instead of landing on the
+        // deny-all floor this method promises. Guarding the whole body costs nothing and removes the
+        // dependence on a property of a different module.
         try {
-            reply = await bridge.call(PACKAGE_GRANTS_LIST_METHOD);
+            const reply = await bridge.call(PACKAGE_GRANTS_LIST_METHOD);
+            const records = parsePackageGrants(reply);
+            return records === null ? ShellPackageGrants.empty() : new ShellPackageGrants(records);
         } catch (error) {
             // Named rather than collapsed so a reader knows both arms were considered; both deny.
             void (error instanceof BridgeError);
             return ShellPackageGrants.empty();
         }
-        const records = parsePackageGrants(reply);
-        return records === null ? ShellPackageGrants.empty() : new ShellPackageGrants(records);
     }
 
     /** Everything the Shell reported — what a consent surface renders. */
