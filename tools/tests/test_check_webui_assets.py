@@ -514,6 +514,10 @@ PANEL_BUNDLE = (
     'var PANEL_DAEMON_CALL_METHOD = "panel.daemon.call";\n'
     # e13c-2 package daemon event fan-OUT drain method (packageevents.ts).
     'var PANEL_EVENTS_POLL_METHOD = "panel.events.poll";\n'
+    # e13c-4 install-consent READ method (packagegrants.ts). The DECIDE half is deliberately absent:
+    # it has no production caller yet, so esbuild tree-shakes it out of the real bundle and the gate
+    # does not enroll it — a fixture that carried it would be MORE CAPABLE THAN THE REAL BUNDLE.
+    'var PACKAGE_GRANTS_LIST_METHOD = "package.grants.list";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -641,6 +645,11 @@ PANEL_CPP_PACKAGE_EVENTS = (
     'inline constexpr std::size_t kMaxBufferedEventsPerPackage = 256;\n'
 )
 
+PANEL_CPP_PACKAGE_GRANTS = (
+    'inline constexpr const char* kPackageGrantsListMethod = "package.grants.list";\n'
+    'inline constexpr const char* kPackageGrantsDecideMethod = "package.grants.decide";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -666,6 +675,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    write_notice: str = PANEL_CPP_WRITE_NOTICE,
                    package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
                    package_events: str = PANEL_CPP_PACKAGE_EVENTS,
+                   package_grants: str = PANEL_CPP_PACKAGE_GRANTS,
                    package: dict | None = None,
                    stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
@@ -688,6 +698,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "write_notice.h").write_text(write_notice, encoding="utf-8")
     (include_dir / "package_sessions.h").write_text(package_sessions, encoding="utf-8")
     (include_dir / "package_events.h").write_text(package_events, encoding="utf-8")
+    (include_dir / "package_grants.h").write_text(package_grants, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -967,6 +978,39 @@ def test_a_renamed_package_events_cpp_constant_is_a_config_error(tmp_path: Path)
     renamed = PANEL_CPP_PACKAGE_EVENTS.replace("kPanelEventsPollMethod", "kPanelEventsDrainMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, package_events=renamed)
+
+
+# --- e13c-4: the install-consent READ method -----------------------------------------------------
+#
+# The same three shapes as the two rows above, for the same reason and with the WORST symptom of the
+# family: `ShellPackageGrants.load` is fail-closed by design, so a drift here does not error - every
+# package silently falls to the deny-all floor and holds no capability at all, which is
+# indistinguishable from an editor on which the operator has simply granted nothing.
+
+
+def test_a_drifted_package_grants_list_method_fails(tmp_path: Path) -> None:
+    """The Shell would route one name and editor-core would call another."""
+    drifted = re.sub(r'(PACKAGE_GRANTS_LIST_METHOD = ")[^"]*(")', r"\1package.grants.drifted\2",
+                     PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_the_package_grants_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT constant means editor-core never reads the consent surface, so every package sits on
+    the deny-all floor with nothing reporting it."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "PACKAGE_GRANTS_LIST_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_package_grants_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2,
+    rather than reporting a green it did not earn."""
+    renamed = PANEL_CPP_PACKAGE_GRANTS.replace("kPackageGrantsListMethod",
+                                               "kPackageGrantsReadMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, package_grants=renamed)
 
 
 # --- e09b-3: the LOUD write-notice vocabulary ----------------------------------------------------

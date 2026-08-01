@@ -1001,9 +1001,34 @@ Named so the gaps are visible rather than assumed:
   `editor-cef-smoke-shell` now boots the real bundle over the real scheme and round-trips a handshake
   through it. **Packaging** the asset root install-relative is still **e15**'s: the default is a
   build-tree path compiled in by CMake.
-- **Package panels render, and now hold ONE authenticated port — but it grants nothing yet** — the
-  capability/consent model, theme-token delivery, the state-blob round trip, the
-  `context new --template extension-panel` scaffold and the demo external package are **e13b-2–f**.
+- **Package panels render, hold ONE authenticated port, and now carry real operator-granted
+  capability** — of the original **e13b-2–f** list only the **demo external package** is still
+  outstanding: theme-token delivery and the state-blob round trip landed with **e13d**, the
+  `context new --template extension-panel` scaffold with **e13e**, and the capability/consent model
+  with **e13c-4**.
+  ✅ **The CAPABILITY/CONSENT MODEL landed with e13c-4**: a persisted per-package grant document
+  (`<home>/.context/package-grants.json` — a SHELL document, deliberately NOT inside
+  `~/.context/packages/`, which the boot scan enumerates and would refuse a loose file out of every
+  boot) records the operator's answer in three separate fields (`requested` / `granted` / `decided`,
+  so "granted nothing" and "never asked" stay different states). It is deny-by-default on every
+  failure path, and a grant is CLAMPED to the package's own declared `capabilities` on both the load
+  and the `decide` path — the contract registry's `manifest_defect` grant≤declaration check stays an
+  INDEPENDENT second control rather than being folded into it. The store feeds
+  `Contribution.sandbox.granted_scopes`, the `AttachOptions::scope` each package's baseline daemon
+  session attaches with (`kPackageSessionScope` is now the DEFAULT, not the constant), and
+  editor-core's capability gate at its ONE call site — `ShellPackageGrants` (`packagegrants.ts`)
+  replaces `DENY_ALL_CAPABILITY_GRANTS` — so a package granted `ui_events` receives `editor.ui`
+  facts over e13c-2's push path through `bridge.ui.subscribe`, while one without it is refused
+  `bridge.capability_not_granted` from a real grant LOOKUP rather than a hardcoded deny.
+  Subscribable topics stay CLOSED to the built-in set: a package's own declared topics are a PUBLISH
+  surface, and subscribing to another package's would need a consent that third party never gave.
+  The operator surface is the privileged router pair `package.grants.list` / `package.grants.decide`
+  plus a boot printout of pending requests — NOT a package-callable verb:
+  `panel_callable_daemon_methods()` is a closed seven-name EXACT-match allowlist (no prefix rule)
+  over DAEMON methods, so a panel can neither name a Shell router method nor grant itself anything.
+  ⚠ NOT claimed: an entry is keyed by package id ALONE — no version, no manifest hash — so a bundle
+  reinstalled under a name that was already answered for inherits that answer up to its own
+  declaration; binding the record to package IDENTITY is tracked as a follow-up, not closed here.
   ✅ **The PANEL PORT landed with e13b-1**: every `text/html` response the `context-ext://` scheme
   serves gets `<script src="/.context-panel-port.js">` spliced in ahead of any script the document
   carries (`ext_inject_port_bootstrap`), and the scheme serves that ONE synthetic asset out of itself
@@ -1014,9 +1039,9 @@ Named so the gaps are visible rather than assumed:
   well-behaved ones. editor-core's half (`panelport.ts` `PanelPortBridge`) accepts only the FIRST
   conforming handshake per frame and revokes the port on a second `load` on the frame element; an
   `iframe` panel is docked with Dockview's `renderer: "always"` so a tab switch cannot detach it and
-  forge that second load. The port ships **zero capability** — every verb answers
-  `bridge.verb_not_granted` out of an EMPTY table — so what landed is the authentication and the
-  lifecycle, not a feature. ⚠ The obligation as originally written ("key off the handshake's
+  forge that second load. As e13b-1 landed it the port carried **zero capability** — every verb
+  answered `bridge.verb_not_granted` out of an EMPTY table — so what landed THERE was the
+  authentication and the lifecycle, not a feature; e13c-4 is what fills that table (above). ⚠ The obligation as originally written ("key off the handshake's
   verified `event.origin`") is NOT implementable: every panel document reports the opaque origin
   `"null"`, and an iframe's `WindowProxy` is stable across same-slot navigations, so neither can name
   a DOCUMENT INSTANCE (`event.source` IS used, but only to tell one FRAME from another). ⚠ NOT

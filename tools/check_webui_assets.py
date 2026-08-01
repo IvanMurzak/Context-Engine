@@ -338,6 +338,25 @@ PACKAGE_SESSION_CONSTANTS = (
      "PANEL_EVENTS_POLL_METHOD"),
 )
 
+# The M9 e13c-4 INSTALL-CONSENT READ joins them for the same reason, and its symptom is the inverse of
+# the two above: editor-core reads `package.grants.list` ONCE at boot, and `ShellPackageGrants.load`
+# is deliberately fail-closed, so a drift makes the read refuse and every package fall to the deny-all
+# floor - every panel capability silently DENIED, with nothing reporting it. Both halves name the
+# parity in their own headers (`package_grants.h` § kPackageGrantsListMethod, `packagegrants.ts`
+# § PACKAGE_GRANTS_LIST_METHOD) and, as with the pair above, neither can catch it alone: the C++ side
+# is pinned by its own suite and the TS side asserts its constant against a TS literal in the same
+# file, which cannot observe the C++ name at all.
+#
+# ⚠ `kPackageGrantsDecideMethod` / `PACKAGE_GRANTS_DECIDE_METHOD` is deliberately NOT enrolled. The
+# consent WRITE has no editor-core caller yet (the consent UI is e13f's), so esbuild tree-shakes the
+# TS constant out of the shipped bundle and `_read_ts_constant_from_bundle` would report it missing on
+# every run - the same carve-out taken for WELCOME_MODE_PROJECT above. It becomes gateable the moment
+# it has a production caller, and that is the commit that should add it here.
+PACKAGE_GRANT_CONSTANTS = (
+    ("package.grants.list install-consent read method", "package_grants.h",
+     "kPackageGrantsListMethod", "PACKAGE_GRANTS_LIST_METHOD"),
+)
+
 # The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
 # bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
 # refused at runtime with no build error — fails here instead.
@@ -1028,6 +1047,25 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"Shell would route one name and editor-core would call another, so EVERY package "
                 f"panel's `bridge.call` would refuse with a code indistinguishable from the verb "
                 f"never having been implemented.")
+
+    # 7a12 — the e13c-4 install-consent read method agrees across the two languages. Same mechanism as
+    # 7a11, opposite symptom: this is the ONLY route by which editor-core learns what the operator
+    # consented to, it is read once at boot, and `ShellPackageGrants.load` is fail-closed by design, so
+    # a drift denies EVERY package every capability with no error surfaced anywhere.
+    for human, cpp_file, cpp_name, ts_name in PACKAGE_GRANT_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be reading the "
+                f"consent surface the Shell routes, so every package would fall to the deny-all "
+                f"floor and hold no capability at all")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would route one name and editor-core would call another, so the consent read "
+                f"would refuse and EVERY package would be silently denied every capability — "
+                f"indistinguishable from an editor on which nothing has been granted.")
 
     # 7b — the D6 persisted-blob member names agree (gui/contract/panel_state.h is their authority).
     for human, cpp_name, ts_name in PANEL_STATE_CONSTANTS:

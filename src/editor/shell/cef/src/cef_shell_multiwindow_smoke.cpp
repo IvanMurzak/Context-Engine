@@ -56,6 +56,7 @@
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_grants.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/session_bridge.h"
@@ -148,6 +149,19 @@ struct WindowSurfaces
     // surface is an `unknown_method` REFUSAL that trips this smoke's `refused() == 0` invariant for
     // every window. Unbound is the honest state for a smoke with no daemon (`edit`, `attached:false`).
     shell::SessionBridge session_bridge;
+    // e13c-4: editor-core's boot reads the operator's install-consent answers with
+    // `package.grants.list` before any panel mounts (boot.ts, `ShellPackageGrants.load`), for the
+    // same deny-by-default reason as every surface above — uninstalled it is an `unknown_method`
+    // REFUSAL that trips this smoke's `refused() == 0` invariant on EVERY window. Bound to an EMPTY
+    // scan (no package is installed here, so no contribution can carry a grant) and an EMPTY grants
+    // path (deterministic regardless of the host's own `~/.context/package-grants.json`, and
+    // `PackageGrantStore::save` REFUSES an empty path, so a `decide` can never write a developer's
+    // real consent document), so the served answer is the same deny-all state a refusal produces and
+    // NO package gains authority. `package_scan` is declared BEFORE the host that references it, so
+    // it outlives it; the host is built in `install` for the same reason `window_bridge` is — it has
+    // no default constructor.
+    shell::PackageStoreScan package_scan;
+    std::unique_ptr<shell::PackageGrantHost> package_grants;
     // e10b: the window-management surface. UNBOUND here — this smoke drives create/destroy through the
     // manager DIRECTLY, not the bridge — but installed on every window so editor-core's boot-time
     // `window.*` calls are served, not refused. Constructed in `install` (it needs the window id).
@@ -186,6 +200,10 @@ struct WindowSurfaces
         ok = config.install(router) && ok;
         // Unbound: no `bind_provider`, so it serves the `edit`/`attached:false` boot baseline.
         ok = session_bridge.install(router) && ok;
+        // e13c-4: the package.grants.* surface, bound to an EMPTY scan + an EMPTY document.
+        package_grants =
+            std::make_unique<shell::PackageGrantHost>(package_scan, std::filesystem::path{});
+        ok = package_grants->install(router) && ok;
         // e10b: the window.* surface, UNBOUND (create/destroy is driven through the manager here).
         window_bridge = std::make_unique<shell::WindowBridge>(window_id, store);
         ok = window_bridge->install(router) && ok;

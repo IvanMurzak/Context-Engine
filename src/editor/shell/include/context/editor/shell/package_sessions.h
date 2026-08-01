@@ -18,12 +18,18 @@
 //
 // ================================ THE FOUR CONTROLS ================================
 //
-//  1. THE SCOPE IS A HARDCODED CONSTANT, NOT A DERIVED VALUE. `AttachOptions::scope` is
-//     client-CHOSEN (`client.h`; the daemon clamps it to the launch-time ceiling at
-//     `dispatcher.cpp`'s `ceiling_.intersect(requested)`), so "a per-package session at the baseline"
-//     needs no consent surface, no grant store and no manifest plumbing — it needs one string that
-//     nothing computes. Deriving that string from a manifest, a grant or a consent answer is e13c-4's
-//     job and is deliberately absent: today there is no code path by which a package can influence it.
+//  1. THE SCOPE IS DERIVED FROM THE PERSISTED GRANT, AT ONE SITE. ⚠ **CHANGED BY M9 e13c-4** — this
+//     control used to read "a HARDCODED CONSTANT, NOT A DERIVED VALUE", and the derivation it named
+//     as e13c-4's job has now landed. `AttachOptions::scope` is client-CHOSEN (`client.h`; the daemon
+//     clamps it to the launch-time ceiling at `dispatcher.cpp`'s `ceiling_.intersect(requested)`), so
+//     what decides a package's authority is the string this class asks for — and it now asks for
+//     `scope_resolver_(package_id)`, whose production value comes from the operator's recorded
+//     consent (`package_grants.h`) clamped to the package's own manifest declaration.
+//     WHAT DID NOT CHANGE, and is why this is still ONE control rather than a new surface: the
+//     resolver is consulted HERE, at the single attach site, and its DEFAULT is still
+//     `kPackageSessionScope` — so a wiring that forgets to supply one denies rather than grants, and
+//     no code path lets a PACKAGE influence its own answer (the grant document is a Shell document
+//     the store scan can never reach — package_grants.h decision 1).
 //
 //  2. THE METHOD SET IS AN ALLOWLIST (S4), and it is checked BEFORE a session is opened. The Shell's
 //     privileged router already refuses the credential-bearing methods BY NAME
@@ -126,14 +132,15 @@ inline constexpr const char* kErrPackageSubscriptionCapacity = "panel.daemon.sub
 
 // ------------------------------------------------------------------------------------ the policy
 
-// The scope EVERY package session attaches with — the `read_query` baseline, and nothing else.
+// The scope a package session attaches with when NOTHING was consented to — the `read_query`
+// baseline, and nothing else.
 //
-// ⚠ THIS CONSTANT IS THE WHOLE CAPABILITY MODEL OF e13c-1. Widening it is not a configuration change;
-// it is the difference between a panel that can read and a panel that can rewrite authored files.
-// e13c-4 replaces the VALUE with one derived from an install-consent grant — at this one site, exactly
-// as `DENY_ALL_CAPABILITY_GRANTS` is replaced at one site on the editor-core side. Spelled `"read"`
-// rather than left to `AttachOptions`' own default so the choice is VISIBLE and greppable here; a
-// default is not a decision anyone can find.
+// ⚠ THIS CONSTANT WAS THE WHOLE CAPABILITY MODEL OF e13c-1, AND IS NOW THE FLOOR OF e13c-4's. It is
+// what `PackageSessionHost`'s DEFAULT resolver answers for every package, so a build that wires no
+// grant source is byte-for-byte the deny-all build e13c-1 shipped. Widening it is not a configuration
+// change; it is the difference between a panel that can read and a panel that can rewrite authored
+// files. Spelled `"read"` rather than left to `AttachOptions`' own default so the choice is VISIBLE
+// and greppable here; a default is not a decision anyone can find.
 inline constexpr const char* kPackageSessionScope = "read";
 
 // ⚠ CONTROL 5 (S8) — A PACKAGE MAY ONLY ADDRESS SUBSCRIPTIONS IT MINTED ITSELF.
@@ -206,6 +213,23 @@ inline constexpr std::size_t kMaxPackageSessions = 4;
 //   * `resource.read`, `snapshot`, `validate`, `reconcile`, `doctor` are simply not needed yet. Adding
 //     one is a reviewed one-line change to this list, which is the shape a capability surface should
 //     have.
+//
+// ⚠ M9 e13c-4 CHANGED WHAT THE ABSENCES ARE WORTH - READ THIS BEFORE ADDING A NAME.
+// Two things that were true when the list above was written are no longer true, and BOTH of them
+// concern exactly the write verbs:
+//   1. THE "REFUSED BY THE DISPATCHER ANYWAY" REDUNDANCY IS GONE FOR A GRANTED PACKAGE. It held while
+//      every package session was the `read_query` baseline. Since e13c-4 a consented package attaches
+//      with a DERIVED scope (`package_grants.h` § attach_scope_spec_for), so a session really can
+//      carry `file_write` / `session_control` / `build_install` - and the dispatcher would then ADMIT
+//      `set` / `edit` / `build` / `package.add`. For those methods this allowlist is now the ONLY
+//      control, not the redundant second one.
+//   2. ADDING A WRITE VERB HERE ALSO ARMS `package.grants.decide`. That route writes the consent
+//      DOCUMENT and is installed on the privileged bridge, whose own threat model (`ipc_bridge.h`)
+//      treats every inbound message as untrusted renderer content. It is harmless today only because
+//      nothing a renderer can reach through THIS list can act on a grant it wrote. A write verb here
+//      closes that loop: renderer -> `decide` -> a grant it chose -> this list -> the authored file.
+// So a name added here is no longer "a reviewed one-line change"; it is a change to the sandbox
+// boundary, and it needs the consent-write route re-examined in the same review.
 [[nodiscard]] const std::vector<std::string>& panel_callable_daemon_methods();
 
 /** Is `method` on the allowlist? EXACT match only — no prefix rule, no normalization. */
@@ -230,7 +254,28 @@ public:
     // scope this class REQUESTS be asserted on the wire.
     using ClientFactory = std::function<std::unique_ptr<client::Client>(std::string& error)>;
 
+    // THE DERIVED SCOPE (M9 e13c-4, control 1). Answers the `AttachOptions::scope` spec for ONE
+    // package — in production `attach_scope_spec(granted_scope_set(<the consented, manifest-clamped
+    // grant>))` (package_grants.h), which is a pure function of a document no package can write.
+    //
+    // ⚠ A `std::function` RATHER THAN A `PackageGrantStore&`, deliberately: this class must not
+    // acquire a dependency on the consent subsystem to attach a session, the resolver is what the
+    // suite substitutes to drive a WIDENED scope through the REAL dispatcher, and a value-returning
+    // seam cannot be tricked into returning a scope for a DIFFERENT package the way a shared lookup
+    // table could. An EMPTY answer is treated as the baseline, so a resolver that goes wrong fails
+    // CLOSED.
+    using ScopeResolver = std::function<std::string(const std::string& package_id)>;
+
     explicit PackageSessionHost(ClientFactory factory, std::size_t max_sessions = kMaxPackageSessions);
+
+    // As above, plus the grant-derived scope source. The two-argument form above keeps the deny-all
+    // default (`kPackageSessionScope` for every package), which is what makes an un-wired build
+    // identical to the e13c-1 one rather than merely similar to it.
+    PackageSessionHost(ClientFactory factory, ScopeResolver scope_resolver,
+                       std::size_t max_sessions = kMaxPackageSessions);
+
+    /** The scope spec this host WOULD attach `package_id` with. The decision path, exposed. */
+    [[nodiscard]] std::string attach_scope_for(const std::string& package_id) const;
 
     PackageSessionHost(const PackageSessionHost&) = delete;
     PackageSessionHost& operator=(const PackageSessionHost&) = delete;
@@ -312,6 +357,8 @@ private:
                                               std::string& message);
 
     ClientFactory factory_;
+    // EMPTY in the two-argument construction = the e13c-1 deny-all build (see `attach_scope_for`).
+    ScopeResolver scope_resolver_;
     std::size_t max_sessions_;
     std::vector<Session> sessions_;
     // The e13c-2 bound. OWNED here rather than beside this class because its lifetime is exactly the

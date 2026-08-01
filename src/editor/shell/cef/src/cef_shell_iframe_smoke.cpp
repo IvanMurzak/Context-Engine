@@ -110,6 +110,7 @@
 #include "context/editor/shell/ext_scheme.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/package_grants.h"
 #include "context/editor/shell/package_sessions.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -565,6 +566,39 @@ int main(int argc, char** argv)
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
     SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
+
+    // --- the package capability-grant read surface (e13c-4) -------------------------------------
+    // editor-core's boot reads the operator's install-consent answers with `package.grants.list`
+    // before any panel mounts (boot.ts, `ShellPackageGrants.load`) — the same deny-by-default
+    // `unknown_method` REFUSAL trap as every surface above, and the same consequence for this
+    // scenario's strict `bridge.refused() == 0` invariant, which that loader's own deny-all fallback
+    // does NOT avert.
+    //
+    // ⚠ THE EMPTY SCAN IS DELIBERATE HERE, and this is the ONE smoke where that needs saying: this
+    // file DOES mount a real third-party package (`kMountedPackage`, served through the ext scheme
+    // from `cef_options.ext_store_root`). It is still the right argument, for two reasons that are
+    // facts about THIS fixture rather than preferences:
+    //   * a real `scan_package_store(package_store)` would find NOTHING to report anyway —
+    //     `write_fixture_package` writes only the HTML/CSS/JS assets and no
+    //     `context-package.json` (`kPackageManifestFileName`), so the scan refuses the directory as
+    //     a manifest-less entry and yields no packages. The consent table is empty either way;
+    //   * the panel roster this smoke serves is HAND-BUILT (`iframe_contribution`, below), never
+    //     derived from a scan — so `apply_package_grants`, which only ever rewrites a scanned
+    //     `Contribution::sandbox`, cannot reach any contribution `PanelHost` actually serves.
+    // A second scan object would therefore add no coverage while performing a real filesystem walk
+    // whose refusal nobody reports. The mounted package holds NO grant either way, so every
+    // assertion below is unchanged and no package gains authority. The grants path is EMPTY for the
+    // same determinism reason as `keybindings` / `themes` / `config` above, and because
+    // `PackageGrantStore::save` REFUSES an empty path, a `package.grants.decide` arriving here can
+    // never write to a developer's real consent document.
+    //
+    // The `PackageSessionHost` below is deliberately left at its DEFAULT scope resolver rather than
+    // wired to this host: the default is `kPackageSessionScope`, which is exactly what this smoke
+    // attached with before e13c-4, so leaving it alone preserves the scenario rather than changing
+    // what it proves. `package_scan` is declared FIRST so it outlives the host referencing it.
+    shell::PackageStoreScan package_scan;
+    shell::PackageGrantHost package_grants(package_scan, std::filesystem::path{});
+    SMOKE_CHECK(package_grants.install(bridge), "the package.grants.* bridge surface installed");
 
     // M9 e13c-2 — THE DRAIN THE RENDERER POLLS ON A TICK, and the one boot-surface entry that only
     // THIS smoke needs. `PackageEventPump` (packageevents.ts) calls `panel.events.poll` once per

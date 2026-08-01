@@ -7,7 +7,11 @@
 //
 //   * `bridge.commands.*` — a package panel's OWN commands, over the ONE registry (05 §6) the palette
 //     and the keymap already read. Nothing new is built here; the delegation IS the design.
-//   * `bridge.ui.subscribe` — ships HARD-DENIED, at the ONE named enforcement point below.
+//   * `bridge.ui.subscribe` — `editor.ui` facts, gated on the `ui_events` GRANT at the ONE named
+//     enforcement point below. It shipped HARD-DENIED from e13b-2 (no build had a grant source that
+//     said yes); M9 e13c-4 supplied one and wired the granted half onto e13c-2's push path, so the
+//     facts arrive as one-way `ui.deliver` envelopes (packageui.ts). The DENIED half is unchanged and
+//     is still what every un-granted package meets.
 //
 //   * `bridge.theme.tokens` — the current design tokens, PULLED over the port (M9 e13d). Its PUSH
 //     half is `IframeThemeChannel` (theme.ts), wired to real frames by `panelhost.ts`.
@@ -95,10 +99,14 @@
 //   * A HARDCODED refusal passes every negative test vacuously — panelport.ts says exactly this about
 //     the table itself, and the reasoning does not stop being true one layer up.
 //
-// So a GRANT SOURCE is consulted, and today's source is `DENY_ALL_CAPABILITY_GRANTS`. e13c replaces
-// THAT ONE OBJECT with install-consent grants; the DENIED half of the parent DoD clause stays true for
-// every package that was not granted `ui_events`. The T1 tier proves the lookup is real by planting a
-// GRANTING source and watching the refusal CODE change.
+// So a GRANT SOURCE is consulted. ⚠ **UPDATED BY M9 e13c-4** — that source used to be
+// `DENY_ALL_CAPABILITY_GRANTS` and is now `ShellPackageGrants` (packagegrants.ts), which carries the
+// operator's persisted install consent, already clamped Shell-side to what each package's manifest
+// declared. ONE ARGUMENT to `makePanelBridgeVerbs` changed; nothing about the gate moved. The DENIED
+// half of the parent DoD clause stays true for every package that was not granted `ui_events` — and
+// the deny-all object stays exported because it is what every failure path of the new source falls
+// back to. The T1 tier proves the lookup is real by driving the SAME verb against a denying and a
+// granting source and watching the ANSWER change.
 //
 // ⚠ A MANIFEST DECLARATION IS NOT A GRANT. `PanelManifest.capabilities` is what a package ASKED for
 // (04 §3). Reading it as the gate would let any package grant itself `ui_events` by editing its own
@@ -142,7 +150,13 @@ export const PANEL_VERB_COMMANDS_REGISTER = "bridge.commands.register";
 export const PANEL_VERB_COMMANDS_UNREGISTER = "bridge.commands.unregister";
 /** Execute one of THIS panel's own commands through the one registry (04 §5 `bridge.commands.execute`). */
 export const PANEL_VERB_COMMANDS_EXECUTE = "bridge.commands.execute";
-/** Subscribe to `editor.ui` facts — requires the `ui_events` grant (04 §5, C-F18). DENIED here. */
+/**
+ * Subscribe to `editor.ui` facts — requires the `ui_events` grant (04 §5, C-F18).
+ *
+ * Params `{topics}`, from the CLOSED built-in vocabulary; answers `{topics}` (the accepted set). The
+ * facts themselves arrive later, one-way, as `ui.deliver` envelopes pushed down this panel's port —
+ * the same delivery shape `bridge.events.subscribe` has, and for the same reason (packageui.ts).
+ */
 export const PANEL_VERB_UI_SUBSCRIBE = "bridge.ui.subscribe";
 /** Read the CURRENT design tokens (04 §5 `bridge.theme.tokens`; 06 §1). The PULL half — M9 e13d. */
 export const PANEL_VERB_THEME_TOKENS = "bridge.theme.tokens";
@@ -244,10 +258,16 @@ export interface PanelCapabilityGrants {
 }
 
 /**
- * THE deny-all grant source — this build's only one.
+ * THE deny-all grant source.
  *
- * Frozen so it cannot be mutated into a grant by anything holding a reference to it. e13c replaces the
- * VALUE passed to `makePanelBridgeVerbs`; it does not weaken this object.
+ * ⚠ NO LONGER "this build's only one" (M9 e13c-4): `ShellPackageGrants` (packagegrants.ts) is what
+ * `boot.ts` now passes, sourced from the operator's persisted consent through `package.grants.list`.
+ * This object stays, and stays exported, because it is what EVERY failure path of that source falls
+ * back to — an older Shell, a window whose router lacks the route, a reply that is not the shape — so
+ * the deny-all behaviour is the floor of the shipping build rather than a state it left behind.
+ *
+ * Frozen so it cannot be mutated into a grant by anything holding a reference to it. e13c-4 replaced
+ * the VALUE passed to `makePanelBridgeVerbs`; it did not weaken this object.
  */
 export const DENY_ALL_CAPABILITY_GRANTS: PanelCapabilityGrants = Object.freeze({
     granted: (): boolean => false,
@@ -272,7 +292,7 @@ export function capabilityDenial(
     }
     return declared.includes(capability)
         ? `the package "${packageId}" declared the "${capability}" capability but has not been ` +
-              "granted it (install consent is not wired in this build)"
+              "granted it (the operator has not consented to it)"
         : `the package "${packageId}" holds no "${capability}" grant and its manifest does not ` +
               "declare one";
 }
@@ -511,6 +531,57 @@ export interface PanelDaemonOutcome {
 export type PanelDaemonCall = (method: string, params: unknown) => Promise<PanelDaemonOutcome>;
 
 /**
+ * What ONE `bridge.ui.subscribe` answered (M9 e13c-4). `diagnostic` is empty exactly when accepted.
+ *
+ * MIRRORS `PackageUiSubscribeResult` (packageui.ts) STRUCTURALLY rather than importing it, for the
+ * reason this module imports `ThemeChangedPayload` type-only: the shape travels, the subsystem does
+ * not. Importing the fan-out here would give this module a dependency on the `editor.ui` bus, which is
+ * exactly the coupling `PanelCapabilityGrants` exists to avoid one field over.
+ */
+export interface PanelUiSubscribeOutcome {
+    /** The topics now subscribed for this panel's package. Empty when `diagnostic` is set. */
+    readonly topics: readonly string[];
+    /** Why it was refused, or `""`. A non-empty value becomes a `malformed_request` refusal. */
+    readonly diagnostic: string;
+}
+
+/**
+ * Subscribe THIS PANEL's package to `editor.ui` topics (M9 e13c-4).
+ *
+ * TAKES NO PACKAGE ARGUMENT — the same structural property as `PanelDaemonCall` one type up, and for
+ * the same reason: `boot.ts` binds one of these per panel with the package already closed over, so the
+ * identity is a property of the closure rather than of the request.
+ */
+export type PanelUiSubscribe = (topics: readonly string[]) => PanelUiSubscribeOutcome;
+
+/**
+ * Read the `topics` array out of a `bridge.ui.subscribe` request. `null` for any other shape.
+ *
+ * FAIL-CLOSED AND TOTAL, in the discipline `readDaemonMethod` follows: the params come from untrusted
+ * code, so a non-array, a non-string entry, or an over-long token is a refusal rather than a value that
+ * is coerced into something adjacent. The length bound is `PANEL_COMMAND_FIELD_MAX_LENGTH`'s — a topic
+ * is echoed in diagnostics exactly as a command id is, and an untrusted peer chooses both.
+ */
+export function readUiTopicsParam(params: unknown): readonly string[] | null {
+    if (typeof params !== "object" || params === null || Array.isArray(params)) {
+        return null;
+    }
+    const raw = (params as Record<string, unknown>)["topics"];
+    if (!Array.isArray(raw)) {
+        return null;
+    }
+    const topics: string[] = [];
+    for (const entry of raw) {
+        if (typeof entry !== "string" || entry === "" ||
+            entry.length > PANEL_COMMAND_FIELD_MAX_LENGTH) {
+            return null;
+        }
+        topics.push(entry);
+    }
+    return topics;
+}
+
+/**
  * Map ONE Shell/daemon refusal code onto the CLOSED panel-facing refusal set.
  *
  * ⚠ NO NEW CODE IS MINTED, deliberately: `PANEL_BRIDGE_REFUSALS` says adding one is a
@@ -578,8 +649,28 @@ export interface PanelVerbContext {
     readonly registry: () => CommandRegistry | undefined;
     /** The live when-context the palette filters on — the same provider, so the two cannot disagree. */
     readonly whenContext: () => WhenContext;
-    /** The capability GRANT source. `DENY_ALL_CAPABILITY_GRANTS` until e13c. */
+    /**
+     * The capability GRANT source.
+     *
+     * `ShellPackageGrants` in the shipping editor since M9 e13c-4 (packagegrants.ts), sourced from the
+     * operator's persisted install consent; `DENY_ALL_CAPABILITY_GRANTS` on every failure path of that
+     * source, and in every build that wires none.
+     */
     readonly grants: PanelCapabilityGrants;
+    /**
+     * THIS PANEL's `editor.ui` fan-out (M9 e13c-4) — supplied per renderer by `boot.ts`, with the
+     * package already closed over.
+     *
+     * A CLOSURE, not a lookup, for the same reason `daemonCall` and `state` are: `bridge.ui.subscribe`
+     * takes no package argument precisely because THIS FUNCTION is the scope, so no request can
+     * subscribe another package's panels to anything. The implementation (`PackageUiFanout`,
+     * packageui.ts) knows about the bus and the ports; this module stays ignorant of both, exactly as
+     * it stays ignorant of the Shell behind `daemonCall`.
+     *
+     * ⚠ IT IS REACHED ONLY THROUGH `requireCapability` — see the `ui_events` enforcement point below.
+     * Nothing else in this table calls it, so the gate cannot be bypassed by a second caller appearing.
+     */
+    readonly uiSubscribe: PanelUiSubscribe;
     /**
      * The CURRENT theme payload (M9 e13d) — LATE-BOUND for the same reason `registry` is: the theme
      * can change under a mounted panel, and a value captured when the table was built would answer
@@ -878,27 +969,45 @@ export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable 
         ],
         [
             PANEL_VERB_UI_SUBSCRIBE,
-            (): never => {
+            (params: unknown): { topics: readonly string[] } => {
                 // ⚠ THE ONE `ui_events` ENFORCEMENT POINT (C-F18) — see the file header. Everything
-                // this verb will ever do sits BEHIND this call, so e13c cannot wire delivery without
-                // passing through it.
+                // this verb does sits BEHIND this call, and it is still the FIRST thing the handler
+                // does: the params are not even parsed above it, so a package with no grant cannot
+                // learn anything from the shape of its own refusal (a malformed-request answer for an
+                // un-granted package would be a free probe for whether the verb is wired).
                 requireCapability(
                     context.grants,
                     context.packageId,
                     CAPABILITY_UI_EVENTS,
                     context.declaredCapabilities,
                 );
-                // THE GRANTED HALF IS e13c's. Reaching here means a grant source said yes — which no
-                // build does today. It must still not deliver `editor.ui` facts, because the
-                // subscription plumbing (and the cross-frame envelope it would ride) does not exist:
-                // answering anything else would be inventing a capability out of a grant. The refusal
-                // is therefore the ordinary "this build has no such verb", and the CODE is what proves
-                // to a T1 plant that the grant lookup above really ran.
-                throw new PanelVerbRefusal(
-                    PANEL_BRIDGE_REFUSALS.verbNotGranted,
-                    "`ui_events` is granted, but editor.ui delivery to package panels is not wired " +
-                        "in this build",
-                );
+                // THE GRANTED HALF, wired by M9 e13c-4 onto the push path e13c-2 built. Reaching here
+                // means the grant source said yes for THIS package — which, in the shipping editor,
+                // means the operator consented at install (`packagegrants.ts`).
+                const topics = readUiTopicsParam(params);
+                if (topics === null) {
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.malformedRequest,
+                        "bridge.ui.subscribe requires a 'topics' array of non-empty strings of at " +
+                            `most ${String(PANEL_COMMAND_FIELD_MAX_LENGTH)} characters`,
+                    );
+                }
+                const outcome = context.uiSubscribe(topics);
+                if (outcome.diagnostic !== "") {
+                    // `malformed_request`, NOT `capability_not_granted`: the package HOLDS the grant —
+                    // it asked for a topic that is not subscribable, which is a fault in the request
+                    // and not a consent question. Answering the capability code here would send a
+                    // package author to an install prompt that could never fix it.
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.malformedRequest,
+                        outcome.diagnostic,
+                    );
+                }
+                // THE ACCEPTED TOPICS ARE ECHOED, and that is the reply's whole content: the FACTS
+                // arrive later, one-way, as `ui.deliver` envelopes pushed down this panel's port —
+                // the same shape (and the same reason) `bridge.events.subscribe` answers with the
+                // daemon's `subId` rather than with events.
+                return { topics: outcome.topics };
             },
         ],
         [

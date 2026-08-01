@@ -64,12 +64,33 @@ bool is_panel_callable_daemon_method(const std::string& method)
 }
 
 PackageSessionHost::PackageSessionHost(ClientFactory factory, std::size_t max_sessions)
-    : factory_(std::move(factory)),
+    : PackageSessionHost(std::move(factory), ScopeResolver{}, max_sessions)
+{
+}
+
+PackageSessionHost::PackageSessionHost(ClientFactory factory, ScopeResolver scope_resolver,
+                                       std::size_t max_sessions)
+    : factory_(std::move(factory)), scope_resolver_(std::move(scope_resolver)),
       // 0 would mean "no package may ever call", which reads as a disabled feature rather than a
       // configuration error; clamping to 1 matches `set_max_connections`' own handling of 0 and keeps
       // the cap a bound rather than a switch.
       max_sessions_(max_sessions == 0 ? 1 : max_sessions)
 {
+}
+
+std::string PackageSessionHost::attach_scope_for(const std::string& package_id) const
+{
+    // FAIL CLOSED IN BOTH DIRECTIONS (control 1): an ABSENT resolver is the e13c-1 deny-all build, and
+    // a resolver that answers EMPTY — a grant document that could not be read, a package nobody
+    // consented to, a wiring bug — lands on the same baseline rather than on `AttachOptions`' silent
+    // default. The two are deliberately the SAME answer: there is no state in which "we do not know"
+    // may grant more than "we know nothing was granted".
+    if (!scope_resolver_)
+    {
+        return kPackageSessionScope;
+    }
+    std::string spec = scope_resolver_(package_id);
+    return spec.empty() ? std::string(kPackageSessionScope) : spec;
 }
 
 bool PackageSessionHost::has_session(const std::string& package_id) const
@@ -186,11 +207,15 @@ client::Client* PackageSessionHost::session_for(const std::string& package_id,
         return nullptr;
     }
 
-    // CONTROL 1 — THE SCOPE IS DECIDED HERE AND NOWHERE ELSE. `options.token` is deliberately left
-    // EMPTY: `Client::attach` falls back to the D20 token `connect_to_project` discovered, so the
-    // token never passes through this class (nor through the request that triggered it).
+    // CONTROL 1 — THE SCOPE IS DECIDED HERE AND NOWHERE ELSE. Since e13c-4 the VALUE is derived from
+    // the operator's persisted consent (`attach_scope_for`), but the SITE is unchanged: one call, at
+    // the one attach, with no path by which a package's own request can reach it — `package_id` comes
+    // from editor-core's per-panel binding, and the grant it indexes is a Shell document.
+    // `options.token` is deliberately left EMPTY: `Client::attach` falls back to the D20 token
+    // `connect_to_project` discovered, so the token never passes through this class (nor through the
+    // request that triggered it).
     client::AttachOptions options;
-    options.scope = kPackageSessionScope;
+    options.scope = attach_scope_for(package_id);
 
     std::string attach_error;
     if (!client->attach(options, attach_error))
