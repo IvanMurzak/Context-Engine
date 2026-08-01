@@ -199,6 +199,20 @@ interface HostedPanel {
 /** A hosted panel known to be a live third-party (`iframe`) one — see `PanelHost.#portPanel`. */
 type HostedIframePanel = HostedPanel & { readonly renderer: IframePanelRenderer };
 
+/**
+ * The outcome of one `PanelHost.deliverToPackage` fan-out (M9 e13c-2).
+ *
+ * TWO NUMBERS, NOT ONE, because they answer different questions and only the first can be asserted in
+ * a tier that cannot grant a port: `addressed` is WHO the host decided belongs to the package (the
+ * discriminating artifact), `delivered` is how many of them actually took the message.
+ */
+export interface PackageDelivery {
+    /** The panel ids the host addressed — `panelsForPackage`'s answer, verbatim. */
+    readonly addressed: readonly string[];
+    /** How many of those panels' ports accepted the push. 0 is ordinary (no port granted yet). */
+    readonly delivered: number;
+}
+
 /** What PanelHost needs from any content renderer it mounts. */
 interface PanelRenderer extends DockviewContentRenderer {
     readonly suspended: boolean;
@@ -334,6 +348,8 @@ class IframePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
     readonly #url: string;
     readonly #panelId: string;
+    /** The `context-ext://<packageId>` authority this panel belongs to (M9 e13c-2 routes on it). */
+    readonly #packageId: string;
     readonly #verbs: PanelVerbTable;
     readonly #themeChannel: PanelThemeChannel | undefined;
     #themeTarget: IframeMessageTarget | undefined;
@@ -364,9 +380,21 @@ class IframePanelRenderer implements PanelRenderer {
      */
     #stateFromPanel = false;
 
-    constructor(panelId: string, url: string, verbs?: PanelVerbBinder, themeChannel?: PanelThemeChannel) {
+    constructor(
+        panelId: string,
+        url: string,
+        packageId: string,
+        verbs?: PanelVerbBinder,
+        themeChannel?: PanelThemeChannel,
+    ) {
         this.#panelId = panelId;
         this.#url = url;
+        // CARRIED, NOT RE-DERIVED FROM `#url` (M9 e13c-2). `parseExtPanelEntry` already validated the
+        // `context-ext://<packageId>` authority, and a second parse here would be a second notion of
+        // "which package is this" — one the daemon fan-out routes EVENTS on. Two spellings of a
+        // package id are two mailboxes, which is exactly the drift `PackageSessionHost::forward`
+        // validates against on its own side.
+        this.#packageId = packageId;
         this.#themeChannel = themeChannel;
         // THE VERB TABLE IS BUILT HERE, IN THE CONSTRUCTOR, and it is handed a `request` closure that
         // resolves `this.#bridge` LAZILY (through the method below, so there is ONE refusal for a
@@ -391,6 +419,11 @@ class IframePanelRenderer implements PanelRenderer {
 
     get suspended(): boolean {
         return this.#suspended;
+    }
+
+    /** The package this panel belongs to — the identity the daemon fan-out routes on (M9 e13c-2). */
+    get packageId(): string {
+        return this.#packageId;
     }
 
     /** This panel's current blob (M9 e13d), or `null` when it has none to persist. */
@@ -451,6 +484,19 @@ class IframePanelRenderer implements PanelRenderer {
                   },
               })
             : bridge.request(verb, params);
+    }
+
+    /**
+     * Push one ONE-WAY FACT into this panel's frame (M9 e13c-2) — `true` when it was posted.
+     *
+     * The delivery half of the daemon fan-out: `PackageEventPump` drains the Shell's bounded buffer
+     * and calls this for every live port of the package. `false` (no port yet, or a revoked one) is an
+     * ORDINARY outcome, not an error — a panel whose document has not finished handshaking simply has
+     * not started receiving, and the fact was already counted as dropped-or-kept by the Shell's buffer,
+     * which is the one place that accounting belongs.
+     */
+    deliver(verb: string, params?: unknown): boolean {
+        return this.#bridge?.deliver(verb, params) ?? false;
     }
 
     /**
@@ -865,6 +911,77 @@ export class PanelHost {
                   renderer.request(verb, params);
     }
 
+    /**
+     * The packages with at least one MOUNTED port panel, deduplicated and in mount order (M9 e13c-2).
+     *
+     * ⚠ DEDUPLICATED IS THE LOAD-BEARING WORD. The Shell buffers per PACKAGE (its daemon session is
+     * pooled per package), and `panel.events.poll` DRAINS — so polling once per PANEL would give a
+     * package's first panel every event and its second panel nothing. That bug is invisible until a
+     * user opens a package's second panel, which is why the deduplication lives here, at the one place
+     * that can see the panel→package mapping, rather than in the pump's loop.
+     */
+    packagesWithPorts(): readonly string[] {
+        const seen = new Set<string>();
+        for (const hosted of this.#panels.values()) {
+            if (hosted.renderer instanceof IframePanelRenderer) {
+                seen.add(hosted.renderer.packageId);
+            }
+        }
+        return [...seen];
+    }
+
+    /**
+     * The MOUNTED port panels belonging to `packageId`, in mount order (M9 e13c-2).
+     *
+     * ⚠ EXTRACTED FROM `deliverToPackage` RATHER THAN INLINED IN IT, AND A PLANT IS WHY. The delivery
+     * count alone cannot pin the ADDRESSING: `deliver` answers `false` for any panel whose port has
+     * not been granted, so in every tier that cannot load a `context-ext://` document the count is 0
+     * for the right package AND for the wrong one — a plant that dropped the `packageId` comparison
+     * entirely came back GREEN against a count-only assertion (MEASURED, this task). Naming the
+     * addressed panels is the POSITIVE artifact that discriminates, and `deliverToPackage` is written
+     * over this one predicate so the two can never disagree about who belongs to a package.
+     */
+    panelsForPackage(packageId: string): readonly string[] {
+        const ids: string[] = [];
+        for (const [panelId, hosted] of this.#panels) {
+            if (
+                hosted.renderer instanceof IframePanelRenderer &&
+                hosted.renderer.packageId === packageId
+            ) {
+                ids.push(panelId);
+            }
+        }
+        return ids;
+    }
+
+    /**
+     * Push one ONE-WAY FACT into EVERY mounted port panel of `packageId` (M9 e13c-2).
+     *
+     * ⚠ RETURNS THE ADDRESSING, NOT ONLY THE COUNT, AND THAT IS WHAT MAKES IT TESTABLE. `delivered`
+     * alone cannot discriminate: `deliver` answers `false` for any panel whose port is not granted, so
+     * in every tier that cannot load a `context-ext://` document the count is 0 for the RIGHT package
+     * and the WRONG one alike — replacing the loop's source with `this.#panels.keys()` (i.e. fanning a
+     * package's events out to EVERY panel) leaves a count-only assertion green. `addressed` is the
+     * POSITIVE artifact that reddens it, which is the same reason `panelsForPackage` exists.
+     *
+     * A 0 `delivered` is an ordinary answer: a package whose panel has not finished its port handshake
+     * yet is not an error, and the Shell's buffer — not this host — is where "was it kept or dropped"
+     * is decided.
+     */
+    deliverToPackage(packageId: string, verb: string, params?: unknown): PackageDelivery {
+        const addressed = this.panelsForPackage(packageId);
+        let delivered = 0;
+        for (const panelId of addressed) {
+            // `#portPanel` is the ONE port-panel predicate this class declares (see its comment):
+            // re-spelling `instanceof` here is what lets the fan-out route and the LayoutPersistence
+            // route drift about what a port panel IS.
+            if (this.#portPanel(panelId)?.renderer.deliver(verb, params) === true) {
+                delivered += 1;
+            }
+        }
+        return { addressed, delivered };
+    }
+
     get api(): DockviewApi | null {
         return this.#api;
     }
@@ -1251,7 +1368,13 @@ export class PanelHost {
                                   request,
                                   state,
                               });
-                return new IframePanelRenderer(panelId, entry.url, binder, this.#themeChannel);
+                return new IframePanelRenderer(
+                    panelId,
+                    entry.url,
+                    entry.packageId,
+                    binder,
+                    this.#themeChannel,
+                );
             }
             case "uitree":
                 return new UitreePanelRenderer(panelId, this.#client, manifest.gestures);

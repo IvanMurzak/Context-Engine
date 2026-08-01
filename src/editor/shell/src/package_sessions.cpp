@@ -43,6 +43,11 @@ const std::vector<std::string>& panel_callable_daemon_methods()
         "query",              // the ONE authored-data read (R-CLI-012)
         "editor.scene-tree",  // the e05d3 composed scene projection
         "editor.inspect",     // the e05d3 composed entity projection
+        // e13c-2 — the R-CLI-015 subscription protocol, admissible ONLY because package_events.h now
+        // bounds the fan-out. All three or none: see the header's allowlist note.
+        "subscribe",          // open a subscription on this package's baseline session
+        "unsubscribe",        // close one (without it, every re-subscribe leaks a subId)
+        "ack",                // advance the retention cursor (without it, the daemon's ring is pinned)
     };
     return kAllowed;
 }
@@ -76,6 +81,72 @@ bool PackageSessionHost::has_session(const std::string& package_id) const
 void PackageSessionHost::reset()
 {
     sessions_.clear();
+    // WITH the sessions, deliberately — see the header. A buffered event's seq belongs to the
+    // incarnation of the connection that delivered it, so surviving the connection would hand a panel
+    // a cursor into a dead lifetime.
+    events_.clear();
+}
+
+std::size_t PackageSessionHost::pump()
+{
+    std::size_t buffered = 0;
+    for (Session& session : sessions_)
+    {
+        if (session.client == nullptr)
+        {
+            continue;
+        }
+        // BOUNDED PER PUMP: a responsiveness bound, not a memory one (package_events.h
+        // § kMaxDrainedFramesPerPump). Anything still on the wire rides the next frame's pump.
+        for (std::size_t drained = 0; drained < kMaxDrainedFramesPerPump; ++drained)
+        {
+            bool disconnected = false;
+            // 0 ms — this runs on the owner loop, so it must never wait. A quiet session answers
+            // nullopt immediately and costs one non-blocking read.
+            // NON-const so the envelope below MOVES. `contract::Json` is a recursive value type, so
+            // a copy here reallocates the whole tree — and `Client::poll_event` is deliberately
+            // non-const-returning for exactly this (client.cpp, "the SDK's hottest path").
+            std::optional<client::InboundFrame> frame = session.client->poll_event(0, disconnected);
+            if (!frame.has_value())
+            {
+                // Nothing queued, or the peer went away. Either way this session has no more to give
+                // THIS frame; a lost daemon is the lifecycle's business, not this pump's.
+                break;
+            }
+            if (frame->kind == client::FrameKind::gap)
+            {
+                // THE DAEMON's ring outran us. Latch the flag WITHOUT touching `dropped`, so the two
+                // causes stay distinguishable (package_events.h § mark_gap).
+                events_.mark_gap(session.package_id);
+                continue;
+            }
+            if (frame->kind != client::FrameKind::event)
+            {
+                // A response to an abandoned call, or a frame this SDK does not model. Ignorable by
+                // construction (wire.h § FrameKind::unknown) — never fatal to a subscription.
+                continue;
+            }
+            // THE WIRE ENVELOPE, CARRIED VERBATIM plus the `subId` it arrived under. The Shell never
+            // interprets a package's events (the same opaque-payload discipline UiMirrorStore keeps),
+            // but a package holding several subscriptions cannot demultiplex without the subId, and
+            // the daemon puts it OUTSIDE the event object — so dropping it here would make multiple
+            // subscriptions per package unusable.
+            contract::Json delivered = std::move(frame->event);
+            if (delivered.is_object())
+            {
+                delivered.set("subId", contract::Json(std::move(frame->sub_id)));
+            }
+            events_.push(session.package_id, std::move(delivered));
+            ++events_buffered_;
+            ++buffered;
+        }
+    }
+    return buffered;
+}
+
+PackageEventDrain PackageSessionHost::poll_events(const std::string& package_id)
+{
+    return events_.take(package_id);
 }
 
 client::Client* PackageSessionHost::session_for(const std::string& package_id,
@@ -129,7 +200,7 @@ client::Client* PackageSessionHost::session_for(const std::string& package_id,
         return nullptr;
     }
 
-    sessions_.push_back(Session{package_id, std::move(client)});
+    sessions_.push_back(Session{package_id, std::move(client), {}});
     return sessions_.back().client.get();
 }
 
@@ -164,6 +235,62 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
                                    "'" + method + "' is not callable from a package panel");
     }
 
+    // CONTROL 5 (S8), AHEAD OF THE WIRE — a package may only address subscriptions it MINTED.
+    //
+    // Checked here, before a session is opened, for control 2's own reason: an id-probing package
+    // must not consume a connection slot doing it. The daemon cannot make this check for us — it
+    // routes `unsubscribe`/`ack` to `serve_subscription` WITHOUT the connection's Session, and
+    // matches on a globally-sequential `subId` that carries no owner (header § control 5).
+    if (method == "unsubscribe" || method == "ack")
+    {
+        std::string sub_id;
+        if (!read_string(params, "subId", sub_id) || sub_id.empty())
+        {
+            return BridgeResult::error(kErrPackageBadParams,
+                                       "'" + method + "' requires a non-empty string 'subId'");
+        }
+        const Session* owner = nullptr;
+        for (const Session& session : sessions_)
+        {
+            if (session.package_id == package_id)
+            {
+                owner = &session;
+                break;
+            }
+        }
+        const bool owns =
+            owner != nullptr && std::find(owner->sub_ids.begin(), owner->sub_ids.end(), sub_id) !=
+                                    owner->sub_ids.end();
+        if (!owns)
+        {
+            ++refused_subscriptions_;
+            // ONE code for "another client's" and "no such subscription" — see the header: a
+            // differentiated refusal would rebuild the enumeration oracle this control closes.
+            return BridgeResult::error(kErrPackageUnknownSubscription,
+                                       "no subscription '" + sub_id + "' belongs to package '" +
+                                           package_id + "'");
+        }
+    }
+    else if (method == "subscribe")
+    {
+        // THE SUBSCRIPTION SUB-CAP — control 5's second half. Without it a package can mint subIds
+        // without bound; each costs the DAEMON a Subscriber with its own queue and one more fan-out
+        // of every matching event, in the process that also serves the CLI and every AI client. The
+        // 256-event buffer bounds what this editor HOLDS, never what the daemon does per subId.
+        for (const Session& session : sessions_)
+        {
+            if (session.package_id == package_id &&
+                session.sub_ids.size() >= kMaxSubscriptionsPerPackage)
+            {
+                ++refused_subscriptions_;
+                return BridgeResult::error(
+                    kErrPackageSubscriptionCapacity,
+                    "package '" + package_id + "' already holds the maximum of " +
+                        std::to_string(kMaxSubscriptionsPerPackage) + " subscriptions");
+            }
+        }
+    }
+
     std::string error_code;
     std::string message;
     client::Client* client = session_for(package_id, error_code, message);
@@ -191,11 +318,113 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
                                              package_id + "'"
                                        : "'" + method + "' could not be delivered to the daemon");
     }
+
+    // CONTROL 5's LEDGER, maintained from the DAEMON's own answer rather than from the request: the
+    // subId a package owns is the one the daemon actually minted for it, so a package cannot claim an
+    // id by asking for it. Re-found by package id because `session_for` may have grown `sessions_`
+    // and invalidated any pointer taken above.
+    if (method == "subscribe" || method == "unsubscribe")
+    {
+        for (Session& session : sessions_)
+        {
+            if (session.package_id != package_id)
+            {
+                continue;
+            }
+            if (method == "subscribe")
+            {
+                // THE R-CLI-008 ENVELOPE, read STRICTLY. `Client::call` hands back the daemon's
+                // `result`, which IS the `{ok, data}` envelope — `serve_subscription` puts `subId`
+                // inside `data`. Reading it strictly is the FAIL-CLOSED direction on purpose: if that
+                // shape ever moves, no subId is recorded, every later `unsubscribe`/`ack` is refused
+                // as unowned, and the feature degrades LOUDLY instead of the control quietly
+                // admitting everything.
+                std::string minted;
+                if (result->is_object() && result->contains("data") &&
+                    read_string(result->at("data"), "subId", minted) && !minted.empty() &&
+                    std::find(session.sub_ids.begin(), session.sub_ids.end(), minted) ==
+                        session.sub_ids.end())
+                {
+                    session.sub_ids.push_back(std::move(minted));
+                }
+            }
+            else
+            {
+                // Ownership was proven above, so this erases exactly the package's own entry — and
+                // frees a slot under the sub-cap, which is what makes `unsubscribe` the release
+                // valve rather than a second way to spend the budget.
+                std::string sub_id;
+                (void)read_string(params, "subId", sub_id);
+                const auto it = std::find(session.sub_ids.begin(), session.sub_ids.end(), sub_id);
+                if (it != session.sub_ids.end())
+                {
+                    session.sub_ids.erase(it);
+                }
+            }
+            break;
+        }
+    }
     return BridgeResult::ok(*result);
+}
+
+std::size_t PackageSessionHost::subscriptions_open(const std::string& package_id) const
+{
+    for (const Session& session : sessions_)
+    {
+        if (session.package_id == package_id)
+        {
+            return session.sub_ids.size();
+        }
+    }
+    return 0;
 }
 
 bool PackageSessionHost::install(BridgeRouter& router)
 {
+    // e13c-2 — THE DRAIN. Registered first so a failure here is reported before the fan-in binding
+    // succeeds and leaves the surface half-installed.
+    //
+    // ⚠ AN UNKNOWN PACKAGE IS AN EMPTY DRAIN, NOT A REFUSAL. editor-core polls on a fixed tick for
+    // every package it has a panel mounted for, so "this package has not subscribed" is the ordinary
+    // case; refusing it would make every idle tick a refusal on a channel whose live smokes assert
+    // `bridge.refused() == 0`, which is exactly the regression session_bridge.h records for e06d.
+    if (!router.register_method(
+            kPanelEventsPollMethod,
+            [this](const BridgeRequest& request) -> BridgeResult
+            {
+                std::string package_id;
+                if (!read_string(request.params, "packageId", package_id) ||
+                    !is_valid_package_id(package_id))
+                {
+                    // The SAME predicate `forward` validates against, for the same reason: a package
+                    // that is one thing to the scheme and another to the buffer would drain a
+                    // mailbox nothing fills.
+                    return BridgeResult::error(kErrPackageBadParams,
+                                               "panel.events.poll requires a valid 'packageId'");
+                }
+                // NON-const so the batch MOVES onto the reply. `drain` is a fully-owned local that
+                // dies with this lambda, and `take()` already went to the trouble of moving each
+                // event out of the deque — copying them back would deep-copy up to
+                // `kMaxBufferedEventsPerPackage` JSON trees per poll, on the owner loop.
+                PackageEventDrain drain = poll_events(package_id);
+                contract::Json events = contract::Json::array();
+                for (contract::Json& event : drain.events)
+                {
+                    events.push_back(std::move(event));
+                }
+                contract::Json result = contract::Json::object();
+                result.set("events", std::move(events));
+                // THE LOUD HALF, and the reason it rides the reply rather than a counter: this is the
+                // only channel that reaches the PACKAGE, and a panel that missed events looks exactly
+                // like a panel whose subject did not change (package_events.h § a drop is loud).
+                result.set("dropped", contract::Json(drain.dropped));
+                result.set("gapped", contract::Json(drain.gapped));
+                return BridgeResult::ok(std::move(result));
+            }))
+    {
+        return false;
+    }
+
     return router.register_method(kPanelDaemonCallMethod,
                                   [this](const BridgeRequest& request) -> BridgeResult
                                   {

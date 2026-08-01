@@ -78,8 +78,10 @@
 
 #include "context/editor/client/client.h"
 #include "context/editor/shell/ipc_bridge.h"
+#include "context/editor/shell/package_events.h" // e13c-2: the BOUNDED fan-out buffer
 
 #include <cstddef>
+#include <cstdint>
 #include <functional>
 #include <memory>
 #include <string>
@@ -111,6 +113,16 @@ inline constexpr const char* kErrPackageMethodNotAllowed = "panel.daemon.method_
 inline constexpr const char* kErrPackageCapacity = "panel.daemon.capacity";
 /** No daemon to attach to, or the attach was refused. The editor is read-only / detached. */
 inline constexpr const char* kErrPackageNoSession = "panel.daemon.unavailable";
+/**
+ * `unsubscribe` / `ack` named a `subId` THIS PACKAGE DID NOT MINT — control 5 (S8).
+ *
+ * ⚠ DELIBERATELY THE SAME CODE whether the subId belongs to another client or does not exist at all.
+ * Differentiating them would rebuild the enumeration oracle this control exists to close, exactly as
+ * `kErrPackageMethodNotAllowed` refuses identically for a real and an imaginary method.
+ */
+inline constexpr const char* kErrPackageUnknownSubscription = "panel.daemon.unknown_subscription";
+/** The per-package SUBSCRIPTION cap is full — control 5. Distinct from the SESSION cap above. */
+inline constexpr const char* kErrPackageSubscriptionCapacity = "panel.daemon.subscription_capacity";
 
 // ------------------------------------------------------------------------------------ the policy
 
@@ -123,6 +135,41 @@ inline constexpr const char* kErrPackageNoSession = "panel.daemon.unavailable";
 // rather than left to `AttachOptions`' own default so the choice is VISIBLE and greppable here; a
 // default is not a decision anyone can find.
 inline constexpr const char* kPackageSessionScope = "read";
+
+// ⚠ CONTROL 5 (S8) — A PACKAGE MAY ONLY ADDRESS SUBSCRIPTIONS IT MINTED ITSELF.
+//
+// WHY THIS EXISTS, and why control 2 does not already cover it. The allowlist is closed over METHOD
+// NAMES; `unsubscribe` and `ack` are on it, and both address a subscription by a `subId` that travels
+// in the PANEL's own params. That id namespace is daemon-GLOBAL, sequential (`"sub-" + (++counter)`,
+// bridge/event_stream.cpp) and — crucially — UNAUTHENTICATED: `Dispatcher::dispatch` routes the three
+// subscription verbs to `serve_subscription(*stream_, method, params)` WITHOUT the connection's
+// `Session`, and `EventStream::unsubscribe` / `::ack` then match on `id` alone, over a
+// `struct Subscription` that carries no owner field at all. One daemon holds ONE stream shared by the
+// Shell's own subscription, every CLI client and every AI client.
+//
+// So control 2's own argument — "a denylist over an OPEN namespace is not a control" — applies one
+// level down, to the ID namespace, and was not made there. Without this control a sandboxed package
+// could walk `sub-1…sub-N` and:
+//   * `unsubscribe` the SHELL's own {diagnostics, derivation, session} subscription, leaving Problems
+//     / Scene tree / Inspector rendering their last state forever with nothing reporting it — the
+//     precise silent-stale failure `package_events.h` § "a drop is loud" exists to prevent, reached
+//     from untrusted code; and
+//   * `ack` a THIRD PARTY's cursor to a huge seq, which advances the retention floor and prunes ring
+//     history that victim has genuinely not read. `EventStream::ack` is monotonic, so it cannot be
+//     undone.
+// The daemon's answer also differs for a live vs an unknown subId, which is an existence ORACLE over
+// every subscription in the process.
+//
+// WHAT THIS CONTROL IS, AND WHAT IT IS NOT. It is a SHELL-side ownership check: the host records the
+// `subId` out of each package's OWN `subscribe` reply, and refuses `unsubscribe` / `ack` for any id
+// that package did not mint — with ONE code for "not yours" and "does not exist", so the oracle stays
+// closed. It is deliberately NOT the whole answer: a Shell-side filter cannot bind a client that does
+// not go through this Shell, so the DURABLE fix is daemon-side (put the owning client id on
+// `Subscription` and hand `serve_subscription` the `Session`), and this control must be RETIRED when
+// that lands rather than kept as a second copy to drift — the hazard control 2 names. It is here
+// because an authorization hole reachable from third-party code is not survivable at the distance of
+// the grant store that will own scopes.
+inline constexpr std::size_t kMaxSubscriptionsPerPackage = 8;
 
 // How many package sessions this Shell process may hold at once — control 4(b).
 //
@@ -143,12 +190,16 @@ inline constexpr std::size_t kMaxPackageSessions = 4;
 //   * `query`              — the ONE authored-data read (R-CLI-012, docs/query-language.md).
 //   * `editor.scene-tree`  — the e05d3 composed scene projection: what a hierarchy panel renders.
 //   * `editor.inspect`     — the e05d3 composed entity projection: what a property panel renders.
+//   * `subscribe` /        — the R-CLI-015 subscription protocol (M9 e13c-2). Baseline-scoped, so
+//     `unsubscribe` /        the dispatcher would always have accepted them; e13c-1 held them out
+//     `ack`                  anyway because "a subscription with no bounded buffer is an unbounded
+//                            allocation driven by untrusted code" — and they are here NOW, and only
+//                            now, because `package_events.h` supplies that bound. The three travel
+//                            together on purpose: `subscribe` with no `ack` pins the daemon's ring
+//                            retention at the slowest cursor (client/subscription.h § 2), and
+//                            `subscribe` with no `unsubscribe` leaks a subId per re-subscribe.
 //
 // WHAT IS DELIBERATELY ABSENT, and why the absences are load-bearing rather than an oversight:
-//   * `subscribe` / `unsubscribe` / `ack` are baseline-scoped and would therefore be ACCEPTED by the
-//     dispatcher — they are held out because the fan-OUT buffer that makes them safe to expose (a
-//     bound, a drop policy, an ack cursor) is e13c-2's, and a subscription with no bounded buffer is
-//     an unbounded allocation driven by untrusted code.
 //   * `set` / `edit` / `build` / `package.add` are not here AND would be refused by the dispatcher
 //     anyway. Both controls, independently — that redundancy is the S4 point: the allowlist must hold
 //     even for a method the scope table would have let through.
@@ -184,8 +235,9 @@ public:
     PackageSessionHost(const PackageSessionHost&) = delete;
     PackageSessionHost& operator=(const PackageSessionHost&) = delete;
 
-    // Bind `panel.daemon.call`. False when the binding was refused (a name collision, or the name
-    // landing on `forbidden_bridge_methods()`), which the caller must treat as a wiring bug.
+    // Bind `panel.daemon.call` AND `panel.events.poll`. False when either binding was refused (a name
+    // collision, or the name landing on `forbidden_bridge_methods()`), which the caller must treat as
+    // a wiring bug.
     [[nodiscard]] bool install(BridgeRouter& router);
 
     // Forward one call onto `package_id`'s baseline session, opening it on first use. The whole
@@ -193,8 +245,32 @@ public:
     [[nodiscard]] BridgeResult forward(const std::string& package_id, const std::string& method,
                                        const contract::Json& params);
 
-    // Drop every session (a daemon that went away, or shutdown). Idempotent.
+    // Drop every session AND everything buffered for it (a daemon that went away, or shutdown).
+    // Idempotent.
+    //
+    // ⚠ THE BUFFER IS CLEARED WITH THE SESSIONS, DELIBERATELY. The events in it were minted by a
+    // subscription on a connection that no longer exists, and their seqs belong to an incarnation
+    // that may not survive (client/subscription.h § 5). Delivering them after a reset would hand a
+    // panel a cursor into a dead lifetime — precisely the corruption `Client::reconnect` clears
+    // `pending_events_` to avoid.
     void reset();
+
+    // Drain every live package session's inbound event frames into the BOUNDED buffer (e13c-2).
+    //
+    // ⚠ THIS MUST RUN ON THE OWNER LOOP, NOT ONLY WHEN editor-core POLLS. Between two polls the frames
+    // otherwise accumulate in `Client::pending_events_` — a plain `std::deque` with NO bound — so a
+    // buffer that filled only on demand would leave the real accumulation point unbounded and the
+    // whole control cosmetic. Pumping every frame is what makes `kMaxBufferedEventsPerPackage` the
+    // actual ceiling.
+    //
+    // NON-BLOCKING (a 0 ms poll per session) and bounded at `kMaxDrainedFramesPerPump` frames per
+    // session per call, so one chatty topic cannot hold the frame. Returns how many events it
+    // buffered — 0 on a quiet pump, which is the common case.
+    std::size_t pump();
+
+    // Read + CLEAR `package_id`'s buffered events, with the LOUD `dropped` / `gapped` pair. The whole
+    // decision path, exposed so the suite drives it without a router in the way.
+    [[nodiscard]] PackageEventDrain poll_events(const std::string& package_id);
 
     // --- what it did ------------------------------------------------------------------------------
     /** Live package sessions. THE lazy-attach observable: 0 until a package actually calls. */
@@ -205,6 +281,17 @@ public:
     [[nodiscard]] std::size_t refused_methods() const { return refused_methods_; }
     /** Calls refused by the sub-cap — control 4(b). */
     [[nodiscard]] std::size_t refused_capacity() const { return refused_capacity_; }
+    /** Daemon events buffered by `pump()` (e13c-2). */
+    [[nodiscard]] std::uint64_t events_buffered() const { return events_buffered_; }
+    /**
+     * Events DISCARDED because a package fell behind its bound (e13c-2). NON-ZERO IS A PANEL FALLING
+     * BEHIND, not a metric — and it is the Shell-side half of "a drop is observable, never silent".
+     */
+    [[nodiscard]] std::uint64_t events_dropped() const { return events_.dropped_total(); }
+    /** How many subscriptions `package_id` currently holds — control 5's live state. */
+    [[nodiscard]] std::size_t subscriptions_open(const std::string& package_id) const;
+    /** `unsubscribe`/`ack` calls refused because the subId was not this package's — control 5. */
+    [[nodiscard]] std::size_t refused_subscriptions() const { return refused_subscriptions_; }
     /** Is `package_id` currently holding a session? */
     [[nodiscard]] bool has_session(const std::string& package_id) const;
 
@@ -213,6 +300,10 @@ private:
     {
         std::string package_id;
         std::unique_ptr<client::Client> client;
+        // CONTROL 5 (S8) — the subIds THIS package minted, in mint order. Small and linear on
+        // purpose: it is capped at `kMaxSubscriptionsPerPackage`, so a set would cost more than it
+        // saves, and the order is what makes a capacity refusal reproducible.
+        std::vector<std::string> sub_ids;
     };
 
     // The live session for `package_id`, opening one if the cap allows. nullptr + `error_code` /
@@ -223,9 +314,14 @@ private:
     ClientFactory factory_;
     std::size_t max_sessions_;
     std::vector<Session> sessions_;
+    // The e13c-2 bound. OWNED here rather than beside this class because its lifetime is exactly the
+    // sessions' — an event only exists while the connection that delivered it does (see reset()).
+    PackageEventBuffer events_;
     std::size_t calls_forwarded_ = 0;
     std::size_t refused_methods_ = 0;
     std::size_t refused_capacity_ = 0;
+    std::size_t refused_subscriptions_ = 0;
+    std::uint64_t events_buffered_ = 0;
 };
 
 } // namespace context::editor::shell

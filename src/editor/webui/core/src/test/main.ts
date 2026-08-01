@@ -35,6 +35,7 @@ import { panelPortTests } from "./panelport.test.js";
 import { panelVerbsTests } from "./panelverbs.test.js";
 import { panelStateTests } from "./panelstate.test.js";
 import { bootTests } from "./boot.test.js";
+import { packageEventTests } from "./packageevents.test.js";
 
 // AWAITED since M9 e08d: `runTests` is async because the e08d boot cases drive the real, async
 // `bootEditorCore` (see boot.test.ts on why a synchronously-reachable seam would not prove the
@@ -73,6 +74,7 @@ void runTests([
     // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so
     // running them after every other case keeps that out of the others' way.
     ...bootTests,
+    ...packageEventTests,
 ])
     .then(report)
     // The harness catches per-CASE failures; this catches a failure of the RUN ITSELF (or of

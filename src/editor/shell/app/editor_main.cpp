@@ -1270,6 +1270,15 @@ int main(int argc, char** argv)
         // read-only STATE + reconnect with backoff, re-snapshotting on reattach. A daemon restart is
         // stalled at most the ladder's bounded duration. now in ms for the backoff clock.
         lifecycle.pump(static_cast<std::int64_t>(now_us() / 1000));
+        // e13c-2: drain every package session's pushed daemon events into their BOUNDED buffers.
+        //
+        // ⚠ EVERY FRAME, NOT ONLY WHEN editor-core POLLS — that is the whole reason the bound is real.
+        // Between two renderer polls the frames otherwise pile up in `Client::pending_events_`, an
+        // UNBOUNDED deque, so a buffer filled only on demand would leave the actual accumulation point
+        // unbounded and `kMaxBufferedEventsPerPackage` cosmetic (package_sessions.h § pump).
+        // Non-blocking and per-session frame-capped, so a quiet editor pays one 0 ms read per open
+        // package session and a chatty topic cannot hold the frame.
+        (void)package_sessions.pump();
         // e08b: re-derive the session feed's non-owning client view from the lifecycle, immediately
         // after the ONE call that can change it. Attach and reattach hand it the new client (with the
         // new per-connection echo-suppression id); a lost daemon — which DESTROYS the client inside

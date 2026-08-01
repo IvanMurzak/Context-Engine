@@ -53,6 +53,7 @@ add_library(context_editor_shell STATIC
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
     src/panel_host.cpp    # e05d1: the panel-agnostic panel.* surface over the e05b roster (04 §3-§4)
     src/package_sessions.cpp  # e13c-1: per-package BASELINE daemon sessions + panel.daemon.call (04 §5 / 08)
+    src/package_events.cpp    # e13c-2: the BOUNDED per-package event fan-out buffer + panel.events.poll
     src/package_store.cpp     # e13c-3: ~/.context/packages - manifest->Contribution + mount PROVENANCE (04 §3/§5 / 08)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
@@ -238,6 +239,8 @@ set(_context_shell_tests
     test_panel_host    # e05d1: the panel-agnostic roster/render/command/gesture/D6-state surface
     test_package_sessions  # e13c-1: the ALLOWLIST, the hardcoded "read" scope proved against the REAL
                        #         dispatcher, lazy attach + the per-package pool + the sub-cap
+    test_package_events    # e13c-2: the BOUNDED fan-out buffer - the cap driven PAST, drop-oldest,
+                       #         the LOUD gapped/dropped pair, the pump, and panel.events.poll
     test_package_store # e13c-3: the store scan + manifest->Contribution + the scan's INHERITANCE of
                        #         the mount provenance check. NOTE the adversarial provenance suite
                        #         itself lives next door in test_ext_scheme, not here.

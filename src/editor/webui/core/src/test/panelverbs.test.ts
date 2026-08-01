@@ -39,6 +39,9 @@ import {
     PANEL_VERB_STATE_GET,
     PANEL_DAEMON_METHOD_MAX_LENGTH,
     PANEL_VERB_CALL,
+    PANEL_VERB_EVENTS_ACK,
+    PANEL_VERB_EVENTS_SUBSCRIBE,
+    PANEL_VERB_EVENTS_UNSUBSCRIBE,
     PANEL_VERB_STATE_SET,
     PANEL_VERB_THEME_TOKENS,
     PANEL_VERB_UI_SUBSCRIBE,
@@ -292,6 +295,112 @@ async function refusalFrom(fx: VerbFixture, verb: string, params?: unknown): Pro
 // ------------------------------------------------------------------------------------------ cases
 
 export const panelVerbsTests: readonly TestCase[] = [
+    // -------------------------------- the daemon EVENT subscription (M9 e13c-2, design 04 §5 / 05 §1)
+    {
+        // ⚠ PLANT: point any of the three at another daemon method (`subscribe` -> `query`). The
+        // per-verb method assertions below go RED, and only they do — which is what proves the mapping
+        // is real rather than "some forward happened".
+        name: "panelverbs: bridge.events.* forward the THREE subscription methods, each to its own",
+        run: async (): Promise<void> => {
+            const fx = fixture();
+            await call(fx, PANEL_VERB_EVENTS_SUBSCRIBE, { topics: ["diagnostics"] });
+            await call(fx, PANEL_VERB_EVENTS_UNSUBSCRIBE, { subId: "sub-1" });
+            await call(fx, PANEL_VERB_EVENTS_ACK, { subId: "sub-1", seq: 9 });
+
+            assertEqual(fx.daemonCalls.length, 3, "three forwards, one per verb");
+            assertEqual(fx.daemonCalls[0]?.method, "subscribe", "…the daemon's own method names");
+            assertEqual(fx.daemonCalls[1]?.method, "unsubscribe", "…one per verb, never collapsed");
+            assertEqual(fx.daemonCalls[2]?.method, "ack", "…so the Shell allowlist sees exactly three");
+            // THE PARAMS TRAVEL VERBATIM — the contract registry owns those shapes, and a second copy
+            // here would be a drifting parser in front of the daemon's own validator.
+            assertEqual(
+                JSON.stringify(fx.daemonCalls[0]?.params),
+                JSON.stringify({ topics: ["diagnostics"] }),
+                "subscribe's topics reach the daemon unaltered",
+            );
+            assertEqual(
+                JSON.stringify(fx.daemonCalls[2]?.params),
+                JSON.stringify({ subId: "sub-1", seq: 9 }),
+                "ack's cursor reaches the daemon unaltered",
+            );
+            // NO PACKAGE ARGUMENT, for the same structural reason `bridge.call` has none: the closure
+            // IS the package, so no request member could ever name another package's session.
+            for (const forwarded of fx.daemonCalls) {
+                assertEqual(forwarded.arity, 2, "every forward is (method, params) and nothing more");
+            }
+        },
+    },
+    {
+        // ⚠ PLANT: return the outcome instead of throwing (drop the `!outcome.ok` branch in
+        // `forwardDaemon`). This case goes RED on the refusal that never arrives.
+        name: "panelverbs: a daemon refusal on bridge.events.subscribe relays its ORIGINATING code",
+        run: async (): Promise<void> => {
+            const denied = fixture({
+                daemonOutcome: {
+                    ok: false,
+                    code: "scope.denied",
+                    message: "the daemon refused 'subscribe' for package 'hello-panel'",
+                },
+            });
+            const refusal = await refusalFrom(denied, PANEL_VERB_EVENTS_SUBSCRIBE, { topics: [] });
+            // THE SAME MAPPING `bridge.call` uses — written once (`forwardDaemon`) precisely so a
+            // package cannot get a different answer depending on which verb provoked the refusal.
+            assertEqual(
+                refusal.code,
+                PANEL_BRIDGE_REFUSALS.capabilityNotGranted,
+                "scope.denied is a capability question, whichever verb met it",
+            );
+            assert(
+                refusal.message.includes("scope.denied"),
+                "and the originating code travels verbatim, or the enforcement would be unobservable",
+            );
+        },
+    },
+    {
+        // The e13c-2 REGRESSION GUARD for the parent DoD line "`bridge.ui.subscribe` remains denied
+        // without a grant". `bridge.events.*` and `bridge.ui.subscribe` are deliberately DIFFERENT
+        // surfaces — daemon facts vs the editor-LOCAL `editor.ui` bus (D7: `editor.ui` never reaches
+        // the daemon) — so wiring the first must not have wired the second. They share a MECHANISM,
+        // not a route, and this is the assertion that keeps that true.
+        name: "panelverbs: filling bridge.events.* did NOT open bridge.ui.subscribe (D7 / C-F18)",
+        run: async (): Promise<void> => {
+            // ⚠ THE GRANT IS SPY-ANSWERED **TRUE**, WHICH IS THE WHOLE POINT OF THIS CASE. Run with
+            // the default deny-all source, `requireCapability` throws before ANY of the handler body
+            // executes, so "no editor.ui subscription reached the daemon" holds because the path was
+            // never taken — and the mutation this case exists to catch (replacing the handler's
+            // terminal throw with `return await forwardDaemon("subscribe", params)`, i.e. wiring
+            // `editor.ui` onto the daemon, the exact D7 violation) stayed GREEN. Passing the gate is
+            // what puts the code under test in the way: past `requireCapability`, the only thing
+            // between `bridge.ui.subscribe` and the daemon is the refusal below.
+            const grants = grantSpy(true);
+            const fx = fixture({ grants, declaredCapabilities: [CAPABILITY_UI_EVENTS] });
+            // The events verbs answer…
+            await call(fx, PANEL_VERB_EVENTS_SUBSCRIBE, { topics: ["diagnostics"] });
+            assertEqual(fx.daemonCalls.length, 1, "the daemon subscription is live");
+            // …while the ui bus verb is still refused — now by the UNWIRED half, not by the gate.
+            const refusal = await refusalFrom(fx, PANEL_VERB_UI_SUBSCRIBE, {
+                topics: ["editor.ui.focus"],
+            });
+            assertEqual(
+                grants.asked,
+                [`${PACKAGE_ID}/${CAPABILITY_UI_EVENTS}`],
+                "the ui_events gate really ran and really said yes — the positive control",
+            );
+            assertEqual(
+                refusal.code,
+                PANEL_BRIDGE_REFUSALS.verbNotGranted,
+                "past the gate the editor.ui surface is still not wired for package panels",
+            );
+            assert(
+                refusal.message.includes("not wired"),
+                "…and it says so, rather than answering a daemon fact it has no route to",
+            );
+            // AND IT NEVER REACHED THE DAEMON. The positive artifact for D7, now load-bearing: with
+            // the grant SATISFIED, a `ui.subscribe` wired onto the daemon fan-out would show up as a
+            // SECOND forward here, so this count is what pins `editor.ui` to the LOCAL bus.
+            assertEqual(fx.daemonCalls.length, 1, "no editor.ui subscription was forwarded to the daemon");
+        },
+    },
     // ------------------------------------- the daemon fan-in (M9 e13c-1, design 04 §5 / 08 §2)
     {
         // ⚠ PLANT: make the handler read a package id off `params` and hand it to `daemonCall` (i.e.

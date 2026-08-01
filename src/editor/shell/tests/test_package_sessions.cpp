@@ -212,7 +212,16 @@ void the_allowlist_is_closed_and_small()
     CHECK(shell::is_panel_callable_daemon_method("query"));
     CHECK(shell::is_panel_callable_daemon_method("editor.scene-tree"));
     CHECK(shell::is_panel_callable_daemon_method("editor.inspect"));
-    CHECK(shell::panel_callable_daemon_methods().size() == 4);
+    // M9 e13c-2 — SAYING SO, as the line above requires. `subscribe` / `unsubscribe` / `ack` were held
+    // out by e13c-1 for ONE stated reason: "the fan-OUT buffer that makes them safe to expose (a bound,
+    // a drop policy, an ack cursor) is e13c-2's". That buffer now exists (`package_events.h`), so the
+    // reason is discharged rather than waived, and the three arrive TOGETHER — `subscribe` without
+    // `ack` pins the daemon's ring retention, and without `unsubscribe` every re-subscribe leaks a
+    // subId. Their own suite is `editor-shell-test_package_events`.
+    CHECK(shell::is_panel_callable_daemon_method("subscribe"));
+    CHECK(shell::is_panel_callable_daemon_method("unsubscribe"));
+    CHECK(shell::is_panel_callable_daemon_method("ack"));
+    CHECK(shell::panel_callable_daemon_methods().size() == 7);
 
     // The write / build families — refused HERE as well as by the dispatcher. Both controls,
     // independently: that redundancy IS S4.
@@ -220,9 +229,10 @@ void the_allowlist_is_closed_and_small()
     CHECK(!shell::is_panel_callable_daemon_method("edit"));
     CHECK(!shell::is_panel_callable_daemon_method("build"));
     CHECK(!shell::is_panel_callable_daemon_method("package.add"));
-    // The e13c-2 surface, held out on purpose (an unbounded fan-out buffer is the reason).
-    CHECK(!shell::is_panel_callable_daemon_method("subscribe"));
-    CHECK(!shell::is_panel_callable_daemon_method("ack"));
+    // ⚠ THE e13c-2 SURFACE MOVED — it is asserted PRESENT above, not absent here. Two entries that
+    // said `!subscribe` / `!ack` lived at this spot until the bound existed; leaving them would have
+    // asserted the opposite of the shipping build. What stays here is the write/build family, whose
+    // absence is permanent.
     // S7: a method the scope table does NOT classify defaults to `read_query`, so the allowlist is
     // the ONLY thing standing between a panel and an unrecognised-but-backend-served verb. Pinned as
     // a pair so the two facts cannot drift apart.
