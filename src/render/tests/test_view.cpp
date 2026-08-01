@@ -37,12 +37,15 @@ namespace
 // fixtures below, on this host: 9.5e-7 for the direct view/projection asserts, 3.6e-5 ABSOLUTE for
 // the 3D round trip (on world coordinates of magnitude ~21), 2.9e-6 for the 2D round trip, 1.1e-5
 // for the pick-ray incidence distance and its direction normalization, 6.5e-6 for the pick-ray
-// reprojection. Each constant sits 8x-21x above its measurement — loose enough to survive another
-// toolchain's rounding, and orders of magnitude BELOW what any wrong matrix produces here (the
-// smallest planted defect in this file's PLANT table moves a projected coordinate by ~0.06 and
-// pushes the round trip off by ~1).
+// reprojection. Those figures are THIS host's (Apple clang / arm64), which contracts multiply-adds
+// into FMA by default; a toolchain that does not contract (MSVC x64 at /fp:precise) accumulates
+// more. Re-measured under strictly-rounded float32 with no contraction, the 3D round trip reaches
+// 9.9e-5 — so kRoundTripEps carries the thinnest margin of any constant here and is set from THAT
+// figure, not from this host's. Every constant still sits orders of magnitude BELOW what a wrong
+// matrix produces (the smallest defect planted against these assertions moves a projected
+// coordinate by ~0.06 and pushes the round trip off by ~1).
 constexpr float kEps = 2.0e-5f;
-constexpr float kRoundTripEps = 3.0e-4f;
+constexpr float kRoundTripEps = 1.0e-3f;
 constexpr float kRayEps = 1.0e-4f;
 constexpr float kReprojectEps = 1.0e-4f;
 
@@ -238,6 +241,17 @@ void test_projection_pins_frustum_edges()
     // aspect — an aspect divide applied upside-down fails here.
     const Vec3 narrow = project(v, target(), point_in_front(v, depth, depth * tan_half, 0.0f));
     CHECK(near_f(narrow.x, 1.0f / aspect)); // PROJECT aspect is applied the right way up
+
+    // The DEPTH RANGE, absolutely. Everything above is invariant to it, and so is every round trip,
+    // so without these projection_matrix could hand perspective() a doubled, halved or SWAPPED
+    // near/far and this file would stay green. test_math pins perspective() given the right two
+    // floats; these pin that the View seam actually passes them.
+    CHECK(near_f(project(v, target(), point_in_front(v, kNear, 0.0f, 0.0f)).z, 0.0f)); // near -> 0
+    CHECK(near_f(project(v, target(), point_in_front(v, kFar, 0.0f, 0.0f)).z, 1.0f));  // far  -> 1
+    // The HARMONIC mean lands at 0.5 -- the projective hallmark, and a second, independent way for a
+    // scaled near/far to show up (an affine depth row would put 0.5 at the arithmetic mean, 60.1).
+    const float harmonic = 2.0f * kNear * kFar / (kNear + kFar);
+    CHECK(near_f(project(v, target(), point_in_front(v, harmonic, 0.0f, 0.0f)).z, 0.5f));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -300,6 +314,123 @@ void test_two_d_mode_is_orthographic()
     CHECK(std::fabs(pa.x - pb.x) > 0.1f); // PERSPECTIVE depth DOES move a point horizontally
 }
 
+void test_two_d_framing_pins_the_ortho_box()
+{
+    // The 2D box is `ortho_half_height` tall and aspect-times-that wide, centred on the camera.
+    // These are ABSOLUTE assertions, and the 2D path needs its own: every other 2D case here is
+    // blind to how the box is SIZED. The round trips invert whatever the projection did; the
+    // ortho/perspective contrasts read one projection on BOTH sides of the comparison, so a common
+    // factor cancels. Ignore ortho_half_height outright, drop the aspect, or apply it upside-down,
+    // and all of them stay green — which is exactly what test_projection_pins_frustum_edges rules
+    // out for the perspective path and nothing ruled out for this one.
+    const View v = fixture_view_2d();
+    const float half_h = v.projection.ortho_half_height;
+    const float aspect = 16.0f / 9.0f;
+    const float half_w = half_h * aspect;
+    const float depth = 12.0f; // anywhere inside the 2D fixture's [near_z, far_z] = [0, 50]
+
+    // The TOP edge of the box -> NDC y +1. This is the assertion that reads ortho_half_height at
+    // all: hardcode the half-height and the framed point stops landing on the edge.
+    const Vec3 box_top = project(v, target(), point_in_front(v, depth, 0.0f, half_h));
+    CHECK(near_f(box_top.y, 1.0f)); // ORTHO 2D box is ortho_half_height tall
+    CHECK(near_f(box_top.x, 0.0f));
+
+    // The RIGHT edge -> NDC x +1: the framed width really is the aspect ratio times that height.
+    const Vec3 box_right = project(v, target(), point_in_front(v, depth, half_w, 0.0f));
+    CHECK(near_f(box_right.x, 1.0f)); // ORTHO 2D box is aspect-times-half-height wide
+    CHECK(near_f(box_right.y, 0.0f));
+
+    // Feeding the VERTICAL half-extent horizontally must land at 1/aspect (0.5625) -- never 1 (no
+    // aspect at all) and never aspect (an upside-down divide). This is the assertion that separates
+    // those two wrong answers from each other, mirroring the perspective case above.
+    const Vec3 box_narrow = project(v, target(), point_in_front(v, depth, half_h, 0.0f));
+    CHECK(near_f(box_narrow.x, 1.0f / aspect)); // ORTHO 2D aspect is applied the right way up
+
+    // The 2D DEPTH RANGE, absolutely (near_z 0, far_z 50 on this fixture). Ortho depth is AFFINE, so
+    // the ARITHMETIC midpoint reads 0.5 -- unlike the 3D path's harmonic one, which is itself a
+    // second discriminator between the two projections.
+    CHECK(near_f(project(v, target(), point_in_front(v, 0.0f, 0.0f, 0.0f)).z, 0.0f));  // near -> 0
+    CHECK(near_f(project(v, target(), point_in_front(v, 50.0f, 0.0f, 0.0f)).z, 1.0f)); // far  -> 1
+    CHECK(near_f(project(v, target(), point_in_front(v, 25.0f, 0.0f, 0.0f)).z, 0.5f)); // affine mid
+}
+
+void test_view_matrix_ignores_camera_scale()
+{
+    // view.h states that a camera's SCALE is deliberately ignored -- the projection owns framing.
+    // Every other fixture in this file leaves scale at its default 1,1,1, so no assertion here could
+    // observe that contract being broken: honouring the scale would make the view matrix
+    // non-orthonormal and quietly reframe every viewport authored from a scaled camera transform.
+    View scaled = fixture_view_3d();
+    scaled.transform.scale[0] = 3.0f;
+    scaled.transform.scale[1] = 0.5f;
+    scaled.transform.scale[2] = 2.0f;
+
+    const Mat4 plain = view_matrix(fixture_view_3d());
+    const Mat4 with_scale = view_matrix(scaled);
+    for (int i = 0; i < 16; ++i)
+    {
+        // VIEW MATRIX camera scale changes nothing
+        CHECK(near_f(with_scale.m[static_cast<std::size_t>(i)],
+                     plain.m[static_cast<std::size_t>(i)]));
+    }
+
+    // ...and end to end, so a scale honoured anywhere downstream of view_matrix also shows up.
+    const Vec3 p = point_in_front(scaled, 6.0f, 1.5f, -0.75f);
+    const Vec3 a = project(fixture_view_3d(), target(), p);
+    const Vec3 b = project(scaled, target(), p);
+    CHECK(near_f(a.x, b.x) && near_f(a.y, b.y) && near_f(a.z, b.z));
+}
+
+void test_view_matrix_absolute_world_anchor()
+{
+    // ⚠ This file's probe helpers (camera_axis / point_in_front) build their points through the SAME
+    // rotation_from_quaternion that view_matrix transposes, so the two cancel: transposing that
+    // function's 3x3 block -- a HANDEDNESS inversion -- leaves every other assertion in this file
+    // green. (test_math.cpp's quarter-turn case is the discriminator, but it is a different ctest
+    // binary.) This case is the one anchor here that names literal WORLD vectors instead, so the
+    // handedness is pinned inside this file too.
+    View axis_aligned;                                 // at the world origin, identity scale
+    axis_aligned.transform.rotation[2] = std::sqrt(0.5f); // +90 degrees about +Z
+    axis_aligned.transform.rotation[3] = std::sqrt(0.5f);
+
+    // The camera is rotated +90 deg about Z, so the VIEW matrix applies -90 deg: world +X -> view -Y.
+    const Mat4 vm = view_matrix(axis_aligned);
+    const Vec3 x_axis = transform_point(vm, Vec3{1.0f, 0.0f, 0.0f});
+    CHECK(near_f(x_axis.y, -1.0f)); // VIEW MATRIX world +X lands on view -Y, not +Y
+    CHECK(near_f(x_axis.x, 0.0f) && near_f(x_axis.z, 0.0f));
+}
+
+void test_three_d_view_with_a_two_d_near_plane_stays_invertible()
+{
+    // Projection keeps BOTH framings so a viewport can toggle 2D <-> 3D without discarding either,
+    // and a 2D view legitimately sits at near_z = 0. Toggling THAT view to 3D builds a perspective
+    // frustum whose depth and projective rows coincide: determinant 0, inverse() falling back to the
+    // identity, and unproject() returning its NDC argument verbatim as a world point. It is FINITE,
+    // so test_degenerate_views_are_finite is structurally blind to it -- the failure is a silently
+    // wrong answer, not a NaN, which is exactly the shape picking would inherit.
+    View toggled = fixture_view_2d(); // near_z = 0
+    toggled.mode = ViewMode::three_d;
+
+    // The bound is MEASURED, not nominal, and it has to be: with the guard this determinant is
+    // -0.259, and with the guard removed the singular product still computes to ~4.9e-7 rather than
+    // to exactly 0, because the cofactor expansion accumulates float error. A near-zero epsilon
+    // therefore passes in BOTH cases and proves nothing. 1e-3 sits ~260x below the healthy value and
+    // ~2000x above the singular one -- do not "tighten" it back toward zero.
+    CHECK(std::fabs(determinant(view_proj(toggled, target()))) > 1.0e-3f); // 3D VIEW not singular
+
+    // The real proof, and it fails by a mile rather than by an epsilon: under the singular matrix
+    // unproject() returned the NDC point, which is nowhere near the world point that produced it.
+    const Vec3 p = point_in_front(toggled, 9.0f, 2.0f, -1.25f);
+    const Vec3 back = unproject(toggled, target(), project(toggled, target(), p));
+    CHECK(near_f(back.x, p.x, kRoundTripEps) && near_f(back.y, p.y, kRoundTripEps) &&
+          near_f(back.z, p.z, kRoundTripEps)); // 3D VIEW round trip survives a 2D near plane
+
+    // ...and pick_ray yields a real view ray rather than the identity fallback's constant +Z.
+    const Ray r = pick_ray(toggled, RegionPoint{1417, 322}, target());
+    const Vec3 forward = camera_axis(toggled, Vec3{0.0f, 0.0f, -1.0f});
+    CHECK(dot(r.direction, forward) > 0.5f); // 3D VIEW pick ray still looks where the camera looks
+}
+
 // ---------------------------------------------------------------------------------------------
 // pick_ray
 // ---------------------------------------------------------------------------------------------
@@ -319,8 +450,10 @@ void test_pick_ray_passes_through_the_picked_point()
 
     // A world point on that pixel's line of sight, well inside the frustum.
     const Vec3 picked = unproject(v, target(), Vec3{ndc_x, ndc_y, 0.97f});
-    // Cross-check through the FORWARD direction, which test_projection_pins_frustum_edges pins
-    // independently: this really is the world point that pixel shows.
+    // NOTE what this reprojection does and does not establish: it is project(unproject(ndc)), which
+    // closes for ANY invertible view-projection. It confirms that inverse() inverts and that the
+    // pixel -> NDC convention restated above is the one in force -- NOT that the projection itself is
+    // right. That is pinned independently by test_projection_pins_frustum_edges.
     const Vec3 reprojected = project(v, target(), picked);
     // PICK RAY probe point reprojects to its own pixel
     CHECK(near_f(reprojected.x, ndc_x, kReprojectEps));
@@ -334,6 +467,17 @@ void test_pick_ray_passes_through_the_picked_point()
     CHECK(along > 0.0f); // PICK RAY the picked point is IN FRONT of the ray origin
     const float off_axis = length(sub(to_point, scale(ray.direction, along)));
     CHECK(off_axis < kRayEps); // PICK RAY passes THROUGH the picked point
+
+    // The ORIGIN lies on the NEAR plane, which view.h promises and nothing above can see: the
+    // assertions so far are all invariant to WHICH depth pick_ray unprojects for its origin,
+    // because a projective map sends the whole constant-(x,y) NDC line to one world line. Move the
+    // origin half-way into the frustum and every one of them still holds; this one does not.
+    CHECK(near_f(project(v, target(), ray.origin).z, 0.0f, kReprojectEps)); // PICK RAY origin on near plane
+
+    // (The FAR probe depth is deliberately NOT asserted: any far depth other than the near one
+    // yields the same world line and therefore the same normalized direction, so no assertion could
+    // distinguish them. A far probe EQUAL to the near one collapses the direction to zero, which the
+    // normalization check above already catches.)
 }
 
 void test_pick_ray_flips_the_pixel_y_axis()
@@ -424,6 +568,10 @@ int main()
     test_round_trip_3d();
     test_round_trip_2d();
     test_two_d_mode_is_orthographic();
+    test_two_d_framing_pins_the_ortho_box();
+    test_view_matrix_ignores_camera_scale();
+    test_view_matrix_absolute_world_anchor();
+    test_three_d_view_with_a_two_d_near_plane_stays_invertible();
     test_pick_ray_passes_through_the_picked_point();
     test_pick_ray_flips_the_pixel_y_axis();
     test_pick_ray_is_parallel_in_two_d_and_divergent_in_three_d();

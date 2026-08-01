@@ -22,6 +22,7 @@
 
 #include <array>
 #include <cmath>
+#include <cstddef>
 
 namespace context::render
 {
@@ -69,9 +70,10 @@ struct Vec3
 }
 
 // normalize() of a (near-)zero vector returns the zero vector rather than NaN -- callers that must
-// reject a degenerate direction check length() first (the extract does; see extract.cpp). This is
-// the house rule the degenerate guards below all follow: return something FINITE and document how a
-// caller asks whether the input was degenerate, rather than propagating an inf/NaN.
+// reject a degenerate direction test the squared length up front (extract.cpp does exactly that to
+// authored DirectionalLight directions, in a check whose `!(len_sq > eps)` form also rejects NaN).
+// This is the house rule the degenerate guards below all follow: return something FINITE and
+// document how a caller asks whether the input was degenerate, rather than propagating an inf/NaN.
 [[nodiscard]] inline Vec3 normalize(Vec3 a)
 {
     const float len = length(a);
@@ -112,6 +114,12 @@ struct Mat4
 // Orthographic projection of the view-space box onto the WebGPU clip cube (x,y in [-1,1] y-up,
 // z in [0,1]) -- the 3D analog of sprite::ortho, with near/far measured along -Z (view forward).
 //
+// WARNING -- "analog", NOT the same function renamed: sprite::ortho's box is WORLD space with +z
+// running into it, so its depth row carries the OPPOSITE sign (+1/fn there, -1/fn here). Both are
+// correct for their own input convention. Do NOT collapse sprite/ortho.h into a re-export of this
+// header the way lit_math.h was -- that shim was sound only because lit's math was identical, and
+// here it would silently invert every 2D sprite depth.
+//
 // A degenerate (zero-extent) box yields a FINITE identity-scale matrix on the collapsed axis rather
 // than a divide-by-zero, matching sprite::ortho's guard: a zero-sized viewport is a real transient
 // state (a panel mid-resize, a minimized window) and must not poison the frame with NaNs.
@@ -127,10 +135,22 @@ struct Mat4
 // Degenerate inputs (a non-positive or non-finite aspect, a fov at or past the half-turn, a
 // zero-depth range) fall back to finite defaults on that axis rather than yielding inf/NaN -- the
 // same guard ortho() applies, for the same reason.
+//
+// SCOPE of that promise, because the difference matters to whoever feeds this from authored data:
+// it covers a collapsed/zero EXTENT and a non-finite ASPECT. It does NOT sanitize a near_z/far_z
+// (or, in ortho(), a box bound) that is itself NaN or infinite -- those flow into the translation
+// terms, which no denominator guard can rescue, and the result is a NaN matrix. A caller turning
+// opaque authored/serialized camera parameters into a Projection must validate them first; these
+// functions are the math, not the input policy.
 [[nodiscard]] Mat4 perspective(float fov_y_radians, float aspect, float near_z, float far_z);
 
 // The determinant of `m`. A caller that must REJECT a singular transform (rather than accept
 // inverse()'s identity fallback below) tests this against its own tolerance first.
+//
+// NECESSARY but not SUFFICIENT in float: a determinant can be non-zero and finite while inverse()
+// still bails to the identity, because a SUBNORMAL determinant makes 1/det overflow and the result
+// sweep then rejects it (test_math pins exactly that case). Treat a non-zero determinant as "not
+// obviously singular", never as proof that the inverse below is a real inverse.
 [[nodiscard]] float determinant(const Mat4& m);
 
 // The inverse of `m` (full 4x4 cofactor expansion -- `m` is NOT assumed affine, because a

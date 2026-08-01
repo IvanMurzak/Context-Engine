@@ -23,6 +23,7 @@
 #include "render_test.h"
 
 #include <cmath>
+#include <limits>
 
 using namespace context::render;
 
@@ -36,7 +37,7 @@ namespace
 // 1.19e-7 for the direct projection asserts, 2.27e-5 for mul(M, inverse(M)) vs the identity. The
 // constants sit ~17x and ~9x above those — loose enough to survive another toolchain's rounding,
 // and one to four orders of magnitude BELOW the error any wrong matrix here produces (the smallest
-// planted defect in this file's PLANT table moves a projected coordinate by ~0.3).
+// defect planted against these assertions moves a projected coordinate by ~0.3).
 constexpr float kEps = 2.0e-6f;
 constexpr float kInverseEps = 2.0e-4f;
 
@@ -123,6 +124,32 @@ void test_perspective_degenerate_inputs_are_finite()
     CHECK(all_finite(perspective(kFovY, 0.0f, kNear, kFar)));        // zero aspect
     CHECK(all_finite(perspective(kFovY, kAspect, 5.0f, 5.0f)));      // zero depth range
     CHECK(all_finite(perspective(0.0f, 0.0f, 0.0f, 0.0f)));          // everything at once
+
+    // ...and the fallback VALUES, not merely finiteness. A guard that substituted some other
+    // constant would keep every all_finite() above green while silently reframing the scene, so
+    // finiteness alone cannot tell a working guard from a broken one -- the same reason the
+    // non-finite-aspect case below asserts a value rather than a finiteness sweep.
+    CHECK(near_f(perspective(0.0f, kAspect, kNear, kFar).at(1, 1), 1.0f)); // zero fov -> tan_half 1
+    CHECK(near_f(perspective(kFovY, kAspect, 5.0f, 5.0f).at(2, 2), -5.0f)); // zero range -> nf -1
+}
+
+void test_perspective_non_finite_aspect_falls_back_to_square()
+{
+    // The header promises a NON-FINITE aspect falls back, and finiteness is the wrong instrument to
+    // prove it with: drop the isfinite() half of that guard and an infinite aspect still yields a
+    // perfectly FINITE matrix, because f/inf is 0. It is silently a degenerate projection that
+    // frames nothing. So assert the fallback's actual observable -- the same matrix an aspect of 1
+    // gives -- and pin that column absolutely first, so the comparison cannot be satisfied by two
+    // matrices that are both zero.
+    const float f = 1.0f / std::tan(0.5f * kFovY);
+    const Mat4 square = perspective(kFovY, 1.0f, kNear, kFar);
+    CHECK(near_f(square.at(0, 0), f)); // an aspect of 1 leaves the x scale at 1/tan(fov/2)
+
+    const float infinite = std::numeric_limits<float>::infinity();
+    const Mat4 fallback = perspective(kFovY, infinite, kNear, kFar);
+    CHECK(all_finite(fallback));
+    CHECK(near_f(fallback.at(0, 0), f)); // NON-FINITE aspect falls back to 1, not to a zero scale
+    CHECK(near_f(fallback.at(1, 1), square.at(1, 1)));
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -216,6 +243,19 @@ void test_determinant_agrees_with_invertibility()
     Mat4 singular;
     singular.m[5] = 0.0f; // collapse one axis: rank 3
     CHECK(near_f(determinant(singular), 0.0f)); // DETERMINANT of a collapsed axis is 0
+
+    // Every fixture above is DIAGONAL, and for a diagonal matrix the determinant is just the product
+    // of the diagonal -- so all three pass against an implementation that only ever multiplies those
+    // four entries, and the cofactor expansion goes unpinned. A proper rotation has determinant
+    // exactly 1 AND full off-diagonal structure; the quarter turn's own diagonal product is 0.
+    const float s = std::sqrt(0.5f);
+    CHECK(near_f(determinant(rotation_from_quaternion(0.0f, 0.0f, s, s)), 1.0f));
+
+    // The composed fixture is the only matrix here with a non-zero fourth column, which is the one
+    // cofactor term the cases above never reach. look_at is rigid (determinant 1), so the product's
+    // determinant is the projection's own.
+    CHECK(near_f(determinant(fixture_view_proj()),
+                 determinant(perspective(kFovY, kAspect, kNear, kFar)), 1.0e-4f));
 }
 
 void test_inverse_of_a_singular_matrix_is_the_identity()
@@ -242,6 +282,16 @@ void test_inverse_that_would_overflow_stays_finite()
     tiny.m[0] = 1.0e-39f;
     const Mat4 subnormal_inverse = inverse(tiny);
     CHECK(all_finite(subnormal_inverse)); // SUBNORMAL determinant still yields a finite inverse
+
+    // The identity is the strictly stronger claim, and it is available here for the same reason the
+    // overflow case below asserts it: finiteness alone cannot separate the fallback from a matrix of
+    // plausible-looking garbage.
+    Mat4 identity;
+    for (int i = 0; i < 16; ++i)
+    {
+        CHECK(near_f(subnormal_inverse.m[static_cast<std::size_t>(i)],
+                     identity.m[static_cast<std::size_t>(i)])); // SUBNORMAL inverse is the identity
+    }
 }
 
 void test_inverse_of_an_overflowing_determinant_is_the_identity()
@@ -318,6 +368,7 @@ int main()
     test_perspective_depth_is_projective_not_linear();
     test_perspective_frustum_edges_and_aspect();
     test_perspective_degenerate_inputs_are_finite();
+    test_perspective_non_finite_aspect_falls_back_to_square();
     test_ortho_asymmetric_box_pins_principal_point();
     test_ortho_degenerate_box_is_finite();
     test_inverse_round_trips_to_identity();

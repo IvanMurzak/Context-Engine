@@ -2,12 +2,15 @@
 
 #include "context/render/view.h"
 
+#include <cmath>
+#include <cstddef>
+
 namespace context::render
 {
 
 float aspect_ratio(Extent2D target)
 {
-    if (target.width == 0u || target.height == 0u)
+    if (is_empty(target)) // rhi.h owns this predicate precisely so every layer stops open-coding it
     {
         return 1.0f; // a zero-extent target (mid-resize, minimized) frames a square, never a NaN
     }
@@ -51,7 +54,19 @@ Mat4 projection_matrix(const View& view, Extent2D target)
     const Projection& p = view.projection;
     if (view.mode == ViewMode::three_d)
     {
-        return perspective(p.fov_y_radians, aspect, p.near_z, p.far_z);
+        // A perspective frustum needs its near plane STRICTLY in front of the eye. At near_z <= 0 the
+        // depth row and the projective row coincide, so the view-projection is SINGULAR: inverse()
+        // takes its identity fallback and unproject() / pick_ray() hand back the NDC point dressed
+        // up as world space -- finite, so a finiteness check cannot see it, and completely wrong.
+        //
+        // This is reachable with no authoring error at all. Projection deliberately keeps BOTH
+        // framings so a viewport can toggle between modes without discarding either, and a 2D view
+        // legitimately sits at near_z = 0 (the z = 0 sprite plane at clip depth 0). Toggling that
+        // same view to 3D is exactly the path. projection_matrix is where that policy belongs:
+        // perspective() is the math, and math.h says so.
+        const float near_z =
+            (std::isfinite(p.near_z) && p.near_z > 0.0f) ? p.near_z : Projection{}.near_z;
+        return perspective(p.fov_y_radians, aspect, near_z, p.far_z);
     }
     // 2D: an orthographic box centred on the camera, half_height tall, aspect-times-that wide.
     const float half_h = p.ortho_half_height;

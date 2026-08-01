@@ -14,7 +14,7 @@
 // e11g consumes pick_ray to drive `editor select`.
 //
 // SCOPE (e11a): value type + math only. No render target, no render pass, no extract change, no
-// shell wiring, no spatial index -- those are e11b / e11c / e11e / e11g.
+// shell wiring, no spatial index -- those are later children of the e11 viewport task.
 //
 // Conventions:
 //   * World / view / clip conventions are context/render/math.h's (right-handed, y-up, view -Z
@@ -86,7 +86,12 @@ struct View
     ViewType type = ViewType::scene;
     // Which viewport this view renders. 0 = unassigned, the same "0 = slot unused" convention the
     // snapshot's mesh/texture handles use. The Shell's string region id maps onto it at the binding
-    // seam (e11e), so nothing here needs to allocate a string per frame.
+    // seam, so nothing here needs to allocate a string per frame.
+    //
+    // WARNING -- this is a render-side SLOT, session-local and never persisted. It is NOT the daemon's
+    // viewport id, which is a std::string (EditorSessionState::set_camera / the "viewportId" JSON
+    // field), nor the Shell's string region id. Same word, different identifier: the binding layer
+    // owns the map between them, and nothing may derive one from the other.
     std::uint32_t viewport_id = 0;
 };
 
