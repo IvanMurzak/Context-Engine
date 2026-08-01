@@ -17,7 +17,6 @@
 #include "render_test_rhi.h"
 
 #include <cstdint>
-#include <memory>
 
 using namespace context::render;
 
@@ -51,6 +50,13 @@ namespace
 // count, size and pointer-distinctness assertion in this file.
 [[nodiscard]] TextureFormat device_format_of(const ITexture* texture)
 {
+    if (texture == nullptr)
+    {
+        // CHECK accumulates rather than aborting, so a failed non-null assertion above still falls
+        // through to here. Returning a sentinel keeps that a legible CHECK failure instead of a
+        // sanitizer SEGV on the ASan+UBSan leg, matching device_size_of()'s guard.
+        return TextureFormat::RGBA8Unorm;
+    }
     return static_cast<const rendertest::FakeTexture*>(texture)->format();
 }
 
@@ -255,6 +261,16 @@ void test_resize_to_the_same_size_does_not_reallocate()
     CHECK(registry.size_of(a).height == 51u);
     CHECK(device_size_of(registry.get_color(a)).height == 51u);
     CHECK(device_size_of(registry.get_depth(a)).height == 51u);
+
+    // A WIDTH-only change reallocates too, and this step is the only thing in the file that says so:
+    // every other resize anywhere in these suites moves the HEIGHT, so dropping the width term from
+    // the early-out's comparison would leave all of them green while the target silently kept its
+    // old width forever -- exactly what dragging a vertical splitter produces.
+    CHECK(registry.resize(a, Extent2D{101, 51}));
+    CHECK(registry.textures_created() == 6u);
+    CHECK(registry.size_of(a).width == 101u);
+    CHECK(device_size_of(registry.get_color(a)).width == 101u);
+    CHECK(device_size_of(registry.get_depth(a)).width == 101u);
 }
 
 void test_resize_to_a_degenerate_extent_keeps_the_last_valid_configuration()
@@ -388,6 +404,116 @@ void test_all_targets_are_destroyed_when_the_registry_dies()
     CHECK(rendertest::g_live_fake_textures - base_live == 0);
 }
 
+// A device REFUSES an allocation when it is exhausted or lost. Every branch below is unreachable
+// without FakeDevice::set_texture_creation_fails(), which is why the fail-closed contracts they
+// implement had no coverage at all -- the same gap set_import_always_fails() was added to close for
+// the external-texture seam.
+void test_a_create_the_device_refuses_burns_no_slot()
+{
+    rendertest::FakeDevice device;
+    const int base_live = rendertest::g_live_fake_textures;
+    ViewportTargetRegistry registry(device);
+
+    device.set_texture_creation_fails(true);
+    CHECK(registry.create(Extent2D{64, 64}) == kInvalidViewportTarget);
+    // Nothing was half-built: no live target, no surviving texture, and the registry's own
+    // allocation counter never moved.
+    CHECK(registry.live_targets() == 0u);
+    CHECK(registry.textures_created() == 0u);
+    CHECK(rendertest::g_live_fake_textures - base_live == 0);
+
+    // The POSITIVE artifact that the refusal handed the slot BACK rather than burning it: the next
+    // successful create lands on slot 1 and the registry still holds exactly one slot. A create that
+    // leaked the slot would put this target on slot 2 with slot_count() == 2.
+    device.set_texture_creation_fails(false);
+    const ViewportTargetId a = registry.create(Extent2D{64, 64});
+    CHECK(a != kInvalidViewportTarget);
+    CHECK(viewport_target_slot(a) == 1u);
+    CHECK(registry.contains(a));
+    CHECK(registry.slot_count() == 1u);
+    CHECK(registry.live_targets() == 1u);
+    CHECK(rendertest::g_live_fake_textures - base_live == 2);
+}
+
+void test_a_resize_the_device_refuses_keeps_the_last_valid_target()
+{
+    rendertest::FakeDevice device;
+    const int base_live = rendertest::g_live_fake_textures;
+    ViewportTargetRegistry registry(device);
+
+    const ViewportTargetId a = registry.acquire_for(7u, Extent2D{64, 48});
+    CHECK(a != kInvalidViewportTarget);
+    CHECK(registry.contains(a));
+    CHECK(rendertest::g_live_fake_textures - base_live == 2);
+
+    device.set_texture_creation_fails(true);
+    CHECK(!registry.resize(a, Extent2D{128, 96}));
+
+    // THE claim: a refused resize leaves the target exactly as it was. Freeing the old pair before
+    // allocating the new one would instead leave the entry LIVE with four null pointers -- so
+    // contains(a) would still be true while color_view(a) returned nullptr, and the caller shape
+    // these suites themselves use, `render_viewport_view(..., *registry.color_view(a), ...)`,
+    // dereferences it. Each accessor is asserted, because contains() alone cannot see that state.
+    CHECK(registry.contains(a));
+    CHECK(registry.get_color(a) != nullptr);
+    CHECK(registry.get_depth(a) != nullptr);
+    CHECK(registry.color_view(a) != nullptr);
+    CHECK(registry.depth_view(a) != nullptr);
+
+    // ...and it is the ORIGINAL configuration, not a zeroed one -- read off the DEVICE as well as
+    // the registry, so a bookkeeping-only survival cannot satisfy this.
+    CHECK(registry.size_of(a).width == 64u && registry.size_of(a).height == 48u);
+    CHECK(device_size_of(registry.get_color(a)).width == 64u);
+    CHECK(device_size_of(registry.get_depth(a)).height == 48u);
+    // Exactly the one pair is still alive: a leak would read 4, a destroy-then-fail would read 0.
+    CHECK(rendertest::g_live_fake_textures - base_live == 2);
+    CHECK(registry.live_targets() == 1u);
+    CHECK(registry.target_for(7u) == a);
+
+    // The refusal cost nothing permanent: once the device recovers the SAME handle resizes.
+    device.set_texture_creation_fails(false);
+    CHECK(registry.resize(a, Extent2D{128, 96}));
+    CHECK(registry.size_of(a).width == 128u);
+    CHECK(device_size_of(registry.get_color(a)).width == 128u);
+    CHECK(rendertest::g_live_fake_textures - base_live == 2);
+}
+
+void test_a_slot_survives_generation_wraparound()
+{
+    rendertest::FakeDevice device;
+    ViewportTargetRegistry registry(device);
+
+    // A handle carries 16 bits of generation, and `free_` is LIFO, so one viewport opened and closed
+    // repeatedly recycles the SAME slot every time. Unmasked, cycle 65536 stored a generation whose
+    // encoded form truncated to 0: resolve() then compared 65536 against 0 and refused every handle
+    // the slot ever minted again -- the slot was dead for good, live_targets() over-counted, and
+    // create() returned a non-zero handle that its own contains() called false. One cycle PAST the
+    // wrap is what discriminates; anything short of it passes with or without the mask.
+    bool every_cycle_resolved = true;
+    for (std::uint32_t i = 0; i <= (kViewportTargetSlotMask + 1u); ++i)
+    {
+        const ViewportTargetId id = registry.create(Extent2D{8, 8});
+        if (id == kInvalidViewportTarget || !registry.contains(id))
+        {
+            every_cycle_resolved = false;
+            break;
+        }
+        registry.release(id);
+    }
+    CHECK(every_cycle_resolved);
+
+    // The positive artifact after the wrap: the recycled slot still hands out a target that RESOLVES
+    // and carries the extent it was asked for.
+    const ViewportTargetId after = registry.create(Extent2D{16, 32});
+    CHECK(after != kInvalidViewportTarget);
+    CHECK(viewport_target_slot(after) == 1u); // still the one recycled slot
+    CHECK(registry.contains(after));
+    CHECK(registry.slot_count() == 1u);
+    CHECK(registry.live_targets() == 1u);
+    CHECK(device_size_of(registry.get_color(after)).width == 16u);
+    CHECK(device_size_of(registry.get_depth(after)).height == 32u);
+}
+
 } // namespace
 
 int main()
@@ -403,5 +529,8 @@ int main()
     test_release_for_frees_the_viewports_target_and_forgets_the_mapping();
     test_acquire_for_never_allocates_on_a_degenerate_extent();
     test_all_targets_are_destroyed_when_the_registry_dies();
+    test_a_create_the_device_refuses_burns_no_slot();
+    test_a_resize_the_device_refuses_keeps_the_last_valid_target();
+    test_a_slot_survives_generation_wraparound();
     RENDER_TEST_MAIN_END();
 }

@@ -3,7 +3,7 @@
 // the ground grid.
 //
 // ⚠ PROXY GEOMETRY IS THE WHOLE STORY, and it is a property of the DATA, not a shortcut taken here.
-// Two facts in the tree bound what a scene can even ask to be drawn, and the next task in this chain
+// Two facts in the tree bound what a scene can even ask to be drawn, and the follow-up work
 // inherits both rather than rediscovering them:
 //
 //   * The `ctx:scene` schema (kSceneSchemaJson, src/editor/schema/src/kind_schema.cpp) declares
@@ -23,13 +23,22 @@
 // binding (e11e), no picking (e11g), no gizmos or selection outline (e11h), no camera controls
 // (e11f), no extract/culling change, no daemon or contract work (e11c).
 //
-// ⚠ SIGNATURE NOTE. The task specified `render_viewport_view(IDevice&, const View&,
-// const RenderSnapshot&, ITextureView& target)`. Those four parameters are here, in that order, with
-// those meanings -- but a fifth is MANDATORY and is not a widening of scope: `ITextureView` exposes no
-// extent, and view.h states the rule ("The framed ASPECT RATIO is never stored on a View. It belongs
-// to the target the view is rendered into, so every entry point below takes that target's extent and
-// derives it"), which is why projection_matrix / view_proj / project all take an Extent2D. Without it
-// this function cannot build a projection at all. Everything else is defaulted config.
+// ⚠ RESOURCE OWNERSHIP IS PER-CALL, AND THE FIRST FRAME LOOP MUST CHANGE THAT. render_viewport_view
+// builds its pipeline (which COMPILES the WGSL below), its uniform buffer and one bind group PER
+// DRAW on every call, then destroys them all on return -- so a viewport driven at 60 Hz would
+// recompile the shader 60 times a second and churn one bind group per grid line per frame. That is
+// affordable now only because nothing drives this in a loop yet. WindowCompositor
+// (editor/shell/src/compositor.cpp) already has the shape of the fix: hold the pipeline and layout
+// as members, grow the uniform buffer monotonically instead of reallocating, and rebuild bind groups
+// only when the draw count changes. A stateless free function has nowhere to put that cache, so
+// whoever introduces the frame loop owns adding it. Recorded here so it is a KNOWN deferral rather
+// than a cost silently inherited.
+//
+// ⚠ WHY `target_size` IS A SEPARATE PARAMETER. `ITextureView` exposes no extent, and view.h fixes
+// the rule ("The framed ASPECT RATIO is never stored on a View. It belongs to the target the view
+// is rendered into, so every entry point below takes that target's extent and derives it") -- which
+// is why projection_matrix / view_proj / project all take an Extent2D too. Without the extent this
+// function cannot build a projection at all. Everything else is defaulted config.
 //
 // GPU-free of any concrete backend (it drives only rhi.h), so it builds and is unit-tested against
 // rendertest::FakeDevice under every toolchain, like the rest of context_render.

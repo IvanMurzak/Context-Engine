@@ -459,6 +459,14 @@ public:
 
     std::unique_ptr<ITexture> create_texture(const TextureDesc& desc) override
     {
+        if (texture_creation_fails_)
+        {
+            // A real device refuses an allocation when it is exhausted or lost. Without this knob
+            // every `create_texture(...) == nullptr` branch in the tree is unreachable from the
+            // suite, so the fail-closed contracts they implement are untestable -- the same reason
+            // set_import_always_fails() exists for the external-texture path.
+            return nullptr;
+        }
         return std::make_unique<FakeTexture>(desc.size, desc.format);
     }
 
@@ -551,6 +559,9 @@ public:
     // Make EVERY import fail, including CpuBgra — the "no texture at all" case (device exhausted or
     // lost) that no source-specific knob can produce.
     void set_import_always_fails(bool fails) { import_always_fails_ = fails; }
+    // Make every create_texture() refuse (device exhausted / lost), so a caller's allocation-failure
+    // branch can be driven. Off by default, so no existing fixture changes behaviour.
+    void set_texture_creation_fails(bool fails) { texture_creation_fails_ = fails; }
     [[nodiscard]] int refresh_count() const { return refresh_count_; }
 
 private:
@@ -559,6 +570,7 @@ private:
     std::set<int> available_accelerated_;
     int refresh_count_ = 0;
     bool import_always_fails_ = false;
+    bool texture_creation_fails_ = false;
 };
 
 // ------------------------------------------------------------------------- fake present path

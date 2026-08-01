@@ -77,8 +77,8 @@ struct DecodedDraw
 
 // Deliberately a PREDICATE rather than a helper full of CHECKs, and every call site spells out its
 // own arguments. CHECK prints the expression text, so folding these comparisons into a void helper
-// would make every geometric failure in the file print the SAME line -- and a planting round has to
-// attribute each RED to the specific claim it broke. The values are printed on mismatch so the log
+// would make every geometric failure in the file print the SAME line -- and a failure has to be
+// attributable to the specific claim it broke. The values are printed on mismatch so the log
 // still says which axis and by how much.
 [[nodiscard]] bool ndc_equals(Vec3 got, Vec3 expected, float tolerance)
 {
@@ -334,8 +334,8 @@ void test_a_proxy_is_drawn_at_each_renderables_authored_position()
 
     // No two proxies land in the same PLACE. This must compare the matrices, not the payloads: a
     // payload also carries the item's tint, so `buffer_writes[0] != buffer_writes[1]` stays TRUE on a
-    // pass that drew every item at the world origin -- measured, plant P01, where that assertion was
-    // the one thing in this test that did NOT redden.
+    // pass that drew every item at the world origin -- measured: against exactly that mutation, a
+    // payload comparison is the one check here that would NOT have caught it.
     const DecodedDraw d0 = decode(device.pass_log().buffer_writes[0]);
     const DecodedDraw d1 = decode(device.pass_log().buffer_writes[1]);
     const DecodedDraw d2 = decode(device.pass_log().buffer_writes[2]);
@@ -394,8 +394,8 @@ void test_a_proxy_honours_the_transforms_rotation_and_scale()
     item.transform.rotation[3] = 0.0f;
     // Three DIFFERENT, non-unit scales. scale[1] was 1.0f in the first cut, which made the +Y
     // assertion below unable to discriminate scale at all -- a plant that dropped the scale entirely
-    // left that assertion GREEN while its X and Z siblings reddened. Caught by the plant round, not
-    // by reading: an unremarkable-looking fixture VALUE is where this kind of vacuity lives.
+    // left that assertion GREEN while its X and Z siblings reddened. Found by planting, not by
+    // reading: an unremarkable-looking fixture VALUE is where this kind of vacuity lives.
     item.transform.scale[0] = 2.0f;
     item.transform.scale[1] = 3.0f;
     item.transform.scale[2] = 0.5f;

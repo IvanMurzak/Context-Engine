@@ -16,7 +16,15 @@ namespace
 [[nodiscard]] ViewportTargetId make_handle(std::size_t index, std::uint32_t generation)
 {
     const std::uint32_t slot = static_cast<std::uint32_t>(index) + 1u;
-    return (generation << kViewportTargetSlotBits) | slot;
+    // Masked to the 16 bits a handle can carry. ⚠ This mask is BELT-AND-BRACES, and saying so is
+    // load-bearing for anyone who later "simplifies" one of the two: the mask that actually bounds
+    // the counter is the one in release(), which keeps entry.generation itself inside 16 bits. With
+    // that one in place this mask can never fire, which is exactly why a plant that deletes ONLY
+    // this one comes back GREEN -- the claim is still true, just defended twice. Delete release()'s
+    // mask and the defect returns in full: the stored generation runs past 65535 while the handle
+    // can only report the low 16 bits, so resolve() compares 65536 against 0, refuses every handle
+    // the slot ever mints again, and leaves it permanently dead with live_ over-counted.
+    return ((generation & kViewportTargetSlotMask) << kViewportTargetSlotBits) | slot;
 }
 
 } // namespace
@@ -37,15 +45,6 @@ void ViewportTargetRegistry::destroy_attachments(Entry& entry)
 
 bool ViewportTargetRegistry::allocate_attachments(Entry& entry, Extent2D size)
 {
-    // This is here for ORDERING, not for freeing, and the distinction is measured rather than
-    // assumed: a plant that deleted this line stayed GREEN across the whole suite, because the
-    // unique_ptr ASSIGNMENTS at the bottom of this function already destroy whatever the entry held.
-    // What they do not do is destroy it in the right ORDER -- `entry.color = std::move(color)` frees
-    // the old colour texture while `entry.color_view` still points at it, leaving a dangling view
-    // until the next statement replaces it. Nothing dereferences it in between, so no test can catch
-    // this and none pretends to; do not "simplify" the call away on the strength of a green suite.
-    destroy_attachments(entry);
-
     TextureDesc color_desc;
     color_desc.size = size;
     color_desc.format = TextureFormat::RGBA8Unorm;
@@ -58,6 +57,15 @@ bool ViewportTargetRegistry::allocate_attachments(Entry& entry, Extent2D size)
     depth_desc.format = TextureFormat::Depth32Float;
     depth_desc.render_attachment = true; // 3D scene geometry has to depth-sort
 
+    // BUILD INTO LOCALS AND COMMIT ONLY ON FULL SUCCESS. Every early return below leaves `entry`
+    // byte-untouched, so a device that refuses mid-way leaves the caller's target exactly as it was
+    // rather than half-built. Freeing first and allocating second would instead leave a LIVE entry
+    // whose attachments are all null -- contains(id) true while color_view(id) is nullptr, which is
+    // the one state the accessors' contract does not describe and which a caller doing
+    // `render_viewport_view(..., *registry.color_view(h), ...)` dereferences. Keeping the old target
+    // on failure is also the recovery posture resize() already takes for a degenerate extent.
+    // The cost is that a resize holds both pairs briefly; that is the standard trade and it is
+    // bounded by one target.
     std::unique_ptr<ITexture> color = device_.create_texture(color_desc);
     std::unique_ptr<ITexture> depth = device_.create_texture(depth_desc);
     if (color == nullptr || depth == nullptr)
@@ -67,7 +75,6 @@ bool ViewportTargetRegistry::allocate_attachments(Entry& entry, Extent2D size)
         // reported failure.
         return false;
     }
-    textures_created_ += 2u;
 
     std::unique_ptr<ITextureView> color_view = color->create_view();
     std::unique_ptr<ITextureView> depth_view = depth->create_view();
@@ -75,6 +82,16 @@ bool ViewportTargetRegistry::allocate_attachments(Entry& entry, Extent2D size)
     {
         return false;
     }
+    // Counted only once the pair is COMPLETE, so the counter cannot over-report a failed round.
+    textures_created_ += 2u;
+
+    // Now that the new pair is in hand, drop the old one. This call is here for ORDERING, not for
+    // freeing: the unique_ptr assignments below already destroy whatever the entry held, but they do
+    // it in the wrong order -- `entry.color = std::move(color)` frees the old colour texture while
+    // `entry.color_view` still points at it, leaving a dangling view until the next statement
+    // replaces it. Nothing dereferences it in between, so no test can observe this and none pretends
+    // to; do not "simplify" the call away on the strength of a green suite.
+    destroy_attachments(entry);
 
     entry.color = std::move(color);
     entry.color_view = std::move(color_view);
@@ -135,8 +152,9 @@ bool ViewportTargetRegistry::release(ViewportTargetId id)
     destroy_attachments(*entry);
     entry->live = false;
     // Bump BEFORE the slot can be reused, so every handle minted from it afterwards differs from the
-    // one just released and the old handle stops resolving.
-    ++entry->generation;
+    // one just released and the old handle stops resolving. Kept inside the 16 bits a handle carries
+    // so the stored generation and the one make_handle() encodes can never disagree.
+    entry->generation = (entry->generation + 1u) & kViewportTargetSlotMask;
     --live_;
     free_.push_back(viewport_target_slot(id) - 1u);
 

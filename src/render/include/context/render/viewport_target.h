@@ -2,10 +2,10 @@
 // m9-editor D5). One entry owns the colour + depth attachments a viewport's render pass draws into,
 // and a viewport keeps ONE entry for its whole life however often the panel is resized.
 //
-// WHY A SIBLING REGISTRY RATHER THAN EXTENDING DynamicTextureRegistry (the choice this task asks to
-// justify). context/render/ui/dynamic_texture.h already keeps per-panel offscreen targets, so
-// extending it looks like the smaller change. It is the wrong one, for three independent reasons and
-// any single one of them settles it:
+// WHY A SIBLING REGISTRY RATHER THAN EXTENDING DynamicTextureRegistry (the choice a reader will
+// second-guess first). context/render/ui/dynamic_texture.h already keeps per-panel offscreen
+// targets, so extending it looks like the smaller change. It is the wrong one, for three
+// independent reasons and any single one of them settles it:
 //
 //   1. LAYERING, and this one is a hard build error rather than a preference. DynamicTextureRegistry
 //      lives in context_render_ui, which links context_render. A viewport pass is context_render
