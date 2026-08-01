@@ -44,9 +44,21 @@ struct Named
     std::string name;
 };
 
+// The directory's own name. Cosmetic for the default template (it becomes the project's `name`),
+// but LOAD-BEARING for `extension-panel`, where the directory name IS the package id.
+//
+// ⚠ A TRAILING SEPARATOR makes `filename()` EMPTY — `<store>/hello-panel` and `<store>/hello-panel/`
+// are the same directory but not the same path — and shell tab-completion appends one. Normalize it
+// away BEFORE the fallback, or `context new --template extension-panel <store>/hello-panel/` writes
+// a manifest declaring the id `project` into a directory named `hello-panel`: the store derives a
+// package's id from the DIRECTORY ENTRY name, so it refuses that package at boot for declaring an id
+// its directory does not carry. The CLI could not catch it either, because `verify_extension_package`
+// re-derives the expected id through THIS function and so agreed with the writer's own mistake.
 std::string project_basename(const std::string& directory)
 {
     std::filesystem::path p(directory);
+    if (p.filename().empty())
+        p = p.parent_path();
     std::string name = p.filename().string();
     if (name.empty())
         name = "project";
@@ -128,10 +140,10 @@ bool write_text_file(const std::filesystem::path& path, const std::string& body)
 
 // ------------------------------------------------------- the `extension-panel` template (M9 e13e)
 
-// The `context-ext://` URL prefix a package panel's entry must carry. A THIRD mirror of the shell
-// tier's vocabulary (`editor::shell::kExtUrlPrefix`), on the same terms as the two in scaffold.h and
-// pinned by the same test: the scheme is the package's ORIGIN, so an entry spelled any other way is
-// refused by `read_package_manifest`'s rule (c).
+// The `context-ext://` URL prefix a package panel's entry must carry. Mirror 4 of the shell tier's
+// vocabulary (`editor::shell::kExtUrlPrefix`) — scaffold.h's MIRROR LIST enumerates all five and
+// names where each is pinned. The scheme is the package's ORIGIN, so an entry spelled any other way
+// is refused by `read_package_manifest`'s rule (c).
 constexpr const char* kExtUrlPrefix = "context-ext://";
 
 bool is_lower_alnum_ascii(unsigned char c)
@@ -164,8 +176,7 @@ Json extension_manifest_json(const std::string& package_id)
 {
     Json dock = Json::object();
     dock.set("zone", Json("right"));
-    // The task's own requirement AND the honest default for a panel of this shape: one instance,
-    // because a second copy of a hello panel says nothing a first does not.
+    // One instance, because a second copy of a hello panel says nothing a first does not.
     dock.set("singleton", Json(true));
     dock.set("minWidth", Json(std::int64_t{280}));
     dock.set("minHeight", Json(std::int64_t{160}));
@@ -230,7 +241,10 @@ std::string extension_panel_html(const std::string& package_id)
            "      <h1>Hello from " +
            package_id +
            "</h1>\n"
-           "      <p id=\"status\">This panel's script has not run yet.</p>\n"
+           // `aria-live` because panel.js REPLACES this text as the port connects: without it a
+           // screen reader announces the pre-script placeholder and never the outcome. The editor's
+           // own webui kit sets the same attribute on its status line.
+           "      <p id=\"status\" aria-live=\"polite\">This panel's script has not run yet.</p>\n"
            "    </main>\n"
            "    <script src=\"panel.js\" defer></script>\n"
            "  </body>\n"
@@ -241,10 +255,18 @@ std::string extension_panel_css()
 {
     return "/* The panel's own stylesheet, served from its own origin (the panel CSP is\n"
            "   `style-src 'self'` with no 'unsafe-inline', so a <style> block would be refused). */\n"
-           ".panel {\n"
+           ":root {\n"
+           "    /* Declared on the ROOT, which is where it governs the document canvas: the canvas\n"
+           "       background and the system colors text resolves against are taken from the ROOT\n"
+           "       element's used color scheme, so putting this on `.panel` would leave a light\n"
+           "       canvas under text following the host's dark preference. */\n"
            "    color-scheme: light dark;\n"
+           "}\n"
+           "body {\n"
+           "    margin: 0; /* the UA default is 8px; `.panel` owns the padding below */\n"
+           "}\n"
+           ".panel {\n"
            "    font: 13px/1.5 system-ui, sans-serif;\n"
-           "    margin: 0;\n"
            "    padding: 12px;\n"
            "}\n"
            ".panel h1 {\n"
@@ -339,6 +361,27 @@ std::vector<std::string> extension_panel_files()
             std::string(kExtensionPanelEntryFileName), "panel.js"};
 }
 
+// The ONE refusal for a template name `context new` does not offer, and the ONE refusal for a
+// directory whose name cannot be a package id. Both are shared by the real scaffold and by
+// `scaffold_dry_run`, so a plan can never accept an input the apply refuses.
+Envelope refuse_unknown_template(const std::string& template_name)
+{
+    return Envelope::failure("usage.invalid", "unknown template: " + template_name);
+}
+
+Envelope refuse_package_id(const std::string& package_id)
+{
+    // Leads with the ACTION, the way the CLI's sibling refusals do ("--take must be 'ours' or
+    // 'theirs'"): a bare grammar recital leaves the reader to diff their own name against a spec.
+    return Envelope::failure(
+        "usage.invalid",
+        "'" + package_id +
+            "' cannot be an editor-package id — rename the target directory. A package's id IS its "
+            "directory name; an id is 1-64 bytes of lower-case a-z, 0-9, '.', '-' or '_', must "
+            "start and end alphanumeric, may not contain '..', and its last dot-separated label may "
+            "not be all digits");
+}
+
 // Write the `extension-panel` template into `directory`, then PROVE the result is loadable
 // (`verify_extension_package`) before reporting success — the same shape the default template's
 // R-QA-006 runnable proof takes, against the property that matters for a package.
@@ -352,16 +395,15 @@ Envelope scaffold_extension_package(const std::string& directory)
     // scaffold that emits an unloadable package is worse than no scaffold, because it teaches the
     // wrong shape and the failure surfaces far from its cause.
     if (!is_scaffold_package_id(package_id))
-        return Envelope::failure(
-            "usage.invalid",
-            "'" + package_id +
-                "' cannot be an editor-package id, so it cannot be a package directory name: an id "
-                "is 1-64 bytes of lower-case a-z, 0-9, '.', '-' or '_', must start and end "
-                "alphanumeric, may not contain '..', and its last dot-separated label may not be "
-                "all digits");
+        return refuse_package_id(package_id);
 
     const fs::path root(directory);
     std::error_code ec;
+    // Decides only the WARNING below. The writes truncate either way, exactly as the default
+    // template's do — and the generated README tells the reader to re-run this very command as the
+    // install step, so REFUSING here would break the flow the template itself teaches.
+    const bool overwriting = fs::exists(root / kExtensionPanelManifestFileName, ec) && !ec;
+    ec.clear();
     fs::create_directories(root, ec);
     if (ec)
         return Envelope::failure("internal.error",
@@ -379,6 +421,15 @@ Envelope scaffold_extension_package(const std::string& directory)
         !write_text_file(root / "panel.js", extension_panel_js(package_id)) ||
         !write_text_file(root / "README.md", extension_readme(package_id)))
     {
+        // ABANDON WHAT WAS WRITTEN. `||` short-circuits, so a failure on file N leaves files 1..N-1
+        // behind — and the manifest is written FIRST. The store does not open a package's entry
+        // document (it validates the entry's URL grammar only), so a half-written package is
+        // ACCEPTED at boot and mounts a panel whose document or script 404s: a blank frame with
+        // nothing naming why, which is exactly the outcome the id refusal above exists to prevent.
+        // The DIRECTORY is left alone — it may have pre-existed, and this call does not own it.
+        std::error_code rm_ec;
+        for (const std::string& file : extension_panel_files())
+            fs::remove(root / file, rm_ec);
         return Envelope::failure("internal.error", "template files failed to write cleanly");
     }
 
@@ -397,7 +448,12 @@ Envelope scaffold_extension_package(const std::string& directory)
     data.set("contributions", loadable.data().at("contributions"));
     data.set("entry", loadable.data().at("entry"));
     data.set("loadable", loadable.data().at("loadable"));
-    return Envelope::success(std::move(data));
+    Envelope out = Envelope::success(std::move(data));
+    if (overwriting)
+        out.add_warning("a package was already installed in " + directory +
+                        "; its manifest and panel assets have been overwritten by the template's. "
+                        "Any edits you had made to them are gone.");
+    return out;
 }
 
 // Auto-install the R-FILE-012 structural merge driver DEFINITION into the project's git config, when
@@ -482,6 +538,22 @@ Json scaffold_plan(const std::string& directory, const std::string& template_nam
     return plan;
 }
 
+Envelope scaffold_dry_run(const std::string& directory, const std::string& template_name)
+{
+    // The SAME refusals `scaffold_project` applies, in the same order, from the same two helpers —
+    // sharing them is the point (see scaffold.h). A plan the apply would reject is a false preview,
+    // and this is the surface an agent consults before deciding to write.
+    if (!is_known_template(template_name))
+        return refuse_unknown_template(template_name);
+    if (template_name == kExtensionPanelTemplate)
+    {
+        const std::string package_id = project_basename(directory);
+        if (!is_scaffold_package_id(package_id))
+            return refuse_package_id(package_id);
+    }
+    return Envelope::success(scaffold_plan(directory, template_name));
+}
+
 Envelope verify_extension_package(const std::string& directory)
 {
     namespace fs = std::filesystem;
@@ -554,7 +626,13 @@ Envelope verify_extension_package(const std::string& directory)
         // exist is ACCEPTED there and fails only at load, as an empty panel with nothing saying
         // why. Scaffolding is the one moment both halves are in hand, so it is checked here.
         const std::string relative = entry.substr(own_origin.size());
-        if (relative.empty() || !std::filesystem::exists(root / relative))
+        // `relative` comes out of the MANIFEST, so on a package this module did not write it is
+        // caller-controlled: refuse a traversal rather than existence-probing outside the package.
+        // `exists` takes the error_code overload — the throwing one would propagate out of a CLI
+        // that installs no handler, and this is a public entry point (scaffold.h).
+        std::error_code entry_ec;
+        if (relative.empty() || relative.find("..") != std::string::npos ||
+            !fs::exists(root / relative, entry_ec) || entry_ec)
             return Envelope::failure("file.not_found",
                                      at + "'s content.entry names '" + relative +
                                          "', which does not exist in the package");
@@ -654,7 +732,7 @@ Envelope scaffold_project(const std::string& directory, const std::string& templ
     if (directory.empty())
         return Envelope::failure("usage.missing_argument", "a target directory is required");
     if (!is_known_template(template_name))
-        return Envelope::failure("usage.invalid", "unknown template: " + template_name);
+        return refuse_unknown_template(template_name);
 
     if (template_name == kExtensionPanelTemplate)
         return scaffold_extension_package(directory);

@@ -206,9 +206,17 @@ int main()
             std::ifstream manifest_in(dir / kExtensionPanelManifestFileName, std::ios::binary);
             std::string manifest_text((std::istreambuf_iterator<char>(manifest_in)),
                                       std::istreambuf_iterator<char>());
+            // Never hand an EMPTY text to `Json::parse` — it is the only throwing call in this file,
+            // and an uncaught parse exception aborts the whole executable, so ctest reports
+            // `Subprocess aborted` with no line number and every later case here (the flag/positional
+            // precedence, the dry runs, all four refusal paths, the template catalog) dies unreported
+            // alongside it. `Json::at` returns a shared null for a missing key, so the assertions
+            // below still fail LOUDLY and in place when the manifest was never written.
+            CHECK(!manifest_text.empty());
             CHECK(context::editor::serializer::canonicalize(manifest_text).bytes == manifest_text);
 
-            const Json manifest = Json::parse(manifest_text);
+            const Json manifest =
+                manifest_text.empty() ? Json::object() : Json::parse(manifest_text);
             const std::string package_id = dir.filename().string();
             CHECK(manifest.at("id").as_string() == package_id);
             CHECK(manifest.at("contributions").size() == 1);
@@ -234,10 +242,21 @@ int main()
             std::ifstream html_in(dir / kExtensionPanelEntryFileName, std::ios::binary);
             std::string html((std::istreambuf_iterator<char>(html_in)),
                              std::istreambuf_iterator<char>());
-            CHECK(html.find("<script src=\"panel.js\"") != std::string::npos);
-            CHECK(html.find("panel.css") != std::string::npos);
-            CHECK(html.find("<script>") == std::string::npos);
+            // Asserted STRUCTURALLY, not against the one literal `<script>`: `<script type=
+            // "module">` and `<script defer>` are the likeliest ways this gets "simplified" back to
+            // inline, and both slip past an exact-string search. So: the document's ONLY `<script`
+            // is the src'd one, there is no `<style` element, and no inline `style=` attribute
+            // (`style-src 'self'` blocks those too).
+            const std::size_t script_at = html.find("<script");
+            CHECK(script_at == html.find("<script src=\"panel.js\""));
+            CHECK(script_at != std::string::npos);
+            const bool panel_html_has_no_second_script =
+                script_at == std::string::npos || html.find("<script", script_at + 1) == std::string::npos;
+            CHECK(panel_html_has_no_second_script);
+            CHECK(html.find("<link rel=\"stylesheet\" href=\"panel.css\"") != std::string::npos);
             CHECK(html.find("<style") == std::string::npos);
+            CHECK(html.find(" style=") == std::string::npos);
+            CHECK(html.find("javascript:") == std::string::npos);
         }
 
         // The README states the three-step budget where the person who ran `context new` sees it.
@@ -283,13 +302,56 @@ int main()
 
     // --- --dry-run reports the extension-panel plan and does NO I/O -----------------------------
     {
+        // A unique temp path, like every other fixture here — NOT a fixed relative name in the ctest
+        // working directory: one earlier run in which dry-run was broken would leave that directory
+        // behind and red this assertion permanently, pointing at a working implementation.
+        const std::filesystem::path dir = unique_temp_dir("extdry");
         const Envelope e =
-            run({"new", "some-package-dir", "--template", kExtensionPanelTemplate, "--dry-run"});
+            run({"new", dir.string(), "--template", kExtensionPanelTemplate, "--dry-run"});
         CHECK(e.ok());
         CHECK(e.data().at("template").as_string() == kExtensionPanelTemplate);
         CHECK(e.data().at("files").size() == 5);
-        CHECK(e.data().at("files").at(1).as_string() == kExtensionPanelManifestFileName);
-        CHECK(!std::filesystem::exists(std::filesystem::path("some-package-dir")));
+        // Searched by NAME, not by index: `files[1]` couples the assertion to the byte-sorted
+        // position, which any added file sorting before the manifest would break for no reason.
+        bool plan_lists_the_manifest = false;
+        for (std::size_t i = 0; i < e.data().at("files").size(); ++i)
+            if (e.data().at("files").at(i).as_string() == kExtensionPanelManifestFileName)
+                plan_lists_the_manifest = true;
+        CHECK(plan_lists_the_manifest);
+        CHECK(!std::filesystem::exists(dir));
+        remove_quiet(dir);
+    }
+
+    // --- --dry-run runs the SAME refusals as the real run --------------------------------------
+    // A dry run exists to PREDICT the apply, and it is the surface an agent consults before
+    // deciding to write. Both claims below reported a confident `ok` plan before `scaffold_dry_run`.
+    {
+        // An unknown template reported the DEFAULT template's file list under the typo'd name,
+        // because `scaffold_plan`'s else-branch MEANS "default".
+        const Envelope e =
+            run({"new", "some-package-dir", "--template", "extension", "--dry-run"});
+        const bool dry_run_refuses_an_unknown_template = !e.ok();
+        CHECK(dry_run_refuses_an_unknown_template);
+        CHECK(e.error().has_value());
+        if (e.error().has_value())
+        {
+            CHECK(e.error()->code == "usage.invalid");
+            // Attributed: `usage.invalid` is shared with the package-id refusal below.
+            CHECK(e.error()->message.find("unknown template") != std::string::npos);
+        }
+    }
+    {
+        // An illegal package-directory name reported five files the apply fails closed on.
+        const Envelope e = run({"new", "Upper", "--template", kExtensionPanelTemplate, "--dry-run"});
+        const bool dry_run_refuses_an_illegal_package_id = !e.ok();
+        CHECK(dry_run_refuses_an_illegal_package_id);
+        CHECK(e.error().has_value());
+        if (e.error().has_value())
+        {
+            CHECK(e.error()->code == "usage.invalid");
+            CHECK(e.error()->message.find("cannot be an editor-package id") != std::string::npos);
+        }
+        CHECK(!std::filesystem::exists(std::filesystem::path("Upper")));
     }
 
     // --- failure path: a directory name that cannot be a package id is refused, and NOTHING is
@@ -302,11 +364,16 @@ int main()
         const Envelope e = scaffold_project(dir.string(), kExtensionPanelTemplate);
         CHECK(!e.ok());
         CHECK(e.error()->code == "usage.invalid");
+        // Attributed to the ID grammar: `usage.invalid` is also what an unknown template returns,
+        // so the code alone does not say which refusal fired.
+        CHECK(e.error()->message.find("cannot be an editor-package id") != std::string::npos);
         CHECK(!std::filesystem::exists(dir));
         remove_quiet(parent);
     }
     {
-        // The whole refused class, at the CLI's own predicate — every clause of the grammar.
+        // A representative row per clause at the CLI's own predicate. The exhaustive table — both
+        // length bounds, the traversal shapes, the byte classes — is the cross-tier one in
+        // test_e13e_ext_scaffold.cpp, which checks each id against the SHELL's answer too.
         CHECK(is_scaffold_package_id("hello-panel"));
         CHECK(is_scaffold_package_id("acme.hello-panel"));
         CHECK(!is_scaffold_package_id(""));
@@ -336,6 +403,12 @@ int main()
     {
         // The manifest's id must equal the directory name — the store refuses a disagreement rather
         // than reconciling it.
+        //
+        // ⚠ The staged manifest carries TWO independent defects (a wrong `id` AND an empty
+        // `contributions`) and BOTH refuse with `file.validation_failed`, so the CODE alone is
+        // satisfied by whichever rule fires — deleting the id check outright would leave this green
+        // on the contributions rule. The MESSAGE is what attributes it, and the block after this one
+        // pins the contributions rule on its own fixture.
         const std::filesystem::path dir = unique_temp_dir("extmismatch");
         CHECK(scaffold_project(dir.string(), kExtensionPanelTemplate).ok());
         {
@@ -346,6 +419,46 @@ int main()
         const Envelope e = verify_extension_package(dir.string());
         CHECK(!e.ok());
         CHECK(e.error()->code == "file.validation_failed");
+        const bool refused_for_the_id_mismatch =
+            e.error().has_value() &&
+            e.error()->message.find("must equal the directory name") != std::string::npos;
+        CHECK(refused_for_the_id_mismatch);
+        remove_quiet(dir);
+    }
+    {
+        // ...and the contributions rule on its OWN fixture, carrying the directory's own id, so the
+        // id check above cannot be what refuses it.
+        const std::filesystem::path dir = unique_temp_dir("extnocontrib");
+        CHECK(scaffold_project(dir.string(), kExtensionPanelTemplate).ok());
+        {
+            std::ofstream out(dir / kExtensionPanelManifestFileName,
+                              std::ios::binary | std::ios::trunc);
+            out << "{\"id\":\"" << dir.filename().string() << "\",\"contributions\":[]}";
+        }
+        const Envelope e = verify_extension_package(dir.string());
+        CHECK(!e.ok());
+        const bool refused_for_declaring_no_contributions =
+            e.error().has_value() &&
+            e.error()->message.find("declares no contributions") != std::string::npos;
+        CHECK(refused_for_declaring_no_contributions);
+        remove_quiet(dir);
+    }
+    {
+        // A FAILED write must not leave a package behind. The manifest is written FIRST and the `||`
+        // chain short-circuits, so a failure on a later file leaves the earlier ones on disk — and
+        // the store validates the entry's URL GRAMMAR without ever opening the document, so it
+        // ACCEPTS such a directory and mounts a panel whose script 404s: the blank frame with
+        // nothing naming why. A pre-existing DIRECTORY named `panel.js` is an unwritable name, which
+        // forces the fourth write to fail with the first three already written.
+        const std::filesystem::path dir = unique_temp_dir("extpartial");
+        std::error_code ec;
+        std::filesystem::create_directories(dir / "panel.js", ec);
+        CHECK(!ec);
+        const Envelope e = scaffold_project(dir.string(), kExtensionPanelTemplate);
+        CHECK(!e.ok());
+        const bool partial_write_left_no_manifest =
+            !std::filesystem::exists(dir / kExtensionPanelManifestFileName);
+        CHECK(partial_write_left_no_manifest);
         remove_quiet(dir);
     }
     {

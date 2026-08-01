@@ -41,6 +41,7 @@
 
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
 #include <fstream>
@@ -282,7 +283,7 @@ void test_generated_contribution_is_what_the_editor_accepts()
     CHECK(c.content.type == gc::ContentType::iframe);
     CHECK(c.content.entry == std::string(shell::kExtUrlPrefix) + package_id + "/" +
                                  cli::kExtensionPanelEntryFileName);
-    // The task's own manifest-v2 requirements, asserted on the PARSED value rather than the text.
+    // The R-EDIT-001 manifest-v2 members, asserted on the PARSED value rather than the text.
     CHECK(c.dock.singleton);
     CHECK(c.dock.default_zone == gc::DockZone::right);
     CHECK(c.dock.min_width > 0);
@@ -295,23 +296,34 @@ void test_generated_contribution_is_what_the_editor_accepts()
     CHECK(std::find(c.capabilities.begin(), c.capabilities.end(), gc::kCapabilityReadQuery) !=
           c.capabilities.end());
 
-    // ⭐ THE PARSED CONTRIBUTION IS ACCEPTED BY THE REAL REGISTRY — the assertion that makes this a
-    // PROPERTY rather than a field-by-field opinion: the registry independently re-validates the
-    // contract version, the sandbox conformance, the manifest structure and the capability
-    // vocabulary, so a template producing a structurally impossible Contribution is refused here even
-    // if every CHECK above passed.
+    // THE PARSED CONTRIBUTION IS ACCEPTED BY THE REAL REGISTRY — scoped honestly, because the
+    // obvious reading overstates it. The STORE's rules dominate the registry's for anything read out
+    // of a manifest: it assigns `contract_version` unconditionally, leaves `sandbox` at the default,
+    // and itself refuses an empty iframe entry, a `schemaVersion` below 1 and an unknown capability.
+    // So a scaffold defect that could red `result.ok` has already reddened `scan.refusals` above,
+    // and this is NOT a second opinion on the template. It is a live tripwire on the store's own
+    // promise — that it never reports a package the registry would then refuse — which is worth
+    // keeping, and the registration is read back as a POSITIVE artifact rather than as a bare `ok`.
     gc::ExtensionRegistry registry;
     const gc::RegistrationResult result = registry.register_contribution(c);
     CHECK(result.ok);
+    CHECK(result.error_code.empty());
+    CHECK(registry.find(c.id) != nullptr);
     if (!result.ok)
     {
         std::fprintf(stderr, "[e13e] the registry REFUSED the scaffolded contribution: %s — %s\n",
                      result.error_code.c_str(), result.message.c_str());
     }
 
-    // The scaffold GRANTS nothing: `capabilities` is what the manifest ASKS for, `sandbox` is what it
-    // is GIVEN, and the store leaves it at least privilege. A template that could move any of these
-    // would be the capability model bypassed by one JSON member.
+    // The scaffold GRANTS nothing: `capabilities` is what the manifest ASKS for, `sandbox` is what
+    // it is GIVEN, and the store leaves it at least privilege.
+    //
+    // ⚠ READ WHAT THESE SIX ESTABLISH, because it is NOT what it looks like: `read_package_manifest`
+    // never READS `sandbox` (it says so at its parse site), so `c.sandbox` is the default policy for
+    // EVERY manifest and no template can move it — these cannot fail on any scaffold, and they pin
+    // the STORE's least-privilege default rather than this template. What pins the TEMPLATE is the
+    // manifest-text assertion further down: the generated manifest declares no `sandbox` member at
+    // all, so the scaffold cannot even teach a self-declared grant as inert text someone copies.
     const gc::Contribution default_policy;
     CHECK(c.sandbox.granted_scopes.names() == default_policy.sandbox.granted_scopes.names());
     CHECK(!c.sandbox.node_integration);
@@ -325,6 +337,10 @@ void test_generated_contribution_is_what_the_editor_accepts()
     const std::string manifest_text = read_text(package_root / cli::kExtensionPanelManifestFileName);
     CHECK(!manifest_text.empty());
     CHECK(context::editor::serializer::canonicalize(manifest_text).bytes == manifest_text);
+    // The TEMPLATE half of the least-privilege claim above, and unlike the parsed-policy checks this
+    // one CAN fail: adding a `sandbox` member to `extension_manifest_json` reds it.
+    const bool manifest_declares_no_sandbox = manifest_text.find("\"sandbox\"") == std::string::npos;
+    CHECK(manifest_declares_no_sandbox);
 
     cleanup(root);
 }
@@ -351,9 +367,9 @@ void test_cross_tier_pins()
     const std::string manifest_text = read_text(package_root / cli::kExtensionPanelManifestFileName);
     // Bail on a CHECK rather than letting `Json::parse` throw out of main. When the scaffold did not
     // run — or wrote its manifest under another name, which is exactly what pin (1) exists to catch —
-    // this text is EMPTY, and an uncaught parse exception reports `Subprocess aborted` with no line
-    // number, burying the assertion that actually failed. (Measured: the P13/P14 plants of this
-    // task's own planting round aborted here before this guard.)
+    // this text is EMPTY, and an uncaught parse exception aborts the whole executable: ctest then
+    // reports `Subprocess aborted` with no line number, burying the assertion that actually failed
+    // along with every case after it. The guard costs one CHECK and keeps the failure legible.
     CHECK(!manifest_text.empty());
     if (manifest_text.empty())
     {
@@ -476,6 +492,56 @@ void test_cli_refuses_what_the_store_would_refuse()
     cleanup(root);
 }
 
+// ===================================================================================================
+// 5. THE PATH SPELLING DOES NOT CHANGE THE PACKAGE — `<store>/id` and `<store>/id/` are the same
+//    directory, and tab-completion appends the separator. Only the STORE can catch a mis-derived id:
+//    the writer and the CLI's own verifier both derive it from the ARGUMENT, so a derivation fault
+//    agrees with itself and reports `loadable: true`, while the store derives it from the DIRECTORY
+//    ENTRY. Every other fixture here composes paths with `store / id`, which can never carry a
+//    trailing separator — so this is the one spelling nothing else in the suite exercises.
+// ===================================================================================================
+
+void test_trailing_separator_scaffolds_the_same_package()
+{
+    const fs::path root = make_temp_root("trailing");
+    const fs::path store = root / "packages";
+    std::error_code ec;
+    fs::create_directories(store, ec);
+    CHECK(!ec);
+    const std::string package_id = "slash-panel";
+    const fs::path package_root = store / package_id;
+
+    // The ONLY difference from test 1: one trailing separator on the argument.
+    const Envelope created =
+        cli::run({"new", "--template", "extension-panel", package_root.string() + "/"});
+    CHECK(created.ok());
+    // The id must come from the DIRECTORY, not from the fallback an empty `filename()` triggers.
+    CHECK(created.data().at("packageId").as_string() == package_id);
+
+    const shell::PackageStoreScan scan = shell::scan_package_store(store);
+    for (const shell::PackageRefusal& refusal : scan.refusals)
+    {
+        std::fprintf(stderr, "[e13e] the trailing-separator scaffold was REFUSED: %s: %s — %s\n",
+                     refusal.id.c_str(), refusal.error_code.c_str(), refusal.message.c_str());
+    }
+    const bool trailing_separator_package_is_accepted =
+        scan.refusals.empty() && scan.packages.size() == 1;
+    CHECK(trailing_separator_package_is_accepted);
+    if (scan.packages.size() == 1)
+        CHECK(scan.packages.front().id == package_id);
+
+    // And the fail-closed refusal is not bypassed by that spelling either: an illegal directory name
+    // must still refuse, and still write nothing. (An empty basename would REPLACE the illegal name
+    // with a grammar-clean fallback and sail past the guard.)
+    const fs::path bad = store / "Upper";
+    const Envelope refused = cli::run({"new", "--template", "extension-panel", bad.string() + "/"});
+    const bool trailing_separator_refusal_still_fires = !refused.ok();
+    CHECK(trailing_separator_refusal_still_fires);
+    CHECK(!fs::exists(bad));
+
+    cleanup(root);
+}
+
 } // namespace
 
 int main()
@@ -485,5 +551,6 @@ int main()
     test_cross_tier_pins();
     test_package_id_grammar_agreement();
     test_cli_refuses_what_the_store_would_refuse();
+    test_trailing_separator_scaffolds_the_same_package();
     return g_failures == 0 ? 0 : 1;
 }

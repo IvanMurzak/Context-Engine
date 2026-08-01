@@ -131,8 +131,10 @@ Envelope dispatch(const VerbSpec& verb, const std::vector<std::string>& position
             tmpl = bound.at("template");
         if (const auto flag = flags.find("template"); flag != flags.end())
             tmpl = flag->second;
+        // `scaffold_dry_run`, not `scaffold_plan`: the plan alone DESCRIBES without deciding, so it
+        // would report a confident file list for an input the apply below refuses.
         if (dry_run)
-            return Envelope::success(scaffold_plan(directory, tmpl));
+            return scaffold_dry_run(directory, tmpl);
         return scaffold_project(directory, tmpl);
     }
 
