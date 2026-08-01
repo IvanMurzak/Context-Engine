@@ -88,6 +88,13 @@ inline void rasterize_reference_triangle(std::vector<std::uint8_t>& image, std::
 
 // ------------------------------------------------------------------------------- fake RHI objects
 
+// How many FakeTexture objects are ALIVE in this process right now, maintained by the ctor/dtor pair
+// below. A registry's release/resize contract is a claim about DESTRUCTION, and no counter the
+// registry itself reports can prove it -- a LEAKING implementation reports exactly the same numbers
+// as a correct one. Counting the objects themselves is the independent oracle, so a test asserts a
+// DELTA against this rather than trusting the subject's own bookkeeping.
+inline int g_live_fake_textures = 0;
+
 class FakeTextureView : public ITextureView
 {
 public:
@@ -104,7 +111,16 @@ public:
     FakeTexture(Extent2D size, TextureFormat format) : size_(size), format_(format)
     {
         pixels_.assign(static_cast<std::size_t>(size.width) * size.height * 4u, 0u);
+        ++g_live_fake_textures;
     }
+
+    // Non-copyable and non-movable BECAUSE of that counter: a copy would inflate the live count and a
+    // move would leave a husk that decrements it again. Nothing in the tree does either -- every
+    // FakeTexture is held by unique_ptr -- so this costs nothing and makes the counter trustworthy.
+    FakeTexture(const FakeTexture&) = delete;
+    FakeTexture& operator=(const FakeTexture&) = delete;
+
+    ~FakeTexture() override { --g_live_fake_textures; }
 
     std::unique_ptr<ITextureView> create_view() override
     {
@@ -218,6 +234,14 @@ struct FakePassLog
     // renders a layer squeezed or offset rather than tripping any counter here. Recording the bytes
     // is what lets a headless test assert the UV arithmetic the GPU would have sampled with.
     std::vector<std::vector<std::uint8_t>> buffer_writes;
+    // The byte OFFSET each of those writes landed at, same order. A pass that gives every draw its
+    // own slice of one buffer and a pass that clobbers offset 0 for all of them record IDENTICAL
+    // payloads, so the payload alone cannot tell them apart -- only the offsets can.
+    std::vector<std::uint64_t> buffer_write_offsets;
+    // How many passes carried a DEPTH attachment. Same reasoning as buffer_writes: a pass that
+    // forgot its depth attachment does not fail here, it silently draws in submission order, so a
+    // headless test needs the fake to have SEEN the attachment (the e11b viewport pass).
+    int depth_attachments = 0;
 };
 
 class FakeRenderPassEncoder : public IRenderPassEncoder
@@ -316,6 +340,10 @@ public:
 
     std::unique_ptr<IRenderPassEncoder> begin_render_pass(const RenderPassDesc& desc) override
     {
+        if (log_ != nullptr && desc.depth.has_value() && desc.depth->view != nullptr)
+        {
+            ++log_->depth_attachments;
+        }
         FakeTexture* target = nullptr;
         Color clear;
         LoadOp load = LoadOp::Clear;
@@ -376,6 +404,7 @@ public:
         {
             const auto* bytes = static_cast<const std::uint8_t*>(data);
             log_->buffer_writes.emplace_back(bytes, bytes + size);
+            log_->buffer_write_offsets.push_back(offset);
         }
     }
 
@@ -430,6 +459,14 @@ public:
 
     std::unique_ptr<ITexture> create_texture(const TextureDesc& desc) override
     {
+        if (texture_creation_fails_)
+        {
+            // A real device refuses an allocation when it is exhausted or lost. Without this knob
+            // every `create_texture(...) == nullptr` branch in the tree is unreachable from the
+            // suite, so the fail-closed contracts they implement are untestable -- the same reason
+            // set_import_always_fails() exists for the external-texture path.
+            return nullptr;
+        }
         return std::make_unique<FakeTexture>(desc.size, desc.format);
     }
 
@@ -522,6 +559,9 @@ public:
     // Make EVERY import fail, including CpuBgra — the "no texture at all" case (device exhausted or
     // lost) that no source-specific knob can produce.
     void set_import_always_fails(bool fails) { import_always_fails_ = fails; }
+    // Make every create_texture() refuse (device exhausted / lost), so a caller's allocation-failure
+    // branch can be driven. Off by default, so no existing fixture changes behaviour.
+    void set_texture_creation_fails(bool fails) { texture_creation_fails_ = fails; }
     [[nodiscard]] int refresh_count() const { return refresh_count_; }
 
 private:
@@ -530,6 +570,7 @@ private:
     std::set<int> available_accelerated_;
     int refresh_count_ = 0;
     bool import_always_fails_ = false;
+    bool texture_creation_fails_ = false;
 };
 
 // ------------------------------------------------------------------------- fake present path
