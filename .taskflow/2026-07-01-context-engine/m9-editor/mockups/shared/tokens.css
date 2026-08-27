@@ -1,0 +1,229 @@
+/* ==========================================================================
+   Context Editor — d1 Visual Direction Mockups — TOKENS
+   ==========================================================================
+   MOCKUP-ONLY CSS. This is NOT the e06 `@context-engine/editor-tokens`
+   package (no JSON schema, no theme engine) — it exists purely to render
+   the d1 demo pages faithfully. e06 is the authoring task for the real
+   token package; it should treat this file (+ mockups/TOKENS.md) as the
+   ported reference values, not as shippable source.
+
+   Ground truth: design doc 06 §2 ("Built-in themes: the monochrome-glow-ui
+   port"). Every value below is either (a) a DIRECT port — see TOKENS.md
+   "Source" column marked "06 §2" — or (b) a PROPOSAL authored for this
+   mockup where doc 06 names the token GROUP but not a value (typography
+   scale steps, spacing/density scale, viewport palette hexes, aurora alpha
+   stops, icon stroke width). Proposals are flagged in TOKENS.md; nothing
+   here should be read as silently-locked ground truth.
+   ========================================================================== */
+
+:root {
+  /* ---------------- Typography ---------------- */
+  --ctx-font-ui: 'Geist', 'Inter', system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --ctx-font-mono: 'Geist Mono', 'JetBrains Mono', ui-monospace, 'SF Mono', 'Cascadia Code', monospace;
+  --ctx-tracking: -0.011em;
+
+  /* Dense scale ~10.5-19px (06 §2). Step values are a PROPOSAL. */
+  --ctx-text-2xs: 10.5px;
+  --ctx-text-xs: 11.5px;
+  --ctx-text-sm: 12.5px;
+  --ctx-text-base: 13.5px;
+  --ctx-text-md: 15px;
+  --ctx-text-lg: 17px;
+  --ctx-text-xl: 19px;
+
+  --ctx-weight-regular: 430;
+  --ctx-weight-medium: 520;
+  --ctx-weight-semibold: 600;
+  --ctx-line-height: 1.45;
+
+  /* ---------------- Shape ---------------- */
+  --ctx-radius-sm: 7px;   /* 06 §2: radii 7-8px */
+  --ctx-radius-md: 8px;
+  --ctx-radius-pill: 999px;
+  --ctx-border-w: 1px;              /* 06 §2: 1px line borders, no shadows */
+  --ctx-selection-bar-w: 3px;        /* 06 §2: selection accent = 3px left ink bar */
+
+  /* Density / control heights — PROPOSAL (06 §1 names the group, no values) */
+  --ctx-h-compact: 22px;
+  --ctx-h-default: 26px;
+  --ctx-h-comfortable: 32px;
+
+  /* Spacing scale — PROPOSAL, dense/4px-leaning to match the type scale */
+  --ctx-space-1: 2px;
+  --ctx-space-2: 4px;
+  --ctx-space-3: 6px;
+  --ctx-space-4: 8px;
+  --ctx-space-5: 10px;
+  --ctx-space-6: 12px;
+  --ctx-space-7: 16px;
+  --ctx-space-8: 20px;
+  --ctx-space-9: 24px;
+  --ctx-space-10: 32px;
+
+  /* ---------------- Motion ---------------- */
+  --ctx-duration-fast: 120ms;   /* 06 §2: 120-160ms micro-transitions */
+  --ctx-duration-base: 140ms;
+  --ctx-duration-slow: 160ms;
+  --ctx-duration-theme: 350ms;  /* 06 §2: 350ms theme cross-fade */
+  --ctx-ease-standard: cubic-bezier(0.4, 0, 0.2, 1);
+  /* CSS approximation of "spring pills" stiffness 400 / damping 32 (06 §2).
+     A real port (e06) should use an actual spring integrator (Framer Motion /
+     react-spring-style); cubic-bezier can only approximate the overshoot feel
+     for this static mockup. Flagged in TOKENS.md. */
+  --ctx-ease-spring: cubic-bezier(0.34, 1.56, 0.64, 1);
+  --ctx-pulse-duration: 1.4s;   /* pulse for active-work (warn) dots */
+
+  /* ---------------- Iconography ---------------- */
+  /* No icon set is named in doc 06 §1/§2 — PROPOSAL placeholder only. */
+  --ctx-icon-stroke: 1.5px;
+  --ctx-icon-box: 18px;
+
+  /* ---------------- Status hues (dark/light source pairs, 06 §2) ---------------- */
+  --ctx-good-dark: #3fb950;
+  --ctx-good-light: #16a34a;
+  --ctx-warn-dark: #f5a623;   /* ACTIVE WORK ONLY — pulses */
+  --ctx-warn-light: #ca8a04;
+  --ctx-bad-dark: #f85149;
+  --ctx-bad-light: #dc2626;
+  --ctx-wait-dark: #a855f7;   /* awaiting human */
+  --ctx-wait-light: #9333ea;
+  --ctx-idle-dark: #8b949e;
+  --ctx-idle-light: #6b7280;
+
+  /* ---------------- Aurora alpha stops (PROPOSAL) ---------------- */
+  /* Monochrome by design (accent = ink, D12) — the glow is a shifting
+     luminance halo, never a hue effect. Tuned lower for light (ink-on-white
+     reads heavier at equal alpha than ink-on-black). */
+  --ctx-aurora-a-dark: rgba(237, 237, 237, 0.55);
+  --ctx-aurora-b-dark: rgba(237, 237, 237, 0.28);
+  --ctx-aurora-c-dark: rgba(237, 237, 237, 0.42);
+  --ctx-aurora-a-light: rgba(23, 23, 23, 0.32);
+  --ctx-aurora-b-light: rgba(23, 23, 23, 0.12);
+  --ctx-aurora-c-light: rgba(23, 23, 23, 0.22);
+
+  /* ---------------- Flourish palette — "Northern Veil" (PROPOSAL) ----------------
+     d1 respin (2026-07-18): the owner rejected aurora variants A/B (the rotating
+     ink-alpha conic halo above — kept in place for the record, no longer used as
+     a live button treatment; see shared/flourishes.css "original-rejected").
+     Of the ~6 new flourish directions authored in response, only ONE — "Northern
+     Veil" — deliberately breaks pure monochrome (D12 exception, explicitly
+     sanctioned for exactly one rare, tasteful moment). Every other new direction
+     reuses `ink` (via color-mix()) or the already-reserved status hues, so it
+     needs no new tokens at all. These three hues sweep a single coherent cool
+     arc (green -> blue -> violet, the real aurora-borealis gradient) and are
+     kept deliberately low-alpha — a hushed wash, not a light show. Chosen to sit
+     near-but-not-on top of existing chroma (good/axis-y green, axis-z blue,
+     wait purple) since a blurred ambient halo and a small solid dot/gizmo arm
+     are never seen in a context where they could be confused for one another. */
+  --ctx-veil-green-dark: rgba(52, 211, 153, 0.34);
+  --ctx-veil-blue-dark: rgba(56, 189, 248, 0.30);
+  --ctx-veil-violet-dark: rgba(139, 124, 246, 0.28);
+  --ctx-veil-green-light: rgba(5, 150, 105, 0.22);
+  --ctx-veil-blue-light: rgba(2, 132, 199, 0.19);
+  --ctx-veil-violet-light: rgba(91, 79, 214, 0.16);
+
+  /* ---------------- Viewport palette (PROPOSAL — the legal chroma
+     exception, D12; doc 06 names the group only) ---------------- */
+  --ctx-axis-x-dark: #ff5a5f;   /* X = red, cross-tool convention (Unity/Unreal/Blender/Maya) */
+  --ctx-axis-x-light: #e11d3c;
+  --ctx-axis-y-dark: #4ade80;   /* Y = green */
+  --ctx-axis-y-light: #22a55e;
+  --ctx-axis-z-dark: #4d9fff;   /* Z = blue */
+  --ctx-axis-z-light: #2563eb;
+  --ctx-grid-major-dark: rgba(237, 237, 237, 0.16);   /* grid stays ink-derived, not a new hue */
+  --ctx-grid-major-light: rgba(23, 23, 23, 0.14);
+  --ctx-grid-minor-dark: rgba(237, 237, 237, 0.06);
+  --ctx-grid-minor-light: rgba(23, 23, 23, 0.06);
+  --ctx-selection-outline-dark: #22d3ee;   /* distinct cyan — never collides with status/axis hues */
+  --ctx-selection-outline-light: #0891b2;
+  --ctx-gizmo-active-dark: #ffe14d;   /* universal "currently dragging" highlight, DCC convention */
+  --ctx-gizmo-active-light: #eab308;
+  --ctx-camera-widget-dark: #ededed;   /* neutral body; faces borrow axis colors on hover */
+  --ctx-camera-widget-light: #171717;
+}
+
+/* ============================================================
+   THEME: DARK (default, 06 §2)
+   ============================================================ */
+:root,
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  --ctx-canvas: #000000;
+  --ctx-panel: #0a0a0a;
+  --ctx-panel-2: #141414;
+  --ctx-ink: #ededed;
+  --ctx-muted: #a1a1a1;
+  --ctx-muted-2: #7e7e7e;
+  --ctx-line: #262626;
+  --ctx-chip: #141414;
+  --ctx-accent: var(--ctx-ink);
+  --ctx-focus-ring-color: rgba(237, 237, 237, 0.6);
+
+  --ctx-good: var(--ctx-good-dark);
+  --ctx-warn: var(--ctx-warn-dark);
+  --ctx-bad: var(--ctx-bad-dark);
+  --ctx-wait: var(--ctx-wait-dark);
+  --ctx-idle: var(--ctx-idle-dark);
+
+  --ctx-aurora-a: var(--ctx-aurora-a-dark);
+  --ctx-aurora-b: var(--ctx-aurora-b-dark);
+  --ctx-aurora-c: var(--ctx-aurora-c-dark);
+
+  --ctx-veil-green: var(--ctx-veil-green-dark);
+  --ctx-veil-blue: var(--ctx-veil-blue-dark);
+  --ctx-veil-violet: var(--ctx-veil-violet-dark);
+
+  --ctx-axis-x: var(--ctx-axis-x-dark);
+  --ctx-axis-y: var(--ctx-axis-y-dark);
+  --ctx-axis-z: var(--ctx-axis-z-dark);
+  --ctx-grid-major: var(--ctx-grid-major-dark);
+  --ctx-grid-minor: var(--ctx-grid-minor-dark);
+  --ctx-selection-outline: var(--ctx-selection-outline-dark);
+  --ctx-gizmo-active: var(--ctx-gizmo-active-dark);
+  --ctx-camera-widget: var(--ctx-camera-widget-dark);
+}
+
+/* ============================================================
+   THEME: LIGHT (06 §2)
+   ============================================================ */
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --ctx-canvas: #fafafa;
+  --ctx-panel: #ffffff;
+  --ctx-panel-2: #f5f5f5;
+  --ctx-ink: #171717;
+  --ctx-muted: #666666;
+  /* muted2 is NOT specified for Light in doc 06 §2 (only Dark lists one).
+     Derived here by mirroring the Dark theme's muted->muted2 recession —
+     PROPOSAL, confirm/replace at the e06 gate. See TOKENS.md. */
+  --ctx-muted-2: #8a8a8a;
+  --ctx-line: #eaeaea;
+  --ctx-chip: #f7f7f7;
+  --ctx-accent: var(--ctx-ink);
+  --ctx-focus-ring-color: rgba(23, 23, 23, 0.55);
+
+  --ctx-good: var(--ctx-good-light);
+  --ctx-warn: var(--ctx-warn-light);
+  --ctx-bad: var(--ctx-bad-light);
+  --ctx-wait: var(--ctx-wait-light);
+  --ctx-idle: var(--ctx-idle-light);
+
+  --ctx-aurora-a: var(--ctx-aurora-a-light);
+  --ctx-aurora-b: var(--ctx-aurora-b-light);
+  --ctx-aurora-c: var(--ctx-aurora-c-light);
+
+  --ctx-veil-green: var(--ctx-veil-green-light);
+  --ctx-veil-blue: var(--ctx-veil-blue-light);
+  --ctx-veil-violet: var(--ctx-veil-violet-light);
+
+  --ctx-axis-x: var(--ctx-axis-x-light);
+  --ctx-axis-y: var(--ctx-axis-y-light);
+  --ctx-axis-z: var(--ctx-axis-z-light);
+  --ctx-grid-major: var(--ctx-grid-major-light);
+  --ctx-grid-minor: var(--ctx-grid-minor-light);
+  --ctx-selection-outline: var(--ctx-selection-outline-light);
+  --ctx-gizmo-active: var(--ctx-gizmo-active-light);
+  --ctx-camera-widget: var(--ctx-camera-widget-light);
+}

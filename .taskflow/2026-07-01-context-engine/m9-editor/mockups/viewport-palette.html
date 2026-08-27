@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Editor — d1 mockup — Viewport palette proposal</title>
+<link rel="stylesheet" href="shared/tokens.css">
+<link rel="stylesheet" href="shared/base.css">
+<link rel="stylesheet" href="shared/components.css">
+<link rel="stylesheet" href="shared/viewport.css">
+<style>
+  .page {
+    max-width: 1040px;
+    margin: 0 auto;
+    padding: var(--ctx-space-9) var(--ctx-space-8) 120px;
+  }
+  .page-header { margin-bottom: var(--ctx-space-9); }
+  .eyebrow {
+    font-family: var(--ctx-font-mono); font-size: 10.5px; letter-spacing: 0.08em;
+    text-transform: uppercase; color: var(--ctx-muted-2);
+  }
+  .page-header h1 { font-size: 24px; font-weight: var(--ctx-weight-semibold); margin-top: var(--ctx-space-3); }
+  .page-header p { color: var(--ctx-muted); margin-top: var(--ctx-space-3); max-width: 720px; }
+  .demo-stage {
+    height: 380px;
+    border: var(--ctx-border-w) solid var(--ctx-line);
+    border-radius: var(--ctx-radius-md);
+    overflow: hidden;
+    margin-bottom: var(--ctx-space-8);
+  }
+  .demo-stage .viewport-object { left: -60px; top: -170px; width: 120px; height: 120px; }
+  .demo-stage .viewport-object .face-top { transform: rotateX(90deg) translateZ(60px); }
+  .demo-stage .viewport-object .face-front { transform: translateZ(60px); }
+  .demo-stage .viewport-object .face-side { width: 78px; transform: rotateY(90deg) translateZ(60px) translateX(-21px); }
+  .demo-stage .viewport-selection { left: -76px; top: -190px; width: 170px; height: 195px; }
+  .demo-stage .viewport-gizmo { left: -4px; top: -52px; }
+  .demo-stage .gizmo-arm.x, .demo-stage .gizmo-arm.y { width: 96px; }
+  .demo-stage .gizmo-arm.z { width: 78px; }
+  .hint {
+    position: absolute; left: var(--ctx-space-5); bottom: var(--ctx-space-5);
+    font-size: 10.5px; color: var(--ctx-muted-2);
+  }
+
+  .legend-table { width: 100%; border-collapse: collapse; font-size: var(--ctx-text-xs); margin-bottom: var(--ctx-space-9); }
+  .legend-table th {
+    text-align: left; font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.05em;
+    color: var(--ctx-muted-2); font-weight: var(--ctx-weight-medium);
+    padding: var(--ctx-space-3) var(--ctx-space-4); border-bottom: var(--ctx-border-w) solid var(--ctx-line);
+  }
+  .legend-table td {
+    padding: var(--ctx-space-4); border-bottom: var(--ctx-border-w) solid var(--ctx-line);
+    vertical-align: middle;
+  }
+  .legend-table .token-name { font-weight: var(--ctx-weight-medium); }
+  .legend-table .usage { color: var(--ctx-muted); }
+  .sw-cell { display: flex; align-items: center; gap: var(--ctx-space-3); }
+  .sw-cell .swatch { width: 22px; height: 22px; }
+  .sw-cell code { font-family: var(--ctx-font-mono); font-size: 10.5px; color: var(--ctx-muted-2); }
+
+  .rationale { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ctx-space-8); margin-bottom: var(--ctx-space-9); }
+  .rationale h3 { font-size: var(--ctx-text-base); font-weight: var(--ctx-weight-semibold); margin-bottom: var(--ctx-space-3); }
+  .rationale p, .rationale li { color: var(--ctx-muted); font-size: var(--ctx-text-xs); line-height: 1.7; }
+  .rationale ul { margin: 0; padding-left: 18px; }
+  .status-pill {
+    display: inline-flex; align-items: center; gap: var(--ctx-space-2);
+    font-family: var(--ctx-font-mono); font-size: 10px; text-transform: uppercase; letter-spacing: 0.05em;
+    padding: 3px 8px; border-radius: var(--ctx-radius-pill); border: var(--ctx-border-w) solid var(--ctx-line);
+    color: var(--ctx-muted-2);
+  }
+</style>
+</head>
+<body class="ctx-ready">
+
+<svg style="display:none" aria-hidden="true"></svg>
+
+<div class="page">
+  <div class="page-header">
+    <div class="eyebrow">D12 · the legal chroma exception</div>
+    <h1>Viewport palette proposal</h1>
+    <p>The viewport is the one place saturated color is allowed outside the 5 reserved status
+      hues — everything else in the editor stays monochrome (ink / muted / line). This page
+      proposes concrete values for the token group doc 06 §1 names but does not fix
+      (<code class="mono">viewport: axis X/Y/Z, grid major/minor, selection outline, gizmo
+      hover/active, camera widget</code>). <span class="status-pill">Proposed — confirm or amend at the d1 gate</span></p>
+  </div>
+
+  <div class="demo-stage viewport-stage">
+    <div class="viewport-floor"></div>
+    <div class="viewport-origin">
+      <div class="viewport-object">
+        <div class="face face-top"></div>
+        <div class="face face-front"></div>
+        <div class="face face-side"></div>
+      </div>
+      <div class="viewport-selection">
+        <span class="corner tl"></span><span class="corner tr"></span>
+        <span class="corner bl"></span><span class="corner br"></span>
+        <span class="box"></span>
+      </div>
+      <div class="viewport-gizmo">
+        <div class="gizmo-arm x"></div>
+        <div class="gizmo-arm y"></div>
+        <div class="gizmo-arm z"></div>
+      </div>
+    </div>
+    <div class="nav-widget" title="Camera orientation">
+      <div class="core">
+        <span class="axis-dot x"></span>
+        <span class="axis-dot y"></span>
+        <span class="axis-dot z"></span>
+      </div>
+    </div>
+    <div class="hint">Hover a gizmo arm to see the hover rule; click-hold to see the active-drag highlight.</div>
+  </div>
+
+  <table class="legend-table">
+    <thead>
+      <tr><th>Token</th><th>Usage</th><th>Dark</th><th>Light</th></tr>
+    </thead>
+    <tbody>
+      <tr>
+        <td class="token-name">Axis X</td>
+        <td class="usage">X-axis gizmo arm; cross-tool convention (Unity/Unreal/Blender/Maya all use red for X)</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#ff5a5f"></span><code>#ff5a5f</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#e11d3c"></span><code>#e11d3c</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Axis Y</td>
+        <td class="usage">Y-axis gizmo arm (up)</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#4ade80"></span><code>#4ade80</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#22a55e"></span><code>#22a55e</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Axis Z</td>
+        <td class="usage">Z-axis gizmo arm (forward/depth)</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#4d9fff"></span><code>#4d9fff</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#2563eb"></span><code>#2563eb</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Grid major</td>
+        <td class="usage">Primary floor grid lines — kept ink-derived, not a new hue</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:rgba(237,237,237,0.16)"></span><code>ink @ 16%</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:rgba(23,23,23,0.14); border-color:#ccc;"></span><code>ink @ 14%</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Grid minor</td>
+        <td class="usage">Subdivision lines between major lines</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:rgba(237,237,237,0.06)"></span><code>ink @ 6%</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:rgba(23,23,23,0.06); border-color:#ccc;"></span><code>ink @ 6%</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Selection outline</td>
+        <td class="usage">Bounding box + corner brackets on the selected object — a distinct cyan, never reused by any status hue or axis color</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#22d3ee"></span><code>#22d3ee</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#0891b2"></span><code>#0891b2</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Gizmo hover</td>
+        <td class="usage">Rule, not a fixed hex: brighten the hovered handle's own axis color (+lightness/saturation). See the live demo above.</td>
+        <td colspan="2" class="usage">formula, no swatch</td>
+      </tr>
+      <tr>
+        <td class="token-name">Gizmo active</td>
+        <td class="usage">Handle currently being dragged, any axis — universal highlight, the classic DCC "you are now dragging" cue</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#ffe14d"></span><code>#ffe14d</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#eab308"></span><code>#eab308</code></div></td>
+      </tr>
+      <tr>
+        <td class="token-name">Camera widget</td>
+        <td class="usage">Orientation navigator body — neutral ink; its directional faces borrow the axis colors on hover rather than inventing a 10th hue</td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#ededed"></span><code>ink</code></div></td>
+        <td><div class="sw-cell"><span class="swatch" style="background:#171717"></span><code>ink</code></div></td>
+      </tr>
+    </tbody>
+  </table>
+
+  <div class="rationale">
+    <div>
+      <h3>Why RGB-convention axis colors</h3>
+      <p>Every mainstream 3D tool a hired game developer already knows (Unity, Unreal, Blender,
+        Maya, 3ds Max, Godot) uses red/green/blue for X/Y/Z. Deviating for brand consistency
+        would cost muscle memory for no real gain — the viewport is explicitly carved out as the
+        one place chroma is legal (D12) precisely so this convention can be honored.</p>
+      <ul>
+        <li>Axis red/green loosely echo the <code class="mono">bad</code>/<code class="mono">good</code>
+          status hues, which is fine in practice — a gizmo arm and a status badge are never
+          adjacent or ambiguous in context, and every tool above ships this overlap already.</li>
+        <li>Values are tuned (not copy-pasted from the status hues) so the two token groups stay
+          independently defined per the 06 §1 schema, even where the hue family is intentionally
+          shared.</li>
+      </ul>
+    </div>
+    <div>
+      <h3>Why selection ≠ warn, active ≠ wait</h3>
+      <p>The status hues carry reserved semantics elsewhere in the UI (<code class="mono">warn</code>
+        = active work only, pulses; <code class="mono">wait</code> = awaiting a human). A static
+        selection outline or a drag-active gizmo handle is neither — reusing those hues here would
+        quietly overload their meaning. Selection gets its own cyan; the active-drag highlight
+        reuses the universal bright-yellow DCC convention instead of inventing something novel for
+        no reason.</p>
+      <h3 style="margin-top:16px;">Open item</h3>
+      <p>The Inspector's own <code class="mono">Light.Color</code> field (see editor.html) shows an
+        arbitrary authored color — that is project content, not UI chrome, so it does not need a
+        viewport-style exception clause of its own, but it is called out in TOKENS.md as worth a
+        one-line confirmation at the e06 gate.</p>
+    </div>
+  </div>
+</div>
+
+<div class="mockup-controls">
+  <div class="mc-heading"><span class="status-dot is-idle"></span>Mockup controls — not part of the product UI</div>
+  <div class="mc-row">
+    <span class="mc-label">Theme</span>
+    <div class="segmented" data-segmented data-role="theme">
+      <span class="pill"></span>
+      <button data-value="dark" class="active">Dark</button>
+      <button data-value="light">Light</button>
+    </div>
+  </div>
+  <div class="mc-nav">
+    <a href="index.html">Index</a>
+    <a href="editor.html">Editor</a>
+    <a href="welcome.html">Welcome</a>
+    <a href="viewport-palette.html" class="current">Viewport palette</a>
+    <a href="tokens-preview.html">Tokens</a>
+    <a href="flourishes.html">Flourishes</a>
+  </div>
+</div>
+
+<script src="shared/main.js"></script>
+</body>
+</html>

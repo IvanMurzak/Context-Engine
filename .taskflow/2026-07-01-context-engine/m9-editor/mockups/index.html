@@ -1,0 +1,224 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-aurora-variant="a">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Editor — d1 Visual Direction Mockups</title>
+<link rel="stylesheet" href="shared/tokens.css">
+<link rel="stylesheet" href="shared/base.css">
+<link rel="stylesheet" href="shared/components.css">
+<link rel="stylesheet" href="shared/aurora.css">
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: var(--ctx-space-9) var(--ctx-space-8) 140px; }
+  .eyebrow { font-family: var(--ctx-font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ctx-muted-2); }
+  .hero { margin-bottom: var(--ctx-space-10); }
+  .hero .mark-row { display: flex; align-items: center; gap: var(--ctx-space-4); margin-bottom: var(--ctx-space-5); }
+  .hero .mark { width: 34px; height: 34px; border-radius: 9px; background: var(--ctx-ink); }
+  .hero h1 { font-size: 28px; font-weight: var(--ctx-weight-semibold); letter-spacing: var(--ctx-tracking); }
+  .hero p { color: var(--ctx-muted); max-width: 680px; margin-top: var(--ctx-space-4); font-size: var(--ctx-text-base); line-height: 1.7; }
+
+  .gate-box {
+    border: var(--ctx-border-w) solid var(--ctx-wait);
+    border-radius: var(--ctx-radius-md);
+    padding: var(--ctx-space-7);
+    margin-bottom: var(--ctx-space-10);
+    background: var(--ctx-panel);
+  }
+  .gate-box .gate-head { display: flex; align-items: center; gap: var(--ctx-space-3); margin-bottom: var(--ctx-space-3); }
+  .gate-box .gate-head .status-dot { width: 9px; height: 9px; }
+  .gate-box .gate-head h2 { font-size: var(--ctx-text-md); font-weight: var(--ctx-weight-semibold); }
+  .gate-box > p { color: var(--ctx-muted); font-size: var(--ctx-text-xs); margin-bottom: var(--ctx-space-6); }
+
+  .variant-grid { display: grid; grid-template-columns: 1fr 1fr; gap: var(--ctx-space-6); }
+  .variant-card {
+    border: var(--ctx-border-w) solid var(--ctx-line); border-radius: var(--ctx-radius-md);
+    padding: var(--ctx-space-6); background: var(--ctx-panel-2);
+  }
+  .variant-card h3 { font-size: var(--ctx-text-sm); font-weight: var(--ctx-weight-semibold); margin-bottom: var(--ctx-space-2); }
+  .variant-card p { font-size: 11px; color: var(--ctx-muted); margin-bottom: var(--ctx-space-5); line-height: 1.6; }
+  .variant-demo { display: flex; align-items: center; gap: var(--ctx-space-5); padding: var(--ctx-space-6); background: var(--ctx-canvas); border-radius: var(--ctx-radius-sm); }
+  .variant-demo .mini-playbar { display:flex; align-items:center; gap:var(--ctx-space-3); }
+  .pick-btn {
+    appearance: none; border-radius: var(--ctx-radius-pill); border: var(--ctx-border-w) solid var(--ctx-line);
+    background: var(--ctx-chip); color: var(--ctx-muted); font-size: 10.5px; padding: 5px 12px; cursor: pointer;
+    margin-top: var(--ctx-space-5);
+  }
+  .pick-btn.picked { background: var(--ctx-ink); color: var(--ctx-canvas); border-color: var(--ctx-ink); }
+
+  .surface-grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: var(--ctx-space-6); margin-bottom: var(--ctx-space-10); }
+  .surface-card {
+    display: block; text-decoration: none; color: inherit;
+    border: var(--ctx-border-w) solid var(--ctx-line); border-radius: var(--ctx-radius-md);
+    padding: var(--ctx-space-7); background: var(--ctx-panel);
+    transition: border-color var(--ctx-duration-fast) var(--ctx-ease-standard), background-color var(--ctx-duration-fast) var(--ctx-ease-standard);
+  }
+  .surface-card:hover { border-color: var(--ctx-muted-2); background: var(--ctx-panel-2); }
+  .surface-card .sc-top { display: flex; align-items: center; justify-content: space-between; margin-bottom: var(--ctx-space-3); }
+  .surface-card h3 { font-size: var(--ctx-text-base); font-weight: var(--ctx-weight-semibold); }
+  .surface-card .go { font-family: var(--ctx-font-mono); font-size: 10.5px; color: var(--ctx-muted-2); }
+  .surface-card p { font-size: var(--ctx-text-xs); color: var(--ctx-muted); line-height: 1.6; }
+  .surface-card .tags { display: flex; gap: var(--ctx-space-2); margin-top: var(--ctx-space-4); flex-wrap: wrap; }
+
+  /* NOTE: li is deliberately NOT display:flex — flexbox turns each inline
+     child (the <a>/<code> tags mixed into the sentence) into its own flex
+     item, which breaks normal text wrapping. A positioned pseudo-box on an
+     ordinary block li keeps the sentence wrapping like plain text. */
+  .checklist { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--ctx-space-4); }
+  .checklist li { position: relative; padding-left: 26px; font-size: var(--ctx-text-xs); color: var(--ctx-muted); line-height: 1.6; }
+  .checklist li .box { position: absolute; left: 0; top: 2px; width: 14px; height: 14px; border: var(--ctx-border-w) solid var(--ctx-muted-2); border-radius: 4px; }
+
+  .footer-links { display: flex; gap: var(--ctx-space-5); padding-top: var(--ctx-space-6); border-top: var(--ctx-border-w) solid var(--ctx-line); font-size: var(--ctx-text-xs); }
+</style>
+</head>
+<body class="ctx-ready">
+
+<svg style="display:none" aria-hidden="true">
+<defs>
+<symbol id="icon-play" viewBox="0 0 20 20"><path d="M6.2 4.4 15.6 10 6.2 15.6Z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-plus" viewBox="0 0 20 20"><path d="M10 4.5v11M4.5 10h11" stroke="currentColor" stroke-width="1.6" stroke-linecap="round"/></symbol>
+</defs>
+</svg>
+
+<div class="page">
+  <div class="hero">
+    <div class="eyebrow">Context Engine · M9 Interactive Editor · task d1</div>
+    <div class="mark-row" style="margin-top:10px;">
+      <span class="mark"></span>
+      <h1>Visual direction mockups</h1>
+    </div>
+    <p>Four live-HTML surfaces porting the monochrome-glow-ui design system (doc 06 §2) to the
+      Context Editor, so the owner can pick the visual direction before e06 hardcodes token
+      values. Nothing here is a screenshot — every page is the real HTML/CSS, themeable and
+      interactive, opened straight off disk.</p>
+  </div>
+
+  <div class="gate-box">
+    <div class="gate-head">
+      <span class="status-dot is-wait"></span>
+      <h2>Owner pick required — O1: aurora-glow placement</h2>
+    </div>
+    <p>The signature flourish (06 §2): an animated conic blur-halo, used sparingly. Doc 02 §7
+      frames this as an open question with two candidates. Compare them directly below — both are
+      the real component, live, not a picture of it.</p>
+
+    <div class="variant-grid">
+      <div class="variant-card">
+        <h3>Variant A — Play button only</h3>
+        <p>The rarest, most conservative reading of "used sparingly": exactly one glowing element
+          in the entire app, reserved for the single most-pressed action.</p>
+        <div class="variant-demo">
+          <div class="mini-playbar">
+            <button class="btn btn-icon aurora"><svg width="15" height="15"><use href="#icon-play"/></svg></button>
+            <span class="muted-2" style="font-size:11px;">Play bar (editor.html)</span>
+          </div>
+        </div>
+        <button class="pick-btn" data-owner-pick="a">Mark as picked</button>
+      </div>
+      <div class="variant-card">
+        <h3>Variant B — Play button + welcome CTA</h3>
+        <p>Extends the flourish to the app's other "start something" moment — the welcome
+          screen's primary CTA — so first-run and every-run both get one moment of delight.</p>
+        <div class="variant-demo" style="justify-content: space-between;">
+          <div class="mini-playbar">
+            <button class="btn btn-icon aurora"><svg width="15" height="15"><use href="#icon-play"/></svg></button>
+            <span class="muted-2" style="font-size:11px;">Play bar</span>
+          </div>
+          <div class="mini-playbar">
+            <button class="btn btn-primary aurora" style="font-size:11px; height:28px; padding:0 12px;"><svg width="12" height="12"><use href="#icon-plus"/></svg>New from Template</button>
+          </div>
+        </div>
+        <button class="pick-btn" data-owner-pick="b">Mark as picked</button>
+      </div>
+    </div>
+    <p style="margin-top:var(--ctx-space-6); margin-bottom:0;">See both in full context — with the
+      reduced-motion fallback and theme toggle — on
+      <a href="editor.html" style="color:var(--ctx-ink)">the editor mockup</a> and
+      <a href="welcome.html" style="color:var(--ctx-ink)">the welcome screen</a>. The
+      "Mark as picked" buttons above are local to this page only (a scratch aid, not a persisted
+      decision) — the real record of the decision is the ROADMAP progress log per the task's DoD.</p>
+  </div>
+
+  <div class="surface-grid">
+    <a class="surface-card" href="editor.html">
+      <div class="sc-top"><h3>Full editor window</h3><span class="go">Open →</span></div>
+      <p>Dockview-style chrome: splits, tab strips, a floating (torn-out) group, Scene viewport
+        with gizmo/grid/selection, Inspector, Scene Tree, Problems, and the play bar.</p>
+      <div class="tags"><span class="chip">dock anatomy</span><span class="chip">play bar</span><span class="chip">command palette</span></div>
+    </a>
+    <a class="surface-card" href="welcome.html">
+      <div class="sc-top"><h3>Welcome screen</h3><span class="go">Open →</span></div>
+      <p>Mini-welcome per D13: recent projects, open folder, new-from-template — the app's other
+        home for the aurora CTA candidate.</p>
+      <div class="tags"><span class="chip">D13</span><span class="chip">update banner</span></div>
+    </a>
+    <a class="surface-card" href="viewport-palette.html">
+      <div class="sc-top"><h3>Viewport palette proposal</h3><span class="go">Open →</span></div>
+      <p>The D12 legal chroma exception: axis X/Y/Z, grid major/minor, selection outline, gizmo
+        hover/active, camera widget — swatches, rationale, and a live demo stage.</p>
+      <div class="tags"><span class="chip">D12</span><span class="chip">proposed</span></div>
+    </a>
+    <a class="surface-card" href="tokens-preview.html">
+      <div class="sc-top"><h3>Token specimen sheet</h3><span class="go">Open →</span></div>
+      <p>Every color/type/shape/motion value rendered live from <code class="mono">tokens.css</code> —
+        the fastest way to visually QA the port before e06 consumes it.</p>
+      <div class="tags"><span class="chip">visual QA</span></div>
+    </a>
+  </div>
+
+  <div class="gate-box" style="border-color: var(--ctx-line);">
+    <div class="gate-head"><span class="status-dot is-idle"></span><h2>What to look at, concretely</h2></div>
+    <ul class="checklist">
+      <li><span class="box"></span>Toggle Dark ⇄ Light on any page (bottom-right control) — confirm the port reads correctly in both.</li>
+      <li><span class="box"></span>Pick aurora A or B (above), or a third option if neither feels right — this is the one required decision (O1).</li>
+      <li><span class="box"></span>Flip Motion → Reduced on any page with an aurora button — confirm the static-halo fallback is acceptable (this also honors your real OS reduced-motion setting automatically).</li>
+      <li><span class="box"></span>On <a href="editor.html" style="color:var(--ctx-ink)">the editor mockup</a>, switch "Dock anatomy" → On to see labeled callouts for split / tab strip / floating group.</li>
+      <li><span class="box"></span>Skim <a href="TOKENS.md" style="color:var(--ctx-ink)">TOKENS.md</a> for anything marked <code class="mono">PROPOSAL</code> — those are values doc 06 named but didn't fix (viewport palette hexes, spacing/density scale, icon set) and are open to a quick amend, not just the aurora call.</li>
+    </ul>
+  </div>
+
+  <div class="footer-links">
+    <a href="README.md">README.md (Markdown source)</a>
+    <a href="TOKENS.md">TOKENS.md (Markdown source)</a>
+  </div>
+</div>
+
+<div class="mockup-controls">
+  <div class="mc-heading"><span class="status-dot is-idle"></span>Mockup controls — not part of the product UI</div>
+  <div class="mc-row">
+    <span class="mc-label">Theme</span>
+    <div class="segmented" data-segmented data-role="theme">
+      <span class="pill"></span>
+      <button data-value="dark" class="active">Dark</button>
+      <button data-value="light">Light</button>
+    </div>
+  </div>
+  <div class="mc-row">
+    <span class="mc-label">Motion</span>
+    <div class="segmented" data-segmented data-role="motion">
+      <span class="pill"></span>
+      <button data-value="normal" class="active">Normal</button>
+      <button data-value="reduced">Reduced</button>
+    </div>
+  </div>
+  <div class="mc-nav">
+    <a href="index.html" class="current">Index</a>
+    <a href="editor.html">Editor</a>
+    <a href="welcome.html">Welcome</a>
+    <a href="viewport-palette.html">Viewport palette</a>
+    <a href="tokens-preview.html">Tokens</a>
+    <a href="flourishes.html">Flourishes</a>
+  </div>
+</div>
+
+<script src="shared/main.js"></script>
+<script>
+  document.querySelectorAll('[data-owner-pick]').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      document.querySelectorAll('[data-owner-pick]').forEach(function (b) { b.classList.remove('picked'); b.textContent = 'Mark as picked'; });
+      btn.classList.add('picked');
+      btn.textContent = 'Picked ✓ (scratch only)';
+    });
+  });
+</script>
+</body>
+</html>

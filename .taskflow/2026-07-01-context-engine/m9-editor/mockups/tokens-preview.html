@@ -1,0 +1,235 @@
+<!doctype html>
+<html lang="en" data-theme="dark" data-aurora-variant="a">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Editor — d1 mockup — Token specimen sheet</title>
+<link rel="stylesheet" href="shared/tokens.css">
+<link rel="stylesheet" href="shared/base.css">
+<link rel="stylesheet" href="shared/components.css">
+<link rel="stylesheet" href="shared/aurora.css">
+<style>
+  .page { max-width: 1080px; margin: 0 auto; padding: var(--ctx-space-9) var(--ctx-space-8) 140px; }
+  .page-header { margin-bottom: var(--ctx-space-9); }
+  .eyebrow { font-family: var(--ctx-font-mono); font-size: 10.5px; letter-spacing: 0.08em; text-transform: uppercase; color: var(--ctx-muted-2); }
+  .page-header h1 { font-size: 24px; font-weight: var(--ctx-weight-semibold); margin-top: var(--ctx-space-3); }
+  .page-header p { color: var(--ctx-muted); margin-top: var(--ctx-space-3); max-width: 720px; }
+
+  section.spec { margin-bottom: var(--ctx-space-10); }
+  section.spec h2 {
+    font-size: var(--ctx-text-md); font-weight: var(--ctx-weight-semibold);
+    padding-bottom: var(--ctx-space-3); margin-bottom: var(--ctx-space-6);
+    border-bottom: var(--ctx-border-w) solid var(--ctx-line);
+  }
+  .swatch-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(140px, 1fr)); gap: var(--ctx-space-5); }
+  .swatch-card {
+    border: var(--ctx-border-w) solid var(--ctx-line); border-radius: var(--ctx-radius-md); overflow: hidden;
+  }
+  .swatch-card .fill { height: 64px; }
+  .swatch-card .label { padding: var(--ctx-space-3) var(--ctx-space-4); font-size: 10.5px; }
+  .swatch-card .label .name { font-weight: var(--ctx-weight-medium); }
+  .swatch-card .label .hex { font-family: var(--ctx-font-mono); color: var(--ctx-muted-2); display:block; margin-top: 2px; }
+
+  .type-row { display: flex; align-items: baseline; gap: var(--ctx-space-6); padding: var(--ctx-space-3) 0; border-bottom: var(--ctx-border-w) solid var(--ctx-line); }
+  .type-row .size-tag { width: 90px; flex-shrink: 0; font-family: var(--ctx-font-mono); font-size: 10.5px; color: var(--ctx-muted-2); }
+
+  .tnum-demo { display: flex; gap: var(--ctx-space-8); font-family: var(--ctx-font-mono); font-size: var(--ctx-text-md); }
+  .tnum-demo .col-nums { display: flex; flex-direction: column; }
+
+  .shape-row { display: flex; gap: var(--ctx-space-6); flex-wrap: wrap; align-items: flex-start; }
+  .depth-demo { display: flex; gap: 0; border: var(--ctx-border-w) solid var(--ctx-line); border-radius: var(--ctx-radius-md); overflow: hidden; }
+  .depth-demo .step { width: 140px; height: 90px; display: flex; align-items: center; justify-content: center; font-size: 10.5px; color: var(--ctx-muted-2); }
+  .depth-demo .step.canvas { background: var(--ctx-canvas); }
+  .depth-demo .step.panel { background: var(--ctx-panel); border-left: var(--ctx-border-w) solid var(--ctx-line); }
+  .depth-demo .step.panel2 { background: var(--ctx-panel-2); border-left: var(--ctx-border-w) solid var(--ctx-line); }
+
+  .selbar-demo { display: flex; flex-direction: column; gap: 2px; width: 220px; }
+  .selbar-demo .row { height: 30px; display: flex; align-items: center; padding-left: 12px; border-left: 3px solid transparent; font-size: 11.5px; color: var(--ctx-muted); }
+  .selbar-demo .row.sel { border-left-color: var(--ctx-ink); color: var(--ctx-ink); background: var(--ctx-panel-2); }
+
+  .motion-row { display: flex; align-items: center; gap: var(--ctx-space-6); flex-wrap: wrap; }
+  .duration-chip {
+    width: 130px; height: 34px; border-radius: var(--ctx-radius-sm); border: var(--ctx-border-w) solid var(--ctx-line);
+    position: relative; overflow: hidden; background: var(--ctx-panel-2); cursor: pointer;
+  }
+  .duration-chip .runner {
+    position: absolute; left: 4px; top: 4px; width: 24px; height: 24px; border-radius: 50%;
+    background: var(--ctx-ink); transition: transform var(--dur, 140ms) var(--ctx-ease-standard);
+  }
+  .duration-chip:hover .runner { transform: translateX(94px); }
+  .duration-chip .cap { position: absolute; bottom: 3px; right: 8px; font-family: var(--ctx-font-mono); font-size: 9.5px; color: var(--ctx-muted-2); }
+
+  .icon-row { display: flex; gap: var(--ctx-space-6); align-items: center; color: var(--ctx-ink); }
+</style>
+</head>
+<body class="ctx-ready">
+
+<svg style="display:none" aria-hidden="true">
+<defs>
+<symbol id="icon-play" viewBox="0 0 20 20"><path d="M6.2 4.4 15.6 10 6.2 15.6Z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-warn" viewBox="0 0 20 20"><path d="M10 3.2 17.5 16H2.5Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 8v3.4" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="13.7" r="0.75" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-inspect" viewBox="0 0 20 20"><path d="M4 6.2h4M4 10h7M4 13.8h5" stroke="currentColor" stroke-width="1.4"/><circle cx="12.3" cy="6.2" r="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="9.3" cy="10" r="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.3" cy="13.8" r="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+<symbol id="icon-git" viewBox="0 0 20 20"><circle cx="6" cy="5" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="15" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="14" cy="10" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 6.7V13.3M7.4 10c1.6 0 3.2-1 3.2-3.3" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+</defs>
+</svg>
+
+<div class="page">
+  <div class="page-header">
+    <div class="eyebrow">Visual QA · doc 06 §2 port</div>
+    <h1>Token specimen sheet</h1>
+    <p>Every value in this page is read from <code class="mono">shared/tokens.css</code> custom
+      properties — toggling Dark/Light in the corner control re-renders all of it live, which is
+      the fastest way to sanity-check the port before e06 treats these as reference values.</p>
+  </div>
+
+  <section class="spec">
+    <h2>Surface &amp; ink hierarchy</h2>
+    <div class="swatch-grid">
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-canvas)"></div><div class="label"><span class="name">canvas</span><code class="hex">deepest surface</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-panel)"></div><div class="label"><span class="name">panel</span><code class="hex">panel surface</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-panel-2)"></div><div class="label"><span class="name">panel2</span><code class="hex">raised step</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-ink)"></div><div class="label"><span class="name">ink</span><code class="hex">primary text / accent</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-muted)"></div><div class="label"><span class="name">muted</span><code class="hex">secondary text</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-muted-2)"></div><div class="label"><span class="name">muted2</span><code class="hex">tertiary text</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-line)"></div><div class="label"><span class="name">line</span><code class="hex">1px borders</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-chip)"></div><div class="label"><span class="name">chip</span><code class="hex">input/chip fill</code></div></div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>Status hues — the only chroma (1:1 bound semantics)</h2>
+    <div class="swatch-grid">
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-good)"></div><div class="label"><span class="name">good</span><code class="hex">success / settled</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-warn)"></div><div class="label"><span class="name">warn</span><code class="hex">active work only — pulses</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-bad)"></div><div class="label"><span class="name">bad</span><code class="hex">errors / diagnostics</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-wait)"></div><div class="label"><span class="name">wait</span><code class="hex">awaiting human</code></div></div>
+      <div class="swatch-card"><div class="fill" style="background:var(--ctx-idle)"></div><div class="label"><span class="name">idle</span><code class="hex">neutral / at rest</code></div></div>
+    </div>
+    <div class="row gap-4" style="margin-top:var(--ctx-space-6); flex-wrap:wrap;">
+      <div class="status-label is-good"><span class="status-dot is-good"></span>Derivation settled</div>
+      <div class="status-label is-warn"><span class="status-dot is-warn"></span>Compiling…</div>
+      <div class="status-label is-bad"><span class="status-dot is-bad"></span>Build failed</div>
+      <div class="status-label is-wait"><span class="status-dot is-wait"></span>Awaiting rebase</div>
+      <span class="badge-count is-bad">2</span>
+      <span class="chip">idle chip</span>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>Typography — Geist / Geist Mono, dense scale, tabular nums</h2>
+    <div class="col">
+      <div class="type-row"><span class="size-tag">2xs 10.5px</span><span style="font-size:var(--ctx-text-2xs)">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">xs 11.5px</span><span style="font-size:var(--ctx-text-xs)">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">sm 12.5px</span><span style="font-size:var(--ctx-text-sm)">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">base 13.5px</span><span style="font-size:var(--ctx-text-base)">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">md 15px</span><span style="font-size:var(--ctx-text-md)">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">lg 17px</span><span style="font-size:var(--ctx-text-lg)">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">xl 19px</span><span style="font-size:var(--ctx-text-xl); font-weight:var(--ctx-weight-semibold);">Aa Context Editor 0123456789</span></div>
+      <div class="type-row"><span class="size-tag">mono / data</span><span class="mono" style="font-size:var(--ctx-text-sm)">scene.ctx:142 · 0xF0386B9 · 12,480 tris</span></div>
+    </div>
+    <div class="tnum-demo" style="margin-top:var(--ctx-space-6);">
+      <div class="col-nums"><span>fps  60</span><span>fps 124</span></div>
+      <div class="col gap-2">
+        <span class="muted-2" style="font-family:var(--ctx-font-ui); font-size:11px;">tabular-nums keeps columns aligned regardless of digit width — required for fps/frame/id columns.</span>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>Shape &amp; elevation — border + surface step, never a shadow</h2>
+    <div class="shape-row">
+      <div class="col gap-3">
+        <span class="muted-2" style="font-size:10.5px;">Depth via surface step (canvas → panel → panel2)</span>
+        <div class="depth-demo">
+          <div class="step canvas">canvas</div>
+          <div class="step panel">panel</div>
+          <div class="step panel2">panel2</div>
+        </div>
+      </div>
+      <div class="col gap-3">
+        <span class="muted-2" style="font-size:10.5px;">Selection accent — 3px left ink bar (never reused for tab-active, see editor.html)</span>
+        <div class="selbar-demo">
+          <div class="row">Main Camera</div>
+          <div class="row sel">Directional Light</div>
+          <div class="row">Ground</div>
+        </div>
+      </div>
+      <div class="col gap-3">
+        <span class="muted-2" style="font-size:10.5px;">Radii — sm 7px / md 8px</span>
+        <div class="row gap-4">
+          <div style="width:56px;height:56px;background:var(--ctx-panel-2);border:1px solid var(--ctx-line);border-radius:var(--ctx-radius-sm);"></div>
+          <div style="width:56px;height:56px;background:var(--ctx-panel-2);border:1px solid var(--ctx-line);border-radius:var(--ctx-radius-md);"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>Motion — durations, spring pills, pulse, aurora</h2>
+    <div class="motion-row" style="margin-bottom:var(--ctx-space-6);">
+      <div class="duration-chip" style="--dur:120ms;"><span class="runner"></span><span class="cap">fast 120ms</span></div>
+      <div class="duration-chip" style="--dur:140ms;"><span class="runner"></span><span class="cap">base 140ms</span></div>
+      <div class="duration-chip" style="--dur:160ms;"><span class="runner"></span><span class="cap">slow 160ms</span></div>
+      <div class="duration-chip" style="--dur:350ms;"><span class="runner"></span><span class="cap">theme 350ms</span></div>
+      <span class="muted-2" style="font-size:10.5px;">(hover each chip)</span>
+    </div>
+    <div class="motion-row" style="margin-bottom:var(--ctx-space-6);">
+      <div class="segmented" data-segmented data-role="demo-seg">
+        <span class="pill"></span>
+        <button data-value="1" class="active">Spring</button>
+        <button data-value="2">Pill</button>
+        <button data-value="3">Feel</button>
+      </div>
+      <span class="muted-2" style="font-size:10.5px;">CSS cubic-bezier(0.34,1.56,0.64,1) approximating stiffness 400 / damping 32 — click a segment</span>
+    </div>
+    <div class="motion-row" style="margin-bottom:var(--ctx-space-6);">
+      <div class="status-label is-warn"><span class="status-dot is-warn"></span>Active work pulses (1.4s ease-in-out)</div>
+    </div>
+    <div class="motion-row">
+      <button class="btn btn-primary aurora"><svg width="14" height="14"><use href="#icon-play"/></svg>Aurora — the signature flourish</button>
+      <span class="muted-2" style="font-size:10.5px;">Monochrome conic halo — see index.html / editor.html / welcome.html for the reduced-motion fallback.</span>
+    </div>
+  </section>
+
+  <section class="spec">
+    <h2>Iconography (proposed placeholder — no set named in doc 06)</h2>
+    <div class="icon-row">
+      <svg width="20" height="20"><use href="#icon-warn"/></svg>
+      <svg width="20" height="20"><use href="#icon-inspect"/></svg>
+      <svg width="20" height="20"><use href="#icon-git"/></svg>
+      <span class="muted-2" style="font-size:11px;">1.5px stroke, 18-20px box, currentColor — recommend Lucide or Geist Icons at e06 implementation time.</span>
+    </div>
+  </section>
+</div>
+
+<div class="mockup-controls">
+  <div class="mc-heading"><span class="status-dot is-idle"></span>Mockup controls — not part of the product UI</div>
+  <div class="mc-row">
+    <span class="mc-label">Theme</span>
+    <div class="segmented" data-segmented data-role="theme">
+      <span class="pill"></span>
+      <button data-value="dark" class="active">Dark</button>
+      <button data-value="light">Light</button>
+    </div>
+  </div>
+  <div class="mc-row">
+    <span class="mc-label">Motion</span>
+    <div class="segmented" data-segmented data-role="motion">
+      <span class="pill"></span>
+      <button data-value="normal" class="active">Normal</button>
+      <button data-value="reduced">Reduced</button>
+    </div>
+  </div>
+  <div class="mc-nav">
+    <a href="index.html">Index</a>
+    <a href="editor.html">Editor</a>
+    <a href="welcome.html">Welcome</a>
+    <a href="viewport-palette.html">Viewport palette</a>
+    <a href="tokens-preview.html" class="current">Tokens</a>
+    <a href="flourishes.html">Flourishes</a>
+  </div>
+</div>
+
+<script src="shared/main.js"></script>
+</body>
+</html>

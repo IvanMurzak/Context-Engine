@@ -1,0 +1,883 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Context Game Engine — Design Presentation</title>
+<style>
+  /* ============ RESET & TOKENS ============ */
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+  :root {
+    --bg: #070a14;
+    --bg-2: #0b1020;
+    --bg-3: #101830;
+    --card: rgba(148, 163, 253, 0.055);
+    --card-border: rgba(148, 163, 253, 0.14);
+    --text: #e7ecf8;
+    --text-dim: #9aa7c7;
+    --text-faint: #64719a;
+    --cyan: #22d3ee;
+    --violet: #a78bfa;
+    --pink: #f472b6;
+    --amber: #fbbf24;
+    --green: #34d399;
+    --red: #f87171;
+    --grad: linear-gradient(90deg, #22d3ee, #818cf8 55%, #a78bfa);
+    --grad-soft: linear-gradient(135deg, rgba(34,211,238,.14), rgba(167,139,250,.14));
+    --mono: "Cascadia Code", "JetBrains Mono", Consolas, "SF Mono", monospace;
+    --sans: "Segoe UI Variable Display", "Segoe UI", -apple-system, "Inter", Roboto, sans-serif;
+  }
+  html { scroll-behavior: smooth; }
+  @media (prefers-reduced-motion: reduce) {
+    html { scroll-behavior: auto; }
+    *, *::before, *::after { animation-duration: .001s !important; transition-duration: .001s !important; }
+  }
+  body {
+    background: var(--bg); color: var(--text); font-family: var(--sans);
+    line-height: 1.6; overflow-x: hidden; -webkit-font-smoothing: antialiased;
+  }
+  ::selection { background: rgba(34,211,238,.35); }
+
+  /* ============ BACKGROUND FX ============ */
+  .bg-fx { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+  .bg-grid {
+    position: absolute; inset: -2px;
+    background-image:
+      linear-gradient(rgba(148,163,253,.05) 1px, transparent 1px),
+      linear-gradient(90deg, rgba(148,163,253,.05) 1px, transparent 1px);
+    background-size: 56px 56px;
+    mask-image: radial-gradient(ellipse 90% 70% at 50% 0%, black 30%, transparent 75%);
+  }
+  .orb { position: absolute; border-radius: 50%; filter: blur(90px); opacity: .5; }
+  .orb-1 { width: 620px; height: 620px; background: radial-gradient(circle, rgba(34,211,238,.24), transparent 65%); top: -180px; left: -120px; animation: drift1 26s ease-in-out infinite alternate; }
+  .orb-2 { width: 700px; height: 700px; background: radial-gradient(circle, rgba(167,139,250,.22), transparent 65%); top: 5%; right: -220px; animation: drift2 32s ease-in-out infinite alternate; }
+  .orb-3 { width: 500px; height: 500px; background: radial-gradient(circle, rgba(244,114,182,.13), transparent 65%); bottom: -160px; left: 32%; animation: drift1 38s ease-in-out infinite alternate-reverse; }
+  @keyframes drift1 { to { transform: translate(90px, 70px) scale(1.12); } }
+  @keyframes drift2 { to { transform: translate(-80px, 110px) scale(.94); } }
+
+  #particles { position: fixed; inset: 0; z-index: 0; pointer-events: none; }
+
+  /* ============ NAV ============ */
+  nav {
+    position: fixed; top: 0; left: 0; right: 0; z-index: 100;
+    display: flex; align-items: center; gap: 6px; padding: 10px 22px;
+    background: rgba(7,10,20,.72); backdrop-filter: blur(14px);
+    border-bottom: 1px solid rgba(148,163,253,.1);
+    transform: translateY(-100%); transition: transform .4s ease;
+    overflow-x: auto; scrollbar-width: none;
+  }
+  nav.visible { transform: translateY(0); }
+  nav .logo { font-weight: 800; font-size: .95rem; letter-spacing: .04em; margin-right: 14px; white-space: nowrap;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  nav a {
+    color: var(--text-dim); text-decoration: none; font-size: .78rem; padding: 5px 11px;
+    border-radius: 99px; white-space: nowrap; transition: all .25s;
+  }
+  nav a:hover, nav a.active { color: var(--text); background: rgba(148,163,253,.12); }
+
+  /* progress bar */
+  #progress { position: fixed; top: 0; left: 0; height: 2.5px; width: 0; z-index: 101; background: var(--grad); box-shadow: 0 0 12px rgba(99,102,241,.8); }
+
+  /* ============ LAYOUT ============ */
+  main { position: relative; z-index: 1; }
+  section { max-width: 1120px; margin: 0 auto; padding: 110px 28px 30px; }
+  .kicker {
+    display: inline-flex; align-items: center; gap: 8px;
+    font-family: var(--mono); font-size: .72rem; letter-spacing: .22em; text-transform: uppercase;
+    color: var(--cyan); margin-bottom: 14px;
+  }
+  .kicker::before { content: ""; width: 26px; height: 1px; background: var(--cyan); }
+  h2 { font-size: clamp(1.7rem, 3.6vw, 2.6rem); font-weight: 800; letter-spacing: -.02em; line-height: 1.15; margin-bottom: 14px; }
+  h2 .g { background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .lead { color: var(--text-dim); font-size: 1.02rem; max-width: 760px; margin-bottom: 40px; }
+  .lead strong { color: var(--text); }
+
+  /* ============ REVEAL ANIMATION ============ */
+  .reveal { opacity: 0; transform: translateY(34px); transition: opacity .8s cubic-bezier(.2,.7,.3,1), transform .8s cubic-bezier(.2,.7,.3,1); }
+  .reveal.in { opacity: 1; transform: none; }
+  .reveal[data-d="1"] { transition-delay: .1s; } .reveal[data-d="2"] { transition-delay: .2s; }
+  .reveal[data-d="3"] { transition-delay: .3s; } .reveal[data-d="4"] { transition-delay: .4s; }
+  .reveal[data-d="5"] { transition-delay: .5s; } .reveal[data-d="6"] { transition-delay: .6s; }
+
+  /* ============ HERO ============ */
+  .hero { min-height: 100svh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; padding: 60px 24px; position: relative; }
+  .hero-badge {
+    display: inline-flex; align-items: center; gap: 9px; font-family: var(--mono); font-size: .74rem;
+    color: var(--green); border: 1px solid rgba(52,211,153,.35); background: rgba(52,211,153,.07);
+    padding: 6px 16px; border-radius: 99px; margin-bottom: 30px;
+    animation: fadeUp 1s .1s both;
+  }
+  .pulse-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); animation: pulse 2s infinite; }
+  @keyframes pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(52,211,153,.55);} 60% { box-shadow: 0 0 0 9px rgba(52,211,153,0);} }
+  .hero h1 {
+    font-size: clamp(2.7rem, 8vw, 5.6rem); font-weight: 900; letter-spacing: -.035em; line-height: 1.02;
+    animation: fadeUp 1s .25s both;
+  }
+  .hero h1 .g {
+    background: linear-gradient(90deg, #22d3ee, #818cf8, #a78bfa, #f472b6, #22d3ee);
+    background-size: 300% 100%;
+    -webkit-background-clip: text; background-clip: text; color: transparent;
+    animation: gradFlow 9s linear infinite;
+  }
+  @keyframes gradFlow { to { background-position: 300% 0; } }
+  .hero .tagline { font-size: clamp(1rem, 2.4vw, 1.35rem); color: var(--text-dim); max-width: 720px; margin: 26px auto 0; animation: fadeUp 1s .45s both; }
+  .hero .tagline strong { color: var(--text); font-weight: 600; }
+  .hero-terminal {
+    margin-top: 44px; font-family: var(--mono); font-size: .86rem; text-align: left;
+    background: rgba(10,14,28,.85); border: 1px solid var(--card-border); border-radius: 14px;
+    padding: 18px 24px; min-width: min(560px, 88vw); box-shadow: 0 24px 70px rgba(0,0,0,.5);
+    animation: fadeUp 1s .65s both;
+  }
+  .hero-terminal .tbar { display: flex; gap: 7px; margin-bottom: 14px; }
+  .hero-terminal .tbar i { width: 11px; height: 11px; border-radius: 50%; background: #2c3654; }
+  .hero-terminal .tbar i:nth-child(1) { background: #f87171aa; } .hero-terminal .tbar i:nth-child(2) { background: #fbbf24aa; } .hero-terminal .tbar i:nth-child(3) { background: #34d399aa; }
+  .hero-terminal .line { white-space: pre-wrap; color: var(--text-dim); min-height: 1.5em; }
+  .hero-terminal .prompt { color: var(--cyan); }
+  .hero-terminal .ok { color: var(--green); }
+  .cursor { display: inline-block; width: 8px; height: 1.05em; background: var(--cyan); vertical-align: text-bottom; animation: blink 1s steps(1) infinite; }
+  @keyframes blink { 50% { opacity: 0; } }
+  @keyframes fadeUp { from { opacity: 0; transform: translateY(30px);} to { opacity: 1; transform: none;} }
+  .scroll-hint { position: absolute; bottom: 26px; left: 50%; transform: translateX(-50%); color: var(--text-faint); font-size: .72rem; letter-spacing: .25em; text-transform: uppercase; animation: fadeUp 1s 1.2s both; }
+  .scroll-hint::after { content: "▼"; display: block; text-align: center; margin-top: 6px; animation: bob 1.8s ease-in-out infinite; }
+  @keyframes bob { 50% { transform: translateY(6px); } }
+
+  /* ============ STATS ============ */
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 16px; }
+  .stat {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 16px;
+    padding: 26px 18px; text-align: center; position: relative; overflow: hidden;
+    transition: transform .3s, border-color .3s;
+  }
+  .stat:hover { transform: translateY(-5px); border-color: rgba(34,211,238,.4); }
+  .stat::before { content: ""; position: absolute; inset: 0 0 auto; height: 2px; background: var(--grad); opacity: .65; }
+  .stat .num { font-size: 2.3rem; font-weight: 850; font-variant-numeric: tabular-nums; letter-spacing: -.02em;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .stat .lbl { font-size: .74rem; color: var(--text-dim); margin-top: 4px; letter-spacing: .05em; text-transform: uppercase; }
+
+  /* ============ CARDS ============ */
+  .grid { display: grid; gap: 18px; }
+  .grid.c2 { grid-template-columns: repeat(auto-fit, minmax(320px, 1fr)); }
+  .grid.c3 { grid-template-columns: repeat(auto-fit, minmax(260px, 1fr)); }
+  .grid.c4 { grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+  .card {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 18px;
+    padding: 26px; position: relative; overflow: hidden;
+    transition: transform .35s cubic-bezier(.2,.7,.3,1), border-color .35s, box-shadow .35s;
+  }
+  .card:hover { transform: translateY(-6px); border-color: rgba(34,211,238,.38); box-shadow: 0 18px 50px rgba(0,0,0,.4); }
+  .card .icon { font-size: 1.7rem; margin-bottom: 12px; display: block; filter: drop-shadow(0 0 14px rgba(34,211,238,.4)); }
+  .card h3 { font-size: 1.06rem; font-weight: 700; margin-bottom: 8px; letter-spacing: -.01em; }
+  .card p { font-size: .88rem; color: var(--text-dim); }
+  .card p code, .lead code, td code, li code { font-family: var(--mono); font-size: .82em; color: var(--cyan); background: rgba(34,211,238,.08); padding: 1px 6px; border-radius: 6px; }
+  .card .tag { position: absolute; top: 18px; right: 18px; font-family: var(--mono); font-size: .64rem; color: var(--text-faint); border: 1px solid var(--card-border); padding: 2px 9px; border-radius: 99px; }
+  .card.glow-c:hover { border-color: rgba(34,211,238,.5); } .card.glow-v:hover { border-color: rgba(167,139,250,.5); }
+  .card.glow-p:hover { border-color: rgba(244,114,182,.5); } .card.glow-g:hover { border-color: rgba(52,211,153,.5); }
+
+  /* numbered principle cards */
+  .principle { padding-left: 76px; }
+  .principle .n {
+    position: absolute; left: 20px; top: 24px; width: 40px; height: 40px; border-radius: 12px;
+    display: grid; place-items: center; font-weight: 800; font-family: var(--mono);
+    background: var(--grad-soft); border: 1px solid var(--card-border); color: var(--cyan);
+  }
+
+  /* ============ ARCHITECTURE DIAGRAM ============ */
+  .arch { display: flex; flex-direction: column; gap: 0; align-items: stretch; }
+  .arch-row { display: grid; gap: 14px; }
+  .arch-box {
+    border-radius: 14px; padding: 16px 18px; border: 1px solid var(--card-border);
+    background: rgba(16,24,48,.6); position: relative; transition: all .3s;
+  }
+  .arch-box:hover { border-color: rgba(34,211,238,.55); box-shadow: 0 0 28px rgba(34,211,238,.12); transform: scale(1.015); }
+  .arch-box h4 { font-size: .92rem; font-weight: 700; display: flex; align-items: center; gap: 8px; }
+  .arch-box .sub { font-size: .74rem; color: var(--text-dim); margin-top: 4px; }
+  .arch-box .chiprow { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+  .chip {
+    font-family: var(--mono); font-size: .66rem; padding: 3px 9px; border-radius: 8px;
+    background: rgba(148,163,253,.09); border: 1px solid rgba(148,163,253,.16); color: var(--text-dim);
+    transition: all .25s;
+  }
+  .chip:hover { color: var(--text); border-color: rgba(34,211,238,.5); background: rgba(34,211,238,.1); }
+  .arch-clients { grid-template-columns: repeat(3, 1fr); }
+  .arch-clients .arch-box { border-color: rgba(244,114,182,.28); background: rgba(244,114,182,.05); text-align: center; }
+  .arch-files { border-color: rgba(251,191,36,.4) !important; background: rgba(251,191,36,.06) !important; text-align: center; padding: 20px !important; }
+  .arch-files h4 { justify-content: center; color: var(--amber); }
+  .arch-editor { border-color: rgba(34,211,238,.38) !important; background: rgba(34,211,238,.05) !important; }
+  .arch-runtime { border-color: rgba(167,139,250,.38) !important; background: rgba(167,139,250,.06) !important; }
+  .arch-inner { border-radius: 11px; border: 1px dashed rgba(148,163,253,.3); padding: 12px 14px; margin-top: 12px; background: rgba(7,10,20,.4); }
+  .arch-inner h5 { font-size: .78rem; font-weight: 700; color: var(--text-dim); text-transform: uppercase; letter-spacing: .1em; margin-bottom: 6px; }
+  .flow-arrow { display: flex; justify-content: center; align-items: center; gap: 12px; padding: 8px 0; color: var(--text-faint); font-size: .72rem; font-family: var(--mono); position: relative; }
+  .flow-arrow .arr { position: relative; width: 2px; height: 34px; background: linear-gradient(180deg, rgba(148,163,253,.5), rgba(148,163,253,.15)); border-radius: 2px; overflow: visible; }
+  .flow-arrow .arr::after { content: ""; position: absolute; bottom: -2px; left: 50%; transform: translateX(-50%); border: 5px solid transparent; border-top-color: rgba(148,163,253,.6); }
+  .flow-arrow .arr .dot { position: absolute; left: 50%; transform: translateX(-50%); width: 6px; height: 6px; border-radius: 50%; background: var(--cyan); box-shadow: 0 0 10px var(--cyan); animation: fall 1.8s linear infinite; }
+  .flow-arrow .arr.up .dot { animation: rise 1.8s linear infinite; background: var(--violet); box-shadow: 0 0 10px var(--violet); }
+  .flow-arrow .arr.up::after { bottom: auto; top: -2px; border-top-color: transparent; border-bottom-color: rgba(167,139,250,.6); }
+  @keyframes fall { from { top: -6px; opacity: 0;} 15% { opacity: 1;} 85% { opacity: 1;} to { top: 34px; opacity: 0;} }
+  @keyframes rise { from { top: 34px; opacity: 0;} 15% { opacity: 1;} 85% { opacity: 1;} to { top: -6px; opacity: 0;} }
+  .platform-row { display: flex; flex-wrap: wrap; justify-content: center; gap: 10px; margin-top: 18px; }
+  .platform { font-family: var(--mono); font-size: .74rem; padding: 7px 15px; border-radius: 10px; border: 1px solid var(--card-border); background: rgba(148,163,253,.06); color: var(--text-dim); transition: all .25s; }
+  .platform:hover { transform: translateY(-3px); color: var(--text); border-color: rgba(34,211,238,.5); }
+  .platform.v2 { opacity: .5; border-style: dashed; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; margin-top: 20px; font-size: .74rem; color: var(--text-dim); justify-content: center; }
+  .legend span { display: inline-flex; align-items: center; gap: 7px; }
+  .legend i { width: 11px; height: 11px; border-radius: 3px; display: inline-block; }
+
+  /* ============ MODULE RELATIONSHIP MAP ============ */
+  .mod-map { display: grid; grid-template-columns: repeat(auto-fit, minmax(230px, 1fr)); gap: 14px; }
+  .mod {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 14px;
+    padding: 18px; cursor: default; transition: all .3s; position: relative;
+  }
+  .mod h4 { font-size: .9rem; font-weight: 700; display: flex; gap: 8px; align-items: center; }
+  .mod p { font-size: .76rem; color: var(--text-dim); margin-top: 6px; }
+  .mod .rel { font-family: var(--mono); font-size: .64rem; color: var(--text-faint); margin-top: 10px; display: block; }
+  .mod-map.dimmed .mod { opacity: .25; filter: saturate(.4); }
+  .mod-map.dimmed .mod.lit { opacity: 1; filter: none; border-color: rgba(34,211,238,.6); box-shadow: 0 0 26px rgba(34,211,238,.14); transform: translateY(-4px); }
+  .mod-map.dimmed .mod.origin { border-color: rgba(244,114,182,.7); box-shadow: 0 0 30px rgba(244,114,182,.2); }
+  .hint { font-size: .74rem; color: var(--text-faint); font-family: var(--mono); margin-bottom: 16px; }
+
+  /* ============ MUTATION FLOW (stepper) ============ */
+  .stepper { display: grid; grid-template-columns: repeat(5, 1fr); gap: 12px; margin-top: 8px; }
+  .step {
+    background: var(--card); border: 1px solid var(--card-border); border-radius: 14px;
+    padding: 18px 14px; text-align: center; transition: all .45s; position: relative;
+  }
+  .step .sn { width: 30px; height: 30px; margin: 0 auto 10px; border-radius: 50%; display: grid; place-items: center; font-family: var(--mono); font-size: .8rem; font-weight: 700; background: rgba(148,163,253,.1); border: 1px solid var(--card-border); color: var(--text-dim); transition: all .45s; }
+  .step h4 { font-size: .8rem; font-weight: 700; }
+  .step p { font-size: .68rem; color: var(--text-dim); margin-top: 5px; }
+  .step.active { border-color: rgba(34,211,238,.6); background: rgba(34,211,238,.07); transform: translateY(-6px); box-shadow: 0 12px 34px rgba(0,0,0,.35); }
+  .step.active .sn { background: var(--grad); color: #06111f; border-color: transparent; box-shadow: 0 0 18px rgba(34,211,238,.5); }
+  .step::after { content: "→"; position: absolute; right: -14px; top: 50%; transform: translateY(-50%); color: var(--text-faint); font-size: 1rem; z-index: 2; }
+  .step:last-child::after { content: none; }
+  @media (max-width: 900px) { .stepper { grid-template-columns: 1fr; } .step::after { content: "↓"; right: 50%; top: auto; bottom: -20px; transform: translateX(50%);} }
+
+  /* ============ TABLES ============ */
+  .tbl { width: 100%; border-collapse: collapse; font-size: .86rem; }
+  .tbl th { text-align: left; font-family: var(--mono); font-size: .68rem; text-transform: uppercase; letter-spacing: .14em; color: var(--cyan); padding: 10px 14px; border-bottom: 1px solid rgba(148,163,253,.22); }
+  .tbl td { padding: 12px 14px; border-bottom: 1px solid rgba(148,163,253,.08); color: var(--text-dim); vertical-align: top; }
+  .tbl td:first-child { color: var(--text); font-weight: 600; white-space: nowrap; }
+  .tbl tr { transition: background .25s; }
+  .tbl tbody tr:hover { background: rgba(148,163,253,.05); }
+
+  /* ============ TIMELINE ============ */
+  .timeline { position: relative; padding-left: 40px; }
+  .timeline::before { content: ""; position: absolute; left: 13px; top: 6px; bottom: 6px; width: 2px;
+    background: linear-gradient(180deg, var(--cyan), var(--violet), var(--pink)); border-radius: 2px; opacity: .55; }
+  .tl-item { position: relative; padding: 0 0 30px 24px; }
+  .tl-item::before { content: ""; position: absolute; left: -34px; top: 5px; width: 15px; height: 15px; border-radius: 50%;
+    background: var(--bg); border: 3px solid var(--cyan); box-shadow: 0 0 14px rgba(34,211,238,.55); transition: all .3s; }
+  .tl-item:hover::before { transform: scale(1.3); }
+  .tl-item .m { font-family: var(--mono); font-size: .72rem; color: var(--cyan); letter-spacing: .12em; }
+  .tl-item h4 { font-size: 1.02rem; font-weight: 700; margin: 3px 0 5px; }
+  .tl-item p { font-size: .84rem; color: var(--text-dim); max-width: 760px; }
+  .tl-item.fork { margin-left: 26px; border-left: 2px dashed rgba(52,211,153,.4); padding-left: 22px; border-radius: 2px; }
+  .tl-item.fork::before { border-color: var(--green); box-shadow: 0 0 14px rgba(52,211,153,.55); left: -60px; }
+  .tl-item.fork .m { color: var(--green); }
+  .badge { display: inline-block; font-family: var(--mono); font-size: .62rem; padding: 2px 9px; border-radius: 99px; margin-left: 8px; vertical-align: 2px; }
+  .badge.ship { background: rgba(52,211,153,.12); color: var(--green); border: 1px solid rgba(52,211,153,.35); }
+  .badge.gate { background: rgba(251,191,36,.1); color: var(--amber); border: 1px solid rgba(251,191,36,.35); }
+  .badge.freeze { background: rgba(34,211,238,.1); color: var(--cyan); border: 1px solid rgba(34,211,238,.35); }
+
+  /* ============ BUSINESS ============ */
+  .biz-hero {
+    text-align: center; padding: 46px 26px; border-radius: 22px; position: relative; overflow: hidden;
+    background: var(--grad-soft); border: 1px solid var(--card-border); margin-bottom: 22px;
+  }
+  .biz-hero .big { font-size: clamp(2.4rem, 6vw, 4rem); font-weight: 900; letter-spacing: -.03em;
+    background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; }
+  .biz-hero p { color: var(--text-dim); max-width: 640px; margin: 10px auto 0; font-size: .95rem; }
+  .biz-hero p strong { color: var(--text); }
+
+  /* ============ CAMPAIGN / ROUNDS ============ */
+  .rounds { display: grid; grid-template-columns: repeat(auto-fit, minmax(165px, 1fr)); gap: 13px; }
+  .round { background: var(--card); border: 1px solid var(--card-border); border-radius: 14px; padding: 18px 15px; transition: all .3s; }
+  .round:hover { transform: translateY(-4px); border-color: rgba(167,139,250,.5); }
+  .round .rn { font-family: var(--mono); font-size: .66rem; color: var(--violet); letter-spacing: .16em; }
+  .round h4 { font-size: .84rem; font-weight: 700; margin: 5px 0 4px; }
+  .round p { font-size: .7rem; color: var(--text-dim); }
+  .verdict {
+    margin-top: 26px; text-align: center; padding: 30px; border-radius: 18px;
+    border: 1px solid rgba(52,211,153,.35); background: rgba(52,211,153,.05);
+  }
+  .verdict .v { font-family: var(--mono); font-size: 1.25rem; font-weight: 800; color: var(--green); letter-spacing: .1em; }
+  .verdict p { color: var(--text-dim); font-size: .86rem; margin-top: 8px; font-style: italic; }
+
+  /* ============ MOAT ============ */
+  .vs { display: grid; grid-template-columns: 1fr 1fr; gap: 18px; }
+  @media (max-width: 800px) { .vs { grid-template-columns: 1fr; } }
+  .vs .col { border-radius: 18px; padding: 26px; border: 1px solid var(--card-border); }
+  .vs .them { background: rgba(248,113,113,.045); border-color: rgba(248,113,113,.22); }
+  .vs .us { background: rgba(52,211,153,.045); border-color: rgba(52,211,153,.28); }
+  .vs h3 { font-size: 1rem; margin-bottom: 14px; display: flex; align-items: center; gap: 9px; }
+  .vs ul { list-style: none; }
+  .vs li { font-size: .85rem; color: var(--text-dim); padding: 7px 0 7px 26px; position: relative; border-bottom: 1px dashed rgba(148,163,253,.09); }
+  .vs li:last-child { border-bottom: none; }
+  .vs .them li::before { content: "✕"; position: absolute; left: 0; color: var(--red); font-weight: 700; }
+  .vs .us li::before { content: "✓"; position: absolute; left: 0; color: var(--green); font-weight: 700; }
+  .vs li strong { color: var(--text); }
+
+  /* ============ FOOTER ============ */
+  footer { position: relative; z-index: 1; text-align: center; padding: 70px 24px 46px; color: var(--text-faint); font-size: .78rem; border-top: 1px solid rgba(148,163,253,.08); margin-top: 80px; }
+  footer .fbig { font-weight: 800; font-size: 1.1rem; background: var(--grad); -webkit-background-clip: text; background-clip: text; color: transparent; margin-bottom: 8px; }
+  .divider { height: 1px; max-width: 1120px; margin: 40px auto 0; background: linear-gradient(90deg, transparent, rgba(148,163,253,.25), transparent); }
+
+  /* quote block */
+  .pull {
+    border-left: 3px solid; border-image: var(--grad) 1; padding: 14px 22px; margin: 30px 0;
+    background: rgba(148,163,253,.04); border-radius: 0 12px 12px 0;
+    font-size: 1.02rem; color: var(--text); font-style: italic;
+  }
+  .pull .who { display: block; font-size: .74rem; color: var(--text-faint); font-style: normal; margin-top: 8px; font-family: var(--mono); }
+</style>
+</head>
+<body>
+
+<div class="bg-fx">
+  <div class="bg-grid"></div>
+  <div class="orb orb-1"></div><div class="orb orb-2"></div><div class="orb orb-3"></div>
+</div>
+<canvas id="particles"></canvas>
+<div id="progress"></div>
+
+<nav id="nav">
+  <span class="logo">CONTEXT</span>
+  <a href="#vision">Vision</a>
+  <a href="#principles">Principles</a>
+  <a href="#architecture">Architecture</a>
+  <a href="#modules">Modules</a>
+  <a href="#flow">Data Flow</a>
+  <a href="#stack">Stack</a>
+  <a href="#contract">Contract</a>
+  <a href="#security">Security</a>
+  <a href="#beachhead">Beachhead</a>
+  <a href="#roadmap">Roadmap</a>
+  <a href="#business">Business</a>
+  <a href="#quality">Quality</a>
+</nav>
+
+<main>
+
+<!-- ================= HERO ================= -->
+<header class="hero">
+  <div class="hero-badge"><span class="pulse-dot"></span> DESIGN LOCKED · 2026-07-02 · PRE-IMPLEMENTATION</div>
+  <h1>Context<br><span class="g">Game Engine</span></h1>
+  <p class="tagline">The <strong>AI-first</strong> game engine where <strong>files are the single source of truth</strong> —
+  headless-complete, CLI-complete, deterministic, and modular from the first commit.</p>
+  <div class="hero-terminal">
+    <div class="tbar"><i></i><i></i><i></i></div>
+    <div class="line" id="term-line"><span class="prompt">$ </span><span id="term-text"></span><span class="cursor"></span></div>
+    <div class="line" id="term-out" style="opacity:0; transition: opacity .6s;"><span class="ok">✓</span> game built, simulated &amp; verified — <b>no GPU, no GUI, no human</b></div>
+  </div>
+  <div class="scroll-hint">scroll</div>
+</header>
+
+<!-- ================= VISION ================= -->
+<section id="vision">
+  <div class="reveal"><span class="kicker">01 · Vision</span>
+  <h2>One engine, <span class="g">every client is equal</span></h2>
+  <p class="lead">A minimal-kernel engine where <strong>every feature is a package</strong> — builds scale from a
+  tiny headless simulation to a full RTX-class 3D game, and <strong>2D is first-class</strong>. A headless
+  <strong>EditorKernel</strong> is a live derived index over your project files (the language-server model):
+  every authored mutation is a file write, and <strong>GUI, CLI, and AI agents are equal clients</strong> over
+  one RPC surface. What you play in the editor is what ships — the editor embeds the same RuntimeKernel the build uses.</p></div>
+
+  <div class="stats">
+    <div class="stat reveal"><div class="num" data-count="59">0</div><div class="lbl">Locked Decisions</div></div>
+    <div class="stat reveal" data-d="1"><div class="num" data-count="140">0</div><div class="lbl">Requirements</div></div>
+    <div class="stat reveal" data-d="2"><div class="num" data-count="5">0</div><div class="lbl">Review Rounds</div></div>
+    <div class="stat reveal" data-d="3"><div class="num" data-count="15">0</div><div class="lbl">Adversarial Reviewers</div></div>
+    <div class="stat reveal" data-d="4"><div class="num" data-count="100" data-suffix="k">0</div><div class="lbl">File Scale Envelope</div></div>
+    <div class="stat reveal" data-d="5"><div class="num" data-count="6">0</div><div class="lbl">M0 Spikes</div></div>
+  </div>
+
+  <div class="pull reveal" data-d="2">"The demo no incumbent can match: an agent builds, runs, verifies, and ships a game with zero GPU and zero GUI."
+    <span class="who">— engine-design/README.md · The durable moat</span></div>
+</section>
+
+<!-- ================= PRINCIPLES ================= -->
+<section id="principles">
+  <div class="reveal"><span class="kicker">02 · Foundation</span>
+  <h2>Four <span class="g">load-bearing principles</span></h2>
+  <p class="lead">Everything else in the design derives from these four. Each one forecloses a class of
+  architecture and buys a class of capability — they are why incumbents can't follow.</p></div>
+
+  <div class="grid c2">
+    <div class="card principle glow-c reveal"><div class="n">1</div>
+      <h3>Headless core, thin clients</h3>
+      <p>All capability lives in <strong>EditorKernel</strong>; GUI, CLI, and AI are equal clients with the same
+      public contract — file writes for mutations, one RPC surface for everything else.
+      <br>⇒ CLI-completeness, automation, the single-instance bridge.</p></div>
+    <div class="card principle glow-v reveal" data-d="1"><div class="n">2</div>
+      <h3>Simulation is authoritative; rendering is a detachable observer</h3>
+      <p>State lives in the simulation; render reads a <strong>one-way snapshot</strong> and can be removed entirely.
+      <br>⇒ GPU-free headless, determinism, Factorio-class optimization.</p></div>
+    <div class="card principle glow-p reveal" data-d="2"><div class="n">3</div>
+      <h3>Minimal kernel; everything is a package</h3>
+      <p>The kernel is <strong>~6 interfaces</strong>; all features compose onto it and
+      <strong>dead-code-eliminate out</strong> of builds that don't use them.
+      <br>⇒ tiny builds, true modularity.</p></div>
+    <div class="card principle glow-g reveal" data-d="3"><div class="n">4</div>
+      <h3>Files ARE the project</h3>
+      <p>Authored state lives only in project files; EditorKernel is a <strong>restartable incremental derivation
+      engine</strong> over them — the language-server model. The law: <em>changes-what-git-would-commit ⇒ file write;
+      everything else ⇒ RPC</em>. No Save button. <strong>Git is the undo system.</strong>
+      <br>⇒ AI-first authoring, git-native collaboration, crash safety, hot reload for free.</p></div>
+  </div>
+</section>
+
+<!-- ================= ARCHITECTURE ================= -->
+<section id="architecture">
+  <div class="reveal"><span class="kicker">03 · System Architecture</span>
+  <h2>The <span class="g">layered model</span></h2>
+  <p class="lead">Three clients, one truth. All authored mutations flow <strong>down</strong> as file writes;
+  queries, session actions, and derived outputs flow <strong>up</strong> over JSON-RPC 2.0 + MCP —
+  never authored mutations.</p></div>
+
+  <div class="arch reveal">
+    <div class="arch-row arch-clients">
+      <div class="arch-box"><h4>🖥️ GUI (CEF)</h4><div class="sub">desktop editor · commits at gesture end</div></div>
+      <div class="arch-box"><h4>⌨️ CLI</h4><div class="sub">embeds EditorKernel as a library · full parity</div></div>
+      <div class="arch-box"><h4>🤖 AI / MCP</h4><div class="sub">edits files directly · scoped tokens</div></div>
+    </div>
+
+    <div class="flow-arrow"><span>file writes</span><span class="arr"><span class="dot"></span></span><span class="arr"><span class="dot" style="animation-delay:.6s"></span></span><span class="arr"><span class="dot" style="animation-delay:1.2s"></span></span><span>ALL authored mutations</span></div>
+
+    <div class="arch-box arch-files">
+      <h4>📁 PROJECT FILES — the single source of truth</h4>
+      <div class="sub">canonical JSON + binary sidecars · scenes · assets + meta · packages · config · a git repo by convention · worktree = instance</div>
+    </div>
+
+    <div class="flow-arrow"><span>watch · hash · derive</span><span class="arr"><span class="dot" style="animation-delay:.3s"></span></span><span>(L-22)</span></div>
+
+    <div class="arch-box arch-editor">
+      <h4>⚙️ EditorKernel <span class="chip">headless · library first, daemon second · one per worktree</span></h4>
+      <div class="sub">runs on a monitorless VPS · byte-range lock on <code>.editor/lock</code> · restartable, crash-safe</div>
+      <div class="chiprow">
+        <span class="chip">file-sync layer</span><span class="chip">derivation graph</span><span class="chip">RPC surface</span>
+        <span class="chip">asset pipeline</span><span class="chip">build orchestration</span><span class="chip">bridge server</span>
+        <span class="chip">sandboxed VM host</span><span class="chip">git integration</span>
+      </div>
+      <div class="arch-inner">
+        <h5>embeds ▾ &nbsp;play-in-editor = the shipping RuntimeKernel + a target platform profile</h5>
+        <div class="arch-box arch-runtime" style="margin-top:8px">
+          <h4>🎮 RuntimeKernel <span class="chip">the SAME binary every game build ships</span></h4>
+          <div class="arch-inner"><h5>Simulation Core — GPU-free, always present</h5>
+            <div class="chiprow">
+              <span class="chip">World (ECS)</span><span class="chip">Scheduler</span><span class="chip">module registry</span>
+              <span class="chip">event bus</span><span class="chip">resource handles</span><span class="chip">platform seam</span>
+              <span class="chip" style="border-color:rgba(167,139,250,.4)">+ logic VM (JS/WASM)</span>
+              <span class="chip" style="border-color:rgba(167,139,250,.4)">physics</span>
+              <span class="chip" style="border-color:rgba(167,139,250,.4)">gameplay packages</span>
+            </div></div>
+          <div class="flow-arrow"><span>one-way snapshot</span><span class="arr"><span class="dot"></span></span><span>sim → render</span></div>
+          <div class="arch-inner"><h5>Presentation modules — loaded only when needed</h5>
+            <div class="chiprow">
+              <span class="chip">render (RHI · lighting · materials · post · 2D/sprites)</span>
+              <span class="chip">UI</span><span class="chip">audio (headless-capable)</span>
+            </div></div>
+        </div>
+      </div>
+    </div>
+
+    <div class="flow-arrow"><span class="arr up"><span class="dot"></span></span><span>RPC + event stream (JSON-RPC 2.0 + MCP) — queries · session actions · derived outputs · never authored mutations</span><span class="arr up"><span class="dot" style="animation-delay:.9s"></span></span></div>
+
+    <div class="platform-row">
+      <span class="platform">Windows</span><span class="platform">macOS</span><span class="platform">Linux desktop</span>
+      <span class="platform">Linux server / headless</span><span class="platform">Web (WebGPU)</span>
+      <span class="platform v2">Android (trailing)</span><span class="platform v2">iOS (v2)</span>
+    </div>
+    <div class="legend">
+      <span><i style="background:var(--pink)"></i> clients</span>
+      <span><i style="background:var(--amber)"></i> the truth (files)</span>
+      <span><i style="background:var(--cyan)"></i> EditorKernel</span>
+      <span><i style="background:var(--violet)"></i> RuntimeKernel</span>
+    </div>
+  </div>
+</section>
+
+<!-- ================= MODULES ================= -->
+<section id="modules">
+  <div class="reveal"><span class="kicker">04 · Components &amp; Relationships</span>
+  <h2>Module map — <span class="g">hover to trace connections</span></h2>
+  <p class="lead">Every component and what it talks to. Hover (or tap) any module to light up its
+  direct collaborators and dim the rest.</p>
+  <div class="hint">◉ hover a module → its relationships glow</div></div>
+
+  <div class="mod-map reveal" id="modmap">
+    <div class="mod" data-id="files" data-rel="filesync,git,merge"><h4>📁 Project Files</h4><p>Canonical JSON + sidecars. The single source of truth for all authored state.</p><span class="rel">↔ file-sync · git · merge driver</span></div>
+    <div class="mod" data-id="filesync" data-rel="files,derivation,intent,watcher"><h4>🔄 File-Sync Layer</h4><p>Atomic temp+rename writes, one serialized write queue, watcher-as-hint + content-hash reconciliation.</p><span class="rel">↔ files · watcher · derivation · intent log</span></div>
+    <div class="mod" data-id="derivation" data-rel="filesync,cache,vm,rpc,assets"><h4>🕸️ Derivation Graph</h4><p>Incremental, content-hash-memoized: parse → validate → compose → instantiate. Two-pass stratified. Doubles as the import cache; hot reload IS this pipeline.</p><span class="rel">↔ file-sync · shared cache · VM host · RPC · asset pipeline</span></div>
+    <div class="mod" data-id="cache" data-rel="derivation,assets"><h4>🗃️ Shared Derivation Cache</h4><p>Machine-level, content-addressed. Keys: source bytes + meta/import settings + importer &amp; engine version + platform profile + migration-set hash.</p><span class="rel">↔ derivation · asset pipeline · N worktrees</span></div>
+    <div class="mod" data-id="rpc" data-rel="derivation,bridge,mcp,cli,gui,sessions"><h4>📡 RPC Surface</h4><p>Queries, session actions (play/pause/step), derived outputs. Scope enforcement lives in the dispatcher. Never mutates authored state.</p><span class="rel">↔ bridge · MCP · CLI · GUI · sessions</span></div>
+    <div class="mod" data-id="bridge" data-rel="rpc,cli,gui,mcp"><h4>🌉 Bridge Server</h4><p>Local IPC, single-instance byte-range lock, heartbeat + stale-lock recovery, multi-client fan-out, capability-negotiation handshake.</p><span class="rel">↔ RPC · all clients</span></div>
+    <div class="mod" data-id="vm" data-rel="derivation,runtime,sandbox"><h4>🧩 Sandboxed VM Host</h4><p>Constrained-ABI JS/WASM runtime hosted inside EditorKernel — boots before pass-1 parsing; runs package-shipped schema migrations during derivation.</p><span class="rel">↔ derivation · RuntimeKernel · sandbox tier</span></div>
+    <div class="mod" data-id="assets" data-rel="derivation,cache,files"><h4>🖼️ Asset Pipeline</h4><p>Importers as packages — run-deterministic, subprocess-isolated. Stable-GUID asset DB, per-platform transcode. Runs fully headless.</p><span class="rel">↔ derivation · cache · files</span></div>
+    <div class="mod" data-id="build" data-rel="derivation,runtime,files"><h4>📦 Build Orchestration</h4><p>Freezes derivation output into packed binaries per platform via toolchain adapters. CLI-invokable; RuntimeKernel never parses authored files.</p><span class="rel">↔ derivation · RuntimeKernel · platform adapters</span></div>
+    <div class="mod" data-id="runtime" data-rel="vm,build,ecs,render,sessions"><h4>🎮 RuntimeKernel</h4><p>Microkernel + packages. Consumes only compiled derivation output — live in editor, baked in builds.</p><span class="rel">↔ ECS · scheduler · VM · render · sessions</span></div>
+    <div class="mod" data-id="ecs" data-rel="runtime,render,spatial"><h4>⚡ World (ECS) + Scheduler</h4><p>Archetype ECS, fixed-timestep scheduler, systems declare R/W component sets. Cross-language: boundary crossed once per system per frame, zero-copy views.</p><span class="rel">↔ RuntimeKernel · spatial index · render extract</span></div>
+    <div class="mod" data-id="spatial" data-rel="ecs,render"><h4>🧭 Spatial Acceleration Index</h4><p>One shared incrementally-updated structure serving render culling, spatial queries, AND streaming (R-SIM-007). A package, not kernel core.</p><span class="rel">↔ ECS · render · streaming</span></div>
+    <div class="mod" data-id="render" data-rel="ecs,runtime,spatial"><h4>🎨 Render Module (optional)</h4><p>Tiered RHI: T1 WebGPU everywhere, T2 native Vulkan/DX12/Metal. Reads the double-buffered snapshot on its own thread. 2D sprites first-class.</p><span class="rel">↔ sim snapshot · spatial index · RHI</span></div>
+    <div class="mod" data-id="git" data-rel="files,merge,filesync"><h4>🌿 Git Integration</h4><p>Git IS the undo/history system — no engine undo/redo. New projects are repos by default; correct under branch switches via reconcile. Daemon-per-worktree.</p><span class="rel">↔ files · merge driver · worktrees</span></div>
+    <div class="mod" data-id="merge" data-rel="git,files"><h4>🔀 Structural Merge Driver</h4><p>Three-way structural merge for canonical JSON; whole-file ours/theirs for binaries + newer-stamped files. Enables N agents authoring in parallel.</p><span class="rel">↔ git · canonical format</span></div>
+    <div class="mod" data-id="intent" data-rel="filesync"><h4>🛟 Crash-Recovery Intent Log</h4><p>fsync-before / clear-after under <code>.editor/</code>; HMAC-integrity-checked; resume-or-diagnose on restart. <code>kill -9</code> mid-write loses nothing.</p><span class="rel">↔ file-sync · multi-file verbs</span></div>
+    <div class="mod" data-id="watcher" data-rel="filesync"><h4>👁️ Watcher</h4><p>OS watcher as HINT only — hash is truth. Unconditional re-hash of hinted paths + a background full re-hash crawl as the dropped-event safety net.</p><span class="rel">↔ file-sync · reconcile index</span></div>
+    <div class="mod" data-id="mcp" data-rel="rpc,bridge,sandbox"><h4>🤖 Built-in MCP Adapter</h4><p>The whole surface exposed to agents natively. CLI ≡ RPC ≡ MCP parity generated from ONE registry — proven by CI.</p><span class="rel">↔ RPC · registry · agents</span></div>
+    <div class="mod" data-id="cli" data-rel="rpc,bridge,files"><h4>⌨️ CLI (<code>context</code>)</h4><p>Embeds EditorKernel as a library — attaches to a live daemon or runs in-process with identical semantics. Mutation verbs are file rewriters.</p><span class="rel">↔ EditorKernel-as-library · bridge · files</span></div>
+    <div class="mod" data-id="gui" data-rel="rpc,bridge,files,runtime"><h4>🖥️ GUI Editor (CEF)</h4><p>Web UI in a C++ host; native 3D viewport via shared-texture compositing. Observer-grade v1: viewport, play controls, scene tree, inspector, Problems panel, session undo.</p><span class="rel">↔ RPC · files (gesture-end writes) · embedded runtime</span></div>
+    <div class="mod" data-id="sessions" data-rel="rpc,runtime"><h4>🎯 Session Surface</h4><p>Play/pause/step/seed/state-hash over RPC (R-QA-005) — the lever for RL orchestration: many headless instances stepped in parallel from one controller.</p><span class="rel">↔ RPC · RuntimeKernel instances</span></div>
+    <div class="mod" data-id="sandbox" data-rel="vm,mcp"><h4>🔒 Sandbox Tiers</h4><p>Tiered trust: AI-installed packages default to the sandboxed constrained-ABI tier; native tier is first-party/consented. Path jail + scoped attach tokens.</p><span class="rel">↔ VM host · package system · consent</span></div>
+  </div>
+</section>
+
+<!-- ================= DATA FLOW ================= -->
+<section id="flow">
+  <div class="reveal"><span class="kicker">05 · The Core Loop</span>
+  <h2>Anatomy of <span class="g">one authoring mutation</span></h2>
+  <p class="lead">The same five steps whether the writer is the GUI, a CLI verb, or an AI editing text.
+  This loop <em>is</em> hot reload, <em>is</em> crash recovery, <em>is</em> collaboration.</p></div>
+
+  <div class="stepper reveal" id="stepper">
+    <div class="step"><div class="sn">1</div><h4>Atomic file write</h4><p>GUI commits at gesture end · CLI verbs rewrite files · AI edits text directly</p></div>
+    <div class="step"><div class="sn">2</div><h4>Watch + hash</h4><p>Watcher hints; content-hash reconciliation marks the file dirty — hash is truth</p></div>
+    <div class="step"><div class="sn">3</div><h4>Incremental derive</h4><p>Only the dirty subgraph recomputes: parse → validate → compose → instantiate</p></div>
+    <div class="step"><div class="sn">4</div><h4>Fan-out</h4><p>Change events reach every attached client; generation counter + <code>settled</code> quiescence</p></div>
+    <div class="step"><div class="sn">5</div><h4>Live swap</h4><p>Embedded RuntimeKernel hot-reloads via handle invalidation. Builds skip it all — packed binaries</p></div>
+  </div>
+
+  <div class="grid c3" style="margin-top:36px">
+    <div class="card reveal"><span class="icon">🧬</span><h3>Data model</h3>
+      <p>Canonical pure JSON + per-kind JSON Schema. ~1&nbsp;MB / 1k-entity file granularity with binary sidecars.
+      Dual-form refs <code>{$ref: guid, path}</code>. GUID + <code>.meta.json</code> identity. Parse-time schema migration
+      with per-payload <code>componentVersions</code>. SI units + radians, by law.</p></div>
+    <div class="card reveal" data-d="1"><span class="icon">🧩</span><h3>Scene composition</h3>
+      <p>No prefab <em>concept</em> — scenes instance scenes. Nested-instance overrides addressed by id-path,
+      innermost-out precedence, provenance chains on every composed value. Flatten emits GUID-addressable
+      streamable content units.</p></div>
+    <div class="card reveal" data-d="2"><span class="icon">♻️</span><h3>Concurrency &amp; recovery</h3>
+      <p>Per-file atomicity (no cross-file transactions). Daemon-per-worktree; parallel agents merge via git +
+      the structural driver. Intent-log resume after <code>kill&nbsp;-9</code>; incarnation epochs; backpressure with
+      load-shed to visible subgraphs.</p></div>
+  </div>
+</section>
+
+<!-- ================= STACK ================= -->
+<section id="stack">
+  <div class="reveal"><span class="kicker">06 · Technology</span>
+  <h2>The locked <span class="g">stack</span></h2>
+  <p class="lead">Three execution tiers: <strong>C++</strong> for the engine, <strong>TypeScript</strong> for gameplay
+  (write once, run everywhere on an embedded JS VM), <strong>WASM</strong> for the native/deterministic tier.</p></div>
+
+  <div style="overflow-x:auto" class="reveal">
+  <table class="tbl">
+    <thead><tr><th>Concern</th><th>Choice</th><th>Note</th></tr></thead>
+    <tbody>
+      <tr><td>Engine / systems</td><td>Modern C++</td><td>microkernel ≈ 6 interfaces; packages via vcpkg (from-source, pinned Clang)</td></tr>
+      <tr><td>Gameplay</td><td>TypeScript on an embedded JS VM</td><td>npm ecosystem; one JIT backend in v1; VM choice = M0 spike (§2d open)</td></tr>
+      <tr><td>Native tier / modules</td><td>WebAssembly</td><td>C++/Rust/AssemblyScript; JIT/AOT per platform; declared R/W sets + layout-hash check</td></tr>
+      <tr><td>Rendering</td><td>WebGPU baseline (T1) + native T2</td><td>Vulkan / DX12 / Metal for advanced; WebGL2 removed from v1 (L-56)</td></tr>
+      <tr><td>Shaders</td><td>glslang/DXC → SPIR-V → cross</td><td>SPIR-V→WGSL via Tint or Naga — M0/M4 spike deliverable; runs as derivation nodes</td></tr>
+      <tr><td>2D</td><td>First-class in v1 (L-55)</td><td>sprite path in the M4 renderer · tilemap asset kind · Box2D-class physics</td></tr>
+      <tr><td>3D physics</td><td>Package (candidate: Jolt)</td><td>cross-platform-deterministic build pairs with the L-54 determinism gate</td></tr>
+      <tr><td>ECS</td><td>Archetype / data-oriented</td><td>candidates EnTT, flecs — M0 spike</td></tr>
+      <tr><td>Editor UI</td><td>CEF (Chromium) in a C++ host</td><td>accelerated-OSR shared-texture viewport compositing — M0 spike</td></tr>
+      <tr><td>Runtime UI</td><td>Pluggable UI-Provider backend</td><td>screen-space + basic render-to-texture world-space in v1; XR-grade in v2</td></tr>
+      <tr><td>Audio</td><td>miniaudio default</td><td>optional FMOD / Wwise / Steam Audio integrations; runs headless</td></tr>
+      <tr><td>Packages</td><td>vcpkg (engine) + npm (content)</td><td>one "add package" experience; deny-by-default license allowlist + SBOM in CI</td></tr>
+    </tbody>
+  </table></div>
+</section>
+
+<!-- ================= CONTRACT ================= -->
+<section id="contract">
+  <div class="reveal"><span class="kicker">07 · Public Contract</span>
+  <h2>One <span class="g">self-describing surface</span></h2>
+  <p class="lead">Built for a decade of agents: the whole capability surface is generated from
+  <strong>one registry</strong> — so CLI ≡ RPC ≡ MCP ≡ introspection is proven by CI, not by promise
+  (R-CLI-007…017).</p></div>
+
+  <div class="grid c3">
+    <div class="card reveal"><span class="icon">📖</span><h3><code>context describe --json</code></h3><p>Whole-contract self-description: every verb, event, error, and capability — machine-readable. The agent corpus learns from the engine itself.</p></div>
+    <div class="card reveal" data-d="1"><span class="icon">🧾</span><h3>Uniform envelope</h3><p>One result envelope, a versioned error-code catalog (additive-only, CI-enforced), an exit-code table, and a verb grammar with a package namespace.</p></div>
+    <div class="card reveal" data-d="2"><span class="icon">🤝</span><h3>Capability negotiation</h3><p>Attach handshake carries <code>{protocolMajor, capabilities[]}</code>. v1 = hard-fail on mismatch, no silent fallback; <code>protocolMajor=0</code> until the M3 freeze.</p></div>
+    <div class="card reveal" data-d="3"><span class="icon">🔍</span><h3>Query language</h3><p>EBNF-specified operators, total ordering, unified cursor/paging, and a read-your-writes barrier (<code>--after-generation</code>).</p></div>
+    <div class="card reveal" data-d="4"><span class="icon">📬</span><h3>Events &amp; subscriptions</h3><p>Topic introspection, subscribe/ack protocol, the derived-world generation counter, <code>derivation.settled</code> quiescence, incarnation epochs.</p></div>
+    <div class="card reveal" data-d="5"><span class="icon">🔁</span><h3>Idempotency &amp; batches</h3><p>Client-supplied idempotency keys, <code>--atomic-plan</code> batches, transport-portable large-result handles. Multi-file verbs resume safely.</p></div>
+  </div>
+</section>
+
+<!-- ================= SECURITY ================= -->
+<section id="security">
+  <div class="reveal"><span class="kicker">08 · Security</span>
+  <h2>Trust, <span class="g">designed in</span></h2>
+  <p class="lead">An engine whose primary users include autonomous agents needs a real trust model —
+  not a warning dialog.</p></div>
+
+  <div class="grid c4">
+    <div class="card reveal"><span class="icon">🔑</span><h3>Cryptographic trust root</h3><p>First-party release signing from the very first toolchain download: pinned publisher key, detached signatures, verify-before-use, <strong>fail closed</strong> (R-SEC-009 / L-58). TUF/Sigstore slots behind the same gate in v2.</p></div>
+    <div class="card reveal" data-d="1"><span class="icon">📦</span><h3>Tiered package trust</h3><p>AI-installed packages default to the <strong>sandboxed constrained-ABI tier</strong>; the native tier is first-party or explicitly consented. No third-party native packages in v1 — an honest surface.</p></div>
+    <div class="card reveal" data-d="2"><span class="icon">🎫</span><h3>Scoped attach tokens</h3><p>Per-client authorization enforced <strong>in the RPC dispatcher</strong>, not the MCP adapter. A read-scoped token cannot install a package or trigger a build. Async consent for elevation.</p></div>
+    <div class="card reveal" data-d="3"><span class="icon">🧱</span><h3>Isolation everywhere</h3><p>Importers run subprocess-isolated; writes are path-jailed to the project; npm installs run <code>--ignore-scripts</code>; the intent log is HMAC-integrity-checked; CEF runs a concrete sandbox spec.</p></div>
+  </div>
+</section>
+
+<!-- ================= BEACHHEAD ================= -->
+<section id="beachhead">
+  <div class="reveal"><span class="kicker">09 · Strategy</span>
+  <h2>The <span class="g">beachhead wedge</span></h2>
+  <p class="lead">"General 3D engine" is the destination, <strong>not the day-one claim</strong>. v1 targets three
+  segments where the moat is decisive <em>today</em> — on desktop, Linux-server, and web. When scope
+  pressure hits, wedge work outranks general-engine breadth.</p></div>
+
+  <div class="grid c3">
+    <div class="card glow-c reveal"><span class="tag">PILLAR 1</span><span class="icon">🧠</span><h3>Headless AI-training / RL</h3>
+      <p>Deterministic, GPU-free, massively parallel simulation on commodity machines. Many cheap headless instances stepped, seeded, and state-hashed from one controller. Honesty: we don't chase GPU-vectorized samples/sec — we win on <strong>agent-authored environments + orchestration</strong>.</p></div>
+    <div class="card glow-v reveal" data-d="1"><span class="tag">PILLAR 2</span><span class="icon">🌐</span><h3>Deterministic server sim &amp; multiplayer</h3>
+      <p>The native/WASM deterministic tier — with a <strong>CI state-hash gate</strong> — plus netcode hooks, serving lockstep and state-sync server-authoritative games. Determinism is designed in, not bolted on.</p></div>
+    <div class="card glow-p reveal" data-d="2"><span class="tag">PILLAR 3</span><span class="icon">🎨</span><h3>AI-generated 2D &amp; simple-3D games</h3>
+      <p>The agent authoring loop over first-class 2D (sprites, tilemaps, 2D physics) and baseline-3D PBR content. A complete game is buildable with <strong>zero AI usage</strong> too — the subscription is a pricing lever, not a tooling gate.</p></div>
+  </div>
+
+  <div class="vs" style="margin-top:36px">
+    <div class="col them reveal"><h3>⛔ Why not MCP-on-Unity/Godot/Unreal?</h3>
+      <ul>
+        <li>Editors <strong>require a GPU/display</strong> for core authoring paths</li>
+        <li>Scene truth lives in <strong>editor memory + binary formats</strong> — a plugin mediates state it doesn't own, and races it</li>
+        <li><strong>One GUI editor instance per seat</strong> — no parallel agent authoring</li>
+        <li>Determinism <strong>cannot be bolted on</strong> from a plugin</li>
+        <li>We ship the Unity/Godot/Unreal MCP plugins ourselves — proof an adapter only reaches what the host chooses to expose</li>
+      </ul></div>
+    <div class="col us reveal" data-d="1"><h3>✅ What Context does instead</h3>
+      <ul>
+        <li><strong>Headless-complete:</strong> every authoring capability on a GPU-less, display-less host</li>
+        <li><strong>An agent's file edit IS the mutation</strong> — no reconciliation, no racing</li>
+        <li><strong>Daemon-per-worktree + structural merge:</strong> N agents author one game in parallel</li>
+        <li><strong>Native determinism</strong> with a CI state-hash gate</li>
+        <li>MCP is <strong>table stakes</strong> — the moat sits below the adapter, in the architecture</li>
+      </ul></div>
+  </div>
+</section>
+
+<!-- ================= ROADMAP ================= -->
+<section id="roadmap">
+  <div class="reveal"><span class="kicker">10 · Execution</span>
+  <h2>Roadmap: <span class="g">M0 → M8.5</span> + the Context Sim fork</h2>
+  <p class="lead">Each milestone is independently demonstrable and de-risks the next. After M3 the roadmap
+  <strong>forks</strong>: the determinism/physics slice ships early as the <strong>"Context Sim" pre-release</strong>
+  (~month 12–15) while rendering and the editor GUI proceed in parallel. Estimated effort to v1: <strong>20–30 engineer-years</strong>.</p></div>
+
+  <div class="timeline reveal">
+    <div class="tl-item"><span class="m">M0</span><span class="badge gate">GATED — awaiting go</span>
+      <h4>Foundations &amp; six spikes</h4>
+      <p>Repo + CMake + vcpkg + signed-fetch bootstrap (fail-closed) · CLA gate · license-allowlist CI + SBOM from commit one · versioned install layout. Spikes: WebGPU triangle (Win/Mac/Linux/Web) · JS engine bench · WASM execution · ECS · CEF shared-texture compositing · <strong>front-loaded 100k-file parse+hash+merge benchmark</strong> — if parse misses 5×, the file format changes BEFORE M1/M2 freeze it.</p></div>
+    <div class="tl-item"><span class="m">M1</span>
+      <h4>Microkernel &amp; file-authoritative EditorKernel skeleton</h4>
+      <p>World/Scheduler/registry/bus/handles/platform seam · sim→render timing contract · file-sync + intent log + derivation skeleton + backpressure · the full public-contract cluster lands BEFORE the schema freezes (<code>protocolMajor=0</code>) · injectable seams + fault-injection harness · the 100k synthetic benchmark tracked from day one. Exit: mutate via CLI AND raw text edit → identical derived world; <code>kill -9</code> mid-write loses nothing.</p></div>
+    <div class="tl-item"><span class="m">M2</span>
+      <h4>Data model &amp; asset pipeline</h4>
+      <p>Canonical-JSON scenes · composition + id-path overrides + provenance · parse-time migration + <code>componentVersions</code> · GUID asset DB + isolated deterministic importers · shared cache · tilemap + string-table asset kinds · chunked-pack content-unit boundaries co-designed here.</p></div>
+    <div class="tl-item"><span class="m">M3</span><span class="badge freeze">contract freeze</span>
+      <h4>Scripting &amp; logic tier</h4>
+      <p>TS gameplay on the chosen VM, WASM native tier, cross-language scheduling, declared R/W sets, hot reload. <code>protocolMajor</code> → 1 after the agent corpus has exercised the surface.</p></div>
+    <div class="tl-item fork"><span class="m">CONTEXT SIM</span><span class="badge ship">pre-release · ~month 12–15</span>
+      <h4>First shippable artifact — 18 months early</h4>
+      <p>The M6 determinism/physics slice + the session surface, shipped to RL and server-sim users straight after M3, while M4/M5 proceed in parallel. Validates the moat, the contract, and the market before the editor GUI even exists. Committed ticks/sec/instance + instances-per-box targets are set here.</p></div>
+    <div class="tl-item"><span class="m">M4</span>
+      <h4>Render module + RHI</h4>
+      <p>T1 WebGPU renderer (native Dawn/wgpu + browser WebGPU on web) · sprite path · SPIR-V→WGSL tool decision · materials/lighting/post baseline.</p></div>
+    <div class="tl-item"><span class="m">M5</span>
+      <h4>Observer-grade editor GUI + play-in-editor</h4>
+      <p>CEF editor: viewport, play controls, scene tree, inspector (edits = override writes), Problems panel, session undo. Asset browser at v1.x; tilemap painting + in-context composition editing trail post-M5.</p></div>
+    <div class="tl-item"><span class="m">M6</span>
+      <h4>Core engine-system packages</h4>
+      <p>Physics (3D + 2D), navigation, animation, audio, the spatial acceleration index, streaming — each a package that DCEs out.</p></div>
+    <div class="tl-item"><span class="m">M7</span>
+      <h4>Runtime UI system</h4>
+      <p>Pluggable UI-Provider backend: screen-space + basic render-to-texture world-space UI. The XR-grade stack builds on this same seam in v2.</p></div>
+    <div class="tl-item"><span class="m">M8</span>
+      <h4>Build pipeline</h4>
+      <p>Per-platform export: Linux + Windows + Web adapters first, macOS trailing (needs the CI build agent anyway), Android per its ruling. Chunked pack format; the engine builds and smoke-runs its own samples headless in CI.</p></div>
+    <div class="tl-item"><span class="m">M8.5</span><span class="badge ship">v1</span>
+      <h4>Wedge hardening</h4>
+      <p>Beachhead scenarios proven end-to-end: parallel headless RL orchestration · deterministic multiplayer sim · agent-built 2D/3D games. 2-client co-edit verified; 60-client scale is honest v1.x work.</p></div>
+  </div>
+</section>
+
+<!-- ================= BUSINESS ================= -->
+<section id="business">
+  <div class="reveal"><span class="kicker">11 · Business Model</span>
+  <h2>Open to read. <span class="g">Free under $200k.</span></h2></div>
+
+  <div class="biz-hero reveal">
+    <div class="big">2% <span style="font-size:.45em; -webkit-text-fill-color: var(--text-dim);">royalty</span></div>
+    <p>…and <strong>only</strong> on gross revenue per product <strong>above $200,000 per year</strong> (annual threshold,
+    resets yearly, marginal — applies only to revenue above the line). The base is <strong>gross receipts</strong> —
+    storefront/platform fees are not deducted — and the royalty is <strong>unconditional</strong>: no subscription
+    of any kind affects it. The engine license is fully independent of ai-game.dev.</p>
+  </div>
+
+  <div class="grid c3">
+    <div class="card reveal"><span class="icon">📜</span><h3>Source-available EULA</h3>
+      <p>The repo is <strong>public from day one</strong> under the proprietary Context Engine EULA — the un-gated
+      Unreal mechanism. Read it, build with it, ship games with it; <strong>no one can fork it into a competing
+      engine</strong>. CLA with copyright assignment required for contributions.</p></div>
+    <div class="card reveal" data-d="1"><span class="icon">🆓</span><h3>The engine is free</h3>
+      <p>Full engine, <strong>no subscription required, zero AI usage required</strong>. A complete game is buildable
+      with the GUI + CLI alone. The subscription buys <strong>AI usage</strong>, not the engine.</p></div>
+    <div class="card reveal" data-d="2"><span class="icon">⚖️</span><h3>Honest enforcement</h3>
+      <p>Royalty enforcement is <strong>contractual-only — no phone-home, no telemetry gate</strong>. Terms lock per
+      engine version: the deal you adopted is the deal you keep. Deny-by-default dependency-license allowlist +
+      SBOM from the first commit.</p></div>
+  </div>
+</section>
+
+<!-- ================= QUALITY / CAMPAIGN ================= -->
+<section id="quality">
+  <div class="reveal"><span class="kicker">12 · Design Provenance</span>
+  <h2>Hardened by <span class="g">five adversarial rounds</span></h2>
+  <p class="lead">The design wasn't reviewed once — it was attacked from fifteen perspectives across five
+  rounds (~250 findings, every one verified against the docs before a fix landed), then regenerated as
+  clean current-state text. Eight merged PRs. Every decision traceable by ID.</p></div>
+
+  <div class="rounds reveal">
+    <div class="round"><div class="rn">ROUND 0</div><h4>Foundations</h4><p>consistency · feasibility · market/scope · AI+security — ~110 findings, business model locked</p></div>
+    <div class="round"><div class="rn">ROUND 1</div><h4>Perf &amp; humans</h4><p>perf/scale · concurrency · human-DX — generation/settled primitive, spatial index, perf floors, HUX layer</p></div>
+    <div class="round"><div class="rn">ROUND 2</div><h4>Trust &amp; contract</h4><p>security coherence · API/contract — cryptographic trust root, the R-CLI-007…017 public-contract cluster</p></div>
+    <div class="round"><div class="rn">ROUND 3</div><h4>Strategy &amp; reality</h4><p>competitive strategy · build/toolchain · AI end-to-end walk — moat statement, beachhead, EULA + CLA, no-custom-LSP</p></div>
+    <div class="round"><div class="rn">ROUND 4</div><h4>Data &amp; tests</h4><p>data-model deep-dive · testing/CI · YAGNI — 16 M2 seam fixes, the test SYSTEM, the v1-lean pass</p></div>
+    <div class="round"><div class="rn">ROUND 5</div><h4>Fresh eyes</h4><p>fresh-eyes architect · red-team · coherence — resequencing, Context Sim, the 6th spike, docs regeneration</p></div>
+  </div>
+
+  <div class="verdict reveal">
+    <div class="v">VERDICT: BUILD-WITH-CHANGES — ALL CHANGES APPLIED</div>
+    <p>"I would stake my reputation on the architecture" — the round-5 fresh-eyes architect.
+    The plan was re-sequenced accordingly; the docs are now clean current-state.</p>
+  </div>
+
+  <div class="grid c4" style="margin-top:28px">
+    <div class="card reveal"><span class="icon">📋</span><h3>Requirements-first</h3><p><code>REQUIREMENTS.md</code> is the single normative home — ~140 ID'd, prioritized requirements. Change anything by citing its <code>R-*</code> ID.</p></div>
+    <div class="card reveal" data-d="1"><span class="icon">🔒</span><h3>59 locks, veto-able by ID</h3><p>Every decision is a numbered lock (L-1…L-59) with rationale. Only two remain open — the JS engine and material/shader detail — both gated on M0 spike data.</p></div>
+    <div class="card reveal" data-d="2"><span class="icon">🧪</span><h3>CI-enforced floors</h3><p>100k-file scale envelope · TS frame budget · GC budget · min-spec floor · build-time budget · determinism state-hash gate — budgets in CI, not in slideware.</p></div>
+    <div class="card reveal" data-d="3"><span class="icon">🗺️</span><h3>Full audit trail</h3><p>Six <code>REVIEW-*.md</code> trackers hold every finding, ruling, and remediation — why any passage reads the way it does is one lookup away.</p></div>
+  </div>
+</section>
+
+<div class="divider"></div>
+
+<footer>
+  <div class="fbig">Context Game Engine</div>
+  <div>Design phase complete · 2026-07-02 · pre-implementation — M0 awaits the go.</div>
+  <div style="margin-top:10px; font-family: var(--mono); font-size:.68rem;">
+    engine-design/ — README · REQUIREMENTS · ARCHITECTURE · ROADMAP · DESIGN-DECISIONS · REVIEW-R0…R5
+  </div>
+</footer>
+</main>
+
+<script>
+(function(){
+  "use strict";
+  var reduced = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+
+  /* ---- typing terminal ---- */
+  var cmd = 'context new my-game && context build --platform linux-headless && context play --headless --verify';
+  var termText = document.getElementById("term-text");
+  var termOut = document.getElementById("term-out");
+  if (reduced) { termText.textContent = cmd; termOut.style.opacity = 1; }
+  else {
+    var i = 0;
+    setTimeout(function type(){
+      if (i <= cmd.length) { termText.textContent = cmd.slice(0, i++); setTimeout(type, 26 + Math.random()*36); }
+      else { setTimeout(function(){ termOut.style.opacity = 1; }, 380); }
+    }, 1200);
+  }
+
+  /* ---- particles ---- */
+  var cv = document.getElementById("particles"), cx = cv.getContext("2d"), ps = [];
+  function resize(){ cv.width = innerWidth; cv.height = innerHeight; }
+  resize(); addEventListener("resize", resize);
+  var N = reduced ? 0 : Math.min(70, Math.floor(innerWidth/22));
+  for (var k=0;k<N;k++) ps.push({ x: Math.random()*innerWidth, y: Math.random()*innerHeight,
+    vx:(Math.random()-.5)*.25, vy:(Math.random()-.5)*.25, r: Math.random()*1.6+.4 });
+  (function tick(){
+    if (!N) return;
+    cx.clearRect(0,0,cv.width,cv.height);
+    for (var a=0;a<ps.length;a++){
+      var p=ps[a]; p.x+=p.vx; p.y+=p.vy;
+      if(p.x<0)p.x=cv.width; if(p.x>cv.width)p.x=0; if(p.y<0)p.y=cv.height; if(p.y>cv.height)p.y=0;
+      cx.beginPath(); cx.arc(p.x,p.y,p.r,0,7); cx.fillStyle="rgba(148,163,253,.35)"; cx.fill();
+      for (var b=a+1;b<ps.length;b++){
+        var q=ps[b], dx=p.x-q.x, dy=p.y-q.y, d=dx*dx+dy*dy;
+        if (d<12000){ cx.beginPath(); cx.moveTo(p.x,p.y); cx.lineTo(q.x,q.y);
+          cx.strokeStyle="rgba(148,163,253,"+(0.10*(1-d/12000)).toFixed(3)+")"; cx.stroke(); }
+      }
+    }
+    requestAnimationFrame(tick);
+  })();
+
+  /* ---- reveal on scroll ---- */
+  var io = new IntersectionObserver(function(es){
+    es.forEach(function(e){ if (e.isIntersecting){ e.target.classList.add("in"); io.unobserve(e.target); } });
+  }, { threshold: .12 });
+  document.querySelectorAll(".reveal").forEach(function(el){ io.observe(el); });
+
+  /* ---- counters ---- */
+  var cio = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if (!e.isIntersecting) return; cio.unobserve(e.target);
+      var el = e.target, target = +el.dataset.count, suf = el.dataset.suffix || "";
+      if (reduced) { el.textContent = target + suf; return; }
+      var t0 = performance.now(), dur = 1400;
+      (function step(t){
+        var p = Math.min(1, (t - t0)/dur); p = 1 - Math.pow(1-p, 3);
+        el.textContent = Math.round(target*p) + suf;
+        if (p < 1) requestAnimationFrame(step);
+      })(t0);
+    });
+  }, { threshold: .6 });
+  document.querySelectorAll("[data-count]").forEach(function(el){ cio.observe(el); });
+
+  /* ---- nav show + progress + active link ---- */
+  var nav = document.getElementById("nav"), prog = document.getElementById("progress");
+  var links = nav.querySelectorAll("a"), secs = [];
+  links.forEach(function(a){ var s = document.querySelector(a.getAttribute("href")); if (s) secs.push([s, a]); });
+  addEventListener("scroll", function(){
+    nav.classList.toggle("visible", scrollY > innerHeight*.6);
+    var h = document.documentElement.scrollHeight - innerHeight;
+    prog.style.width = (h ? (scrollY/h*100) : 0) + "%";
+    var cur = null;
+    secs.forEach(function(sa){ if (sa[0].getBoundingClientRect().top < innerHeight*.4) cur = sa[1]; });
+    links.forEach(function(a){ a.classList.toggle("active", a === cur); });
+  }, { passive: true });
+
+  /* ---- module relationship map ---- */
+  var map = document.getElementById("modmap");
+  var mods = map.querySelectorAll(".mod");
+  function clearMap(){ map.classList.remove("dimmed"); mods.forEach(function(m){ m.classList.remove("lit","origin"); }); }
+  mods.forEach(function(m){
+    function light(){
+      clearMap(); map.classList.add("dimmed");
+      m.classList.add("lit","origin");
+      var rel = (m.dataset.rel||"").split(",");
+      mods.forEach(function(o){ if (rel.indexOf(o.dataset.id) !== -1) o.classList.add("lit"); });
+    }
+    m.addEventListener("mouseenter", light);
+    m.addEventListener("click", light);
+    m.addEventListener("mouseleave", clearMap);
+  });
+  map.addEventListener("mouseleave", clearMap);
+
+  /* ---- mutation stepper autoplay ---- */
+  var steps = document.querySelectorAll("#stepper .step"), si = 0, timer = null;
+  function setStep(n){ steps.forEach(function(s,idx){ s.classList.toggle("active", idx===n); }); }
+  var sio = new IntersectionObserver(function(es){
+    es.forEach(function(e){
+      if (e.isIntersecting && !timer){
+        setStep(0);
+        timer = setInterval(function(){ si = (si+1) % steps.length; setStep(si); }, reduced ? 3600 : 2000);
+      } else if (!e.isIntersecting && timer){ clearInterval(timer); timer = null; }
+    });
+  }, { threshold: .3 });
+  sio.observe(document.getElementById("stepper"));
+})();
+</script>
+</body>
+</html>

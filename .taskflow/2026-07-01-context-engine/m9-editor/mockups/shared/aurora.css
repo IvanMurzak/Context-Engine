@@ -1,0 +1,90 @@
+/* ==========================================================================
+   Context Editor — d1 Visual Direction Mockups — AURORA
+   ==========================================================================
+   The single signature flourish (06 §2 / O1): an animated conic blur-halo,
+   used SPARINGLY. Deliberately MONOCHROME (accent = ink, D12) — the "glow"
+   reads through rotating alpha bands + blur + a slow breathing opacity, not
+   through hue. Chroma stays reserved for status hues + the viewport
+   exception; introducing color here would contradict the pure-monochrome
+   accent rule.
+
+   Two candidate placements are wired via a single attribute so the owner
+   can A/B them live:
+     data-aurora-variant="a"  -> Play button only
+     data-aurora-variant="b"  -> Play button + welcome-screen primary CTA
+   Toggle lives in shared/main.js (Mockup Controls overlay).
+
+   Reduced motion: the REAL `prefers-reduced-motion: reduce` media query is
+   honored unconditionally (matches the OS/browser setting with no JS). A
+   manual `.force-reduced-motion` class on <html> lets the owner preview the
+   fallback on demand even if their OS isn't set that way.
+   ========================================================================== */
+
+.aurora {
+  position: relative;
+  isolation: isolate;
+}
+
+.aurora::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  z-index: -1;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    var(--ctx-aurora-a) 0deg,
+    transparent 65deg,
+    var(--ctx-aurora-b) 135deg,
+    transparent 200deg,
+    var(--ctx-aurora-c) 270deg,
+    transparent 330deg,
+    var(--ctx-aurora-a) 360deg
+  );
+  filter: blur(14px);
+  opacity: 0.85;
+  animation: aurora-spin 7s linear infinite, aurora-breathe 3.4s ease-in-out infinite;
+  pointer-events: none;
+  will-change: transform, opacity;
+}
+
+@keyframes aurora-spin {
+  to { transform: rotate(1turn); }
+}
+@keyframes aurora-breathe {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 0.95; }
+}
+
+/* Static fallback — REAL media query, no JS required */
+@media (prefers-reduced-motion: reduce) {
+  .aurora::before {
+    animation: none;
+    opacity: 0.65;
+    transform: none;
+  }
+}
+
+/* Manual "simulate reduced motion" toggle mirrors the same fallback */
+html.force-reduced-motion .aurora::before {
+  animation: none;
+  opacity: 0.65;
+  transform: none;
+}
+
+/* Variant gating: only the welcome primary CTA is conditional.
+   The Play button (.play-btn) always keeps the glow in both variants. */
+:root[data-aurora-variant="a"] .welcome-cta.aurora::before {
+  content: none;
+}
+
+/* A small "glow" caption chip used in the mockups to label which variant
+   is currently active, purely so the static screenshots/exports stay
+   legible out of context. Not a product element. */
+.aurora-variant-flag {
+  font-family: var(--ctx-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ctx-muted-2);
+}
