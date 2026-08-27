@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="en" data-theme="dark">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Context Editor — d1 mockup — Full editor window</title>
+<link rel="stylesheet" href="shared/tokens.css">
+<link rel="stylesheet" href="shared/base.css">
+<link rel="stylesheet" href="shared/components.css">
+<link rel="stylesheet" href="shared/viewport.css">
+<link rel="stylesheet" href="shared/flourishes.css">
+<style>
+  /* Page-local layout only — everything visual lives in shared/*.css */
+  .floating-window { left: 56%; top: 56%; }
+  .anatomy-label.al-left { top: 8px; left: 8px; }
+  .anatomy-label.al-tabstrip { top: 40px; left: 50%; transform: translateX(-50%); }
+  .anatomy-label.al-split { top: 50%; }
+  .anatomy-label.al-floating { top: calc(56% - 26px); left: 56%; }
+  .palette-overlay {
+    display: none;
+    position: fixed;
+    inset: 0;
+    background: color-mix(in srgb, var(--ctx-canvas) 55%, transparent);
+    align-items: flex-start;
+    justify-content: center;
+    padding-top: 14vh;
+    z-index: 500;
+  }
+</style>
+</head>
+<body>
+
+<!-- ============== Icon sprite (inline, no external requests) ============== -->
+<svg style="display:none" aria-hidden="true">
+<defs>
+<g id="i-stroke-defaults" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></g>
+<symbol id="icon-folder" viewBox="0 0 20 20"><path d="M2.5 5.5a1 1 0 0 1 1-1h3.6l1.3 1.6h7.1a1 1 0 0 1 1 1v7.4a1 1 0 0 1-1 1h-12a1 1 0 0 1-1-1V5.5Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/></symbol>
+<symbol id="icon-camera" viewBox="0 0 20 20"><path d="M3 7.5a1 1 0 0 1 1-1h1.6l.9-1.3h3l.9 1.3H16a1 1 0 0 1 1 1v7a1 1 0 0 1-1 1H4a1 1 0 0 1-1-1v-7Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><circle cx="10" cy="11" r="2.5" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-sun" viewBox="0 0 20 20"><circle cx="10" cy="10" r="3" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 2.5v2M10 15.5v2M2.5 10h2M15.5 10h2M4.6 4.6l1.4 1.4M14 14l1.4 1.4M4.6 15.4l1.4-1.4M14 6l1.4-1.4" stroke="currentColor" stroke-width="1.4" stroke-linecap="round"/></symbol>
+<symbol id="icon-cube" viewBox="0 0 20 20"><path d="M10 2.8 17 6.4v7.2L10 17.2 3 13.6V6.4Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M3 6.4 10 10l7-3.6M10 10v7.2" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-collider" viewBox="0 0 20 20"><rect x="3.5" y="3.5" width="13" height="13" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.4" stroke-dasharray="2.4 2.2"/></symbol>
+<symbol id="icon-layout" viewBox="0 0 20 20"><rect x="3" y="3.5" width="14" height="13" rx="1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M3 7.5h14M8 7.5v9" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-dot" viewBox="0 0 20 20"><circle cx="10" cy="10" r="2.6" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-command" viewBox="0 0 20 20"><rect x="3" y="3" width="14" height="14" rx="3.2" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M12.2 6.4 7.8 13.6" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-minimize" viewBox="0 0 20 20"><path d="M4.5 10h11" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-maximize" viewBox="0 0 20 20"><rect x="4.7" y="4.7" width="10.6" height="10.6" rx="1" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-close" viewBox="0 0 20 20"><path d="M5 5l10 10M15 5 5 15" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-play" viewBox="0 0 20 20"><path d="M6.2 4.4 15.6 10 6.2 15.6Z" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-pause" viewBox="0 0 20 20"><path d="M6.6 4.6v10.8M13.4 4.6v10.8" stroke="currentColor" stroke-width="2.1"/></symbol>
+<symbol id="icon-stop" viewBox="0 0 20 20"><rect x="5.7" y="5.7" width="8.6" height="8.6" rx="1.2" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-warn" viewBox="0 0 20 20"><path d="M10 3.2 17.5 16H2.5Z" fill="none" stroke="currentColor" stroke-width="1.4" stroke-linejoin="round"/><path d="M10 8v3.4" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="13.7" r="0.75" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-bad" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7.5 7.5l5 5M12.5 7.5l-5 5" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-info" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10 9v4.2" stroke="currentColor" stroke-width="1.5"/><circle cx="10" cy="6.6" r="0.9" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-inspect" viewBox="0 0 20 20"><path d="M4 6.2h4M4 10h7M4 13.8h5" stroke="currentColor" stroke-width="1.4"/><circle cx="12.3" cy="6.2" r="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="9.3" cy="10" r="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="11.3" cy="13.8" r="1.3" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+<symbol id="icon-tree" viewBox="0 0 20 20"><path d="M6 3.5v13M6 6.5h6M6 10h4.5M6 13.5h7" stroke="currentColor" stroke-width="1.4"/><circle cx="6" cy="3.5" r="1.1" fill="currentColor" stroke="none"/></symbol>
+<symbol id="icon-git" viewBox="0 0 20 20"><circle cx="6" cy="5" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="6" cy="15" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/><circle cx="14" cy="10" r="1.7" fill="none" stroke="currentColor" stroke-width="1.3"/><path d="M6 6.7V13.3M7.4 10c1.6 0 3.2-1 3.2-3.3" fill="none" stroke="currentColor" stroke-width="1.3"/></symbol>
+<symbol id="icon-link" viewBox="0 0 20 20"><path d="M8 12l4-4" stroke="currentColor" stroke-width="1.4"/><path d="M9.4 5.6l1-1a3 3 0 0 1 4.2 4.2l-1.4 1.4" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M10.6 14.4l-1 1a3 3 0 0 1-4.2-4.2l1.4-1.4" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-external" viewBox="0 0 20 20"><path d="M8 12 15 5" stroke="currentColor" stroke-width="1.4"/><path d="M10.5 5H15v4.5" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M13 11v3.5a1 1 0 0 1-1 1H5.5a1 1 0 0 1-1-1V8a1 1 0 0 1 1-1H9" fill="none" stroke="currentColor" stroke-width="1.4"/></symbol>
+<symbol id="icon-chevron" viewBox="0 0 20 20"><path d="M7.5 5l5 5-5 5" fill="none" stroke="currentColor" stroke-width="1.6"/></symbol>
+<symbol id="icon-help" viewBox="0 0 20 20"><circle cx="10" cy="10" r="7" fill="none" stroke="currentColor" stroke-width="1.4"/><path d="M7.8 8.2a2.2 2.2 0 1 1 3.1 2c-.7.5-.9.8-.9 1.6" fill="none" stroke="currentColor" stroke-width="1.4"/><circle cx="10" cy="14.1" r="0.75" fill="currentColor" stroke="none"/></symbol>
+</defs>
+</svg>
+
+<div class="app-shell">
+
+  <!-- ============== Titlebar (custom-drawn, VS-Code-grade windowing D1) ============== -->
+  <div class="titlebar">
+    <div class="brand"><span class="mark"></span> Context Editor</div>
+    <div class="menu">
+      <span>File</span><span>Edit</span><span>View</span><span>Selection</span><span>Panel</span><span>Window</span><span>Help</span>
+    </div>
+    <div class="project-name mono">platformer-demo</div>
+    <div class="win-controls">
+      <button class="btn-icon" title="Command Palette — Ctrl/Cmd+K" data-palette-trigger><svg width="15" height="15"><use href="#icon-command"/></svg></button>
+      <button title="Minimize"><svg width="15" height="15"><use href="#icon-minimize"/></svg></button>
+      <button title="Maximize"><svg width="13" height="13"><use href="#icon-maximize"/></svg></button>
+      <button class="close" title="Close"><svg width="14" height="14"><use href="#icon-close"/></svg></button>
+    </div>
+  </div>
+
+  <!-- ============== Play bar — full-width, unmistakable (L-51) ============== -->
+  <div class="play-bar">
+    <div class="transport">
+      <button class="btn btn-icon flourish-btn" data-play-btn data-flourish-target data-flourish="state-linked" title="Play"><svg width="15" height="15"><use href="#icon-play"/></svg></button>
+      <button class="btn btn-icon" data-pause-btn title="Pause" disabled><svg width="15" height="15"><use href="#icon-pause"/></svg></button>
+      <button class="btn btn-icon" data-stop-btn title="Stop" disabled><svg width="13" height="13"><use href="#icon-stop"/></svg></button>
+    </div>
+    <div class="divider"></div>
+    <div class="status-label" data-play-status-label><span class="status-dot" data-play-status-dot></span>Ready</div>
+    <div class="divider"></div>
+    <div class="mono muted-2" style="font-size:11px;">t+<span data-play-timer>00:00</span></div>
+    <div class="fill"></div>
+    <div class="chip mono">Target: Scene <svg width="10" height="10" style="margin-left:2px"><use href="#icon-chevron"/></svg></div>
+    <div class="fps">60 fps</div>
+  </div>
+
+  <!-- ============== Dock root: left / center(viewport+problems) / right ============== -->
+  <div class="dock-root">
+
+    <!-- LEFT: Scene Tree -->
+    <div class="dock-group" style="grid-column:1; grid-row:1 / span 3;">
+      <div class="tabstrip">
+        <div class="tab active"><svg width="13" height="13"><use href="#icon-tree"/></svg>Scene Tree</div>
+        <div class="tabstrip-fill"></div>
+      </div>
+      <div class="dock-content">
+        <div class="tree-search"><svg width="12" height="12"><use href="#icon-inspect"/></svg>Filter entities…</div>
+        <div class="tree">
+          <div class="tree-row" style="--depth:0">
+            <div class="disclosure open"><svg width="10" height="10"><use href="#icon-chevron"/></svg></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-folder"/></svg>
+            <span class="name">Scene</span>
+            <span class="tag">.ctx</span>
+          </div>
+          <div class="tree-row" style="--depth:1">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-camera"/></svg>
+            <span class="name">Main Camera</span>
+          </div>
+          <div class="tree-row selected" style="--depth:1">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-sun"/></svg>
+            <span class="name">Directional Light</span>
+          </div>
+          <div class="tree-row" style="--depth:1">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-cube"/></svg>
+            <span class="name">Ground</span>
+            <span class="status-dot is-bad" style="width:6px;height:6px;" title="1 problem"></span>
+          </div>
+          <div class="tree-row" style="--depth:1">
+            <div class="disclosure open"><svg width="10" height="10"><use href="#icon-chevron"/></svg></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-dot"/></svg>
+            <span class="name">Player</span>
+          </div>
+          <div class="tree-row" style="--depth:2">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-cube"/></svg>
+            <span class="name">Mesh</span>
+          </div>
+          <div class="tree-row" style="--depth:2">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-collider"/></svg>
+            <span class="name">Collider</span>
+          </div>
+          <div class="tree-row" style="--depth:1">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-dot"/></svg>
+            <span class="name">Enemy Spawner</span>
+            <span class="status-dot is-bad" style="width:6px;height:6px;" title="1 problem"></span>
+          </div>
+          <div class="tree-row" style="--depth:1">
+            <div class="disclosure open"><svg width="10" height="10"><use href="#icon-chevron"/></svg></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-layout"/></svg>
+            <span class="name">UI Canvas</span>
+          </div>
+          <div class="tree-row" style="--depth:2">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-layout"/></svg>
+            <span class="name">HUD</span>
+          </div>
+          <div class="tree-row" style="--depth:2">
+            <div class="disclosure"></div>
+            <svg class="icon" width="13" height="13"><use href="#icon-layout"/></svg>
+            <span class="name">PauseMenu</span>
+          </div>
+        </div>
+      </div>
+      <span class="anatomy-label al-left">dock group · split (left)</span>
+    </div>
+
+    <div class="dock-splitter vertical" style="grid-column:2; grid-row:1 / span 3;"></div>
+    <span class="anatomy-label al-split" style="grid-column:2; left:-34px; z-index:70;">split handle</span>
+
+    <!-- CENTER TOP: Scene / Game viewport -->
+    <div class="dock-group" style="grid-column:3; grid-row:1;">
+      <div class="tabstrip">
+        <div class="tab active" data-panel="scene">Scene</div>
+        <div class="tab" data-panel="game">Game</div>
+        <div class="tabstrip-fill"></div>
+        <div class="tabstrip-actions">
+          <svg width="13" height="13" title="Tear out"><use href="#icon-external"/></svg>
+        </div>
+      </div>
+      <div class="dock-content" data-panel-body="scene">
+        <div class="viewport-stage">
+          <div class="viewport-floor"></div>
+          <div class="viewport-origin">
+            <div class="viewport-object">
+              <div class="face face-top"></div>
+              <div class="face face-front"></div>
+              <div class="face face-side"></div>
+            </div>
+            <div class="viewport-selection">
+              <span class="corner tl"></span><span class="corner tr"></span>
+              <span class="corner bl"></span><span class="corner br"></span>
+              <span class="box"></span>
+            </div>
+            <div class="viewport-gizmo">
+              <div class="gizmo-arm x"></div>
+              <div class="gizmo-arm y"></div>
+              <div class="gizmo-arm z"></div>
+            </div>
+          </div>
+          <div class="viewport-toolbar">
+            <div class="chip mono">Shaded <svg width="9" height="9" style="margin-left:2px"><use href="#icon-chevron"/></svg></div>
+            <div class="chip mono">Gizmos: On</div>
+          </div>
+          <div class="nav-widget" title="Camera orientation">
+            <div class="core">
+              <span class="axis-dot x"></span>
+              <span class="axis-dot y"></span>
+              <span class="axis-dot z"></span>
+            </div>
+          </div>
+          <div class="viewport-stats">
+            <span>60 fps</span><span>12,480 tris</span><span>cam: Scene</span>
+          </div>
+        </div>
+      </div>
+      <div class="dock-content" data-panel-body="game" style="display:none">
+        <div class="viewport-stage row" style="align-items:center; justify-content:center;">
+          <div class="col gap-3" style="align-items:center;">
+            <svg width="34" height="34" class="muted-2"><use href="#icon-play"/></svg>
+            <div class="muted-2" style="font-size:11.5px;">Press Play to preview the Game view</div>
+          </div>
+        </div>
+      </div>
+      <span class="anatomy-label al-tabstrip">tab strip · Scene / Game</span>
+    </div>
+
+    <div class="dock-splitter horizontal" style="grid-column:3; grid-row:2;"></div>
+
+    <!-- CENTER BOTTOM: Problems / Output / Console -->
+    <div class="dock-group" style="grid-column:3; grid-row:3;">
+      <div class="tabstrip">
+        <div class="tab active" data-panel="problems"><svg width="13" height="13"><use href="#icon-warn"/></svg>Problems<span class="badge-count is-bad">2</span></div>
+        <div class="tab" data-panel="output">Output</div>
+        <div class="tab" data-panel="console">Console</div>
+        <div class="tabstrip-fill"></div>
+      </div>
+      <div class="dock-content" data-panel-body="problems">
+        <div class="problems-list">
+          <div class="problem-row">
+            <svg class="sev is-bad" width="13" height="13"><use href="#icon-bad"/></svg>
+            <div class="msg">Missing component reference on 'Enemy Spawner' — <span class="mono">SpawnPoint</span> is null<span class="src mono">Scene.ctx:142</span></div>
+          </div>
+          <div class="problem-row">
+            <svg class="sev is-bad" width="13" height="13"><use href="#icon-bad"/></svg>
+            <div class="msg">Unresolved asset reference — <span class="mono">textures/rock_04.png</span> not found<span class="src mono">Ground.ctx:8</span></div>
+          </div>
+          <div class="problem-row">
+            <svg class="sev is-idle" width="13" height="13"><use href="#icon-info"/></svg>
+            <div class="msg">3 assets re-imported after an external change<span class="src mono">watcher · 12:04:31</span></div>
+          </div>
+        </div>
+      </div>
+      <div class="dock-content" data-panel-body="output" style="display:none">
+        <div class="mono muted-2" style="padding:12px; font-size:11px; line-height:1.7;">
+          12:04:29  daemon: derivation settled (4 files)<br>
+          12:04:30  daemon: session attach ok — client #2 (agent)<br>
+          12:04:31  fs: watcher re-imported 3 assets
+        </div>
+      </div>
+      <div class="dock-content" data-panel-body="console" style="display:none">
+        <div class="mono muted-2" style="padding:12px; font-size:11px; line-height:1.7;">&gt; context edit .<br>context-editor v0.10.0 attached to daemon :51420</div>
+      </div>
+    </div>
+
+    <div class="dock-splitter vertical" style="grid-column:4; grid-row:1 / span 3;"></div>
+
+    <!-- RIGHT: Inspector -->
+    <div class="dock-group" style="grid-column:5; grid-row:1 / span 3;">
+      <div class="tabstrip">
+        <div class="tab active"><svg width="13" height="13"><use href="#icon-inspect"/></svg>Inspector</div>
+        <div class="tabstrip-fill"></div>
+        <div class="tabstrip-actions"><svg width="13" height="13" title="Tear out"><use href="#icon-external"/></svg></div>
+      </div>
+      <div class="dock-content">
+        <div class="inspector">
+          <div class="inspector-header">
+            <svg class="icon" width="16" height="16"><use href="#icon-sun"/></svg>
+            <div class="col" style="gap:1px;">
+              <span class="title" data-inspector-target>Directional Light</span>
+              <span class="kind">builtin.scene-tree → Light</span>
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Transform</div>
+            <div class="field-grid" style="margin-bottom:4px;">
+              <span class="field-label">Position</span>
+              <input class="field-input" value="0.00">
+              <input class="field-input" value="6.20">
+              <input class="field-input" value="-2.40">
+            </div>
+            <div class="field-grid" style="margin-bottom:4px;">
+              <span class="field-label">Rotation</span>
+              <input class="field-input" value="50.0">
+              <input class="field-input" value="-30.0">
+              <input class="field-input" value="0.00">
+            </div>
+            <div class="field-grid">
+              <span class="field-label">Scale</span>
+              <input class="field-input" value="1.00">
+              <input class="field-input" value="1.00">
+              <input class="field-input" value="1.00">
+            </div>
+          </div>
+
+          <div class="section">
+            <div class="section-title">Light</div>
+            <div class="field-row">
+              <span class="field-label">Color</span>
+              <div class="row gap-2">
+                <span class="swatch" style="background:#ffd9a0;"></span>
+                <input class="field-input mono" style="width:84px;" value="#FFD9A0">
+              </div>
+            </div>
+            <div class="field-row">
+              <span class="field-label">Intensity</span>
+              <input class="field-input" style="width:84px;" value="3.20 lux">
+            </div>
+            <div class="field-row">
+              <span class="field-label">Cast Shadows</span>
+              <div class="toggle on"></div>
+            </div>
+            <div class="field-note">Content-authored color (project data) — not a UI-chrome hue; see TOKENS.md note.</div>
+          </div>
+
+          <div class="row gap-2 muted-2" style="margin-top:var(--ctx-space-6); padding-top:var(--ctx-space-4); border-top:1px solid var(--ctx-line); font-size:10.5px;">
+            <span class="status-dot is-good"></span>
+            <span class="mono">Settled · Scene.ctx:88</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Floating group (tear-out demo) -->
+    <div class="floating-window">
+      <div class="titlebar-mini">
+        <span class="drag-dots"><span></span><span></span><span></span></span>
+        <svg width="11" height="11"><use href="#icon-external"/></svg>
+        Console — floating (torn out)
+        <div class="tabstrip-fill"></div>
+        <svg width="11" height="11" class="muted-2"><use href="#icon-close"/></svg>
+      </div>
+      <div class="mono muted-2" style="padding:12px; font-size:10.5px; line-height:1.7;">
+        12:04:29  daemon: derivation settled<br>
+        12:04:30  daemon: session attach ok<br>
+        12:04:31  fs: watcher re-imported 3 assets<br>
+        <span style="color:var(--ctx-idle)">— dragged past the window edge becomes its own OS window (D6/D17) —</span>
+      </div>
+    </div>
+    <!-- kept OUTSIDE .floating-window on purpose: that element has
+         overflow:hidden (for its rounded corners), which clipped this
+         label when it lived inside with a negative top offset -->
+    <span class="anatomy-label al-floating">floating group (tear-out)</span>
+
+  </div>
+
+  <!-- ============== Statusbar ============== -->
+  <div class="statusbar">
+    <div class="item"><span class="status-dot is-good"></span>Derivation settled</div>
+    <div class="item mono"><svg width="12" height="12"><use href="#icon-git"/></svg>main · scene.ctx@f0386bb9</div>
+    <div class="item">Selection: Scene / Directional Light</div>
+    <div class="fill"></div>
+    <div class="item"><svg width="12" height="12"><use href="#icon-link"/></svg>Attached · daemon :51420 · 2 clients</div>
+    <div class="item">Dark · monochrome-glow-ui</div>
+  </div>
+</div>
+
+<!-- ============== Command palette (D8) ============== -->
+<div class="palette-overlay" data-palette-overlay>
+  <div class="cmdk">
+    <input placeholder="Type a command or search…" autocomplete="off">
+    <div class="cmdk-row active">Play <kbd>⌘⏎</kbd></div>
+    <div class="cmdk-row">Toggle Theme <kbd>⌘K T</kbd></div>
+    <div class="cmdk-row">Move Panel to New Window <kbd>⌘K M</kbd></div>
+    <div class="cmdk-row">Focus Problems Panel <kbd>⌘K P</kbd></div>
+    <div class="cmdk-row">Open Recent Project <kbd>⌘O</kbd></div>
+    <div class="cmdk-row">Undo <kbd>⌘Z</kbd></div>
+  </div>
+</div>
+
+<!-- ============== Mockup controls (NOT product UI) ============== -->
+<div class="mockup-controls">
+  <div class="mc-heading"><span class="status-dot is-idle"></span>Mockup controls — not part of the product UI</div>
+  <div class="mc-row">
+    <span class="mc-label">Theme</span>
+    <div class="segmented" data-segmented data-role="theme">
+      <span class="pill"></span>
+      <button data-value="dark" class="active">Dark</button>
+      <button data-value="light">Light</button>
+    </div>
+  </div>
+  <div class="mc-row">
+    <span class="mc-label">Flourish</span>
+    <select class="field-select" data-flourish-select style="width:148px;">
+      <optgroup label="New directions (d1 respin)">
+        <option value="ink-bloom">1 · Ink Bloom</option>
+        <option value="northern-veil">2 · Northern Veil</option>
+        <option value="signal-ring">3 · Signal Ring</option>
+        <option value="living-line">4 · Living Line</option>
+        <option value="passing-light">5 · Passing Light</option>
+        <option value="state-linked">6 · Pulse of Work</option>
+      </optgroup>
+      <optgroup label="Reference">
+        <option value="original-rejected">Original (rejected)</option>
+      </optgroup>
+    </select>
+  </div>
+  <div class="field-note" style="margin-top:-6px;">Swaps the Play button's treatment live — see flourishes.html for all of them side by side.</div>
+  <div class="mc-row">
+    <span class="mc-label">Motion</span>
+    <div class="segmented" data-segmented data-role="motion">
+      <span class="pill"></span>
+      <button data-value="normal" class="active">Normal</button>
+      <button data-value="reduced">Reduced</button>
+    </div>
+  </div>
+  <div class="mc-row">
+    <span class="mc-label">Dock anatomy</span>
+    <div class="segmented" data-segmented data-role="anatomy">
+      <span class="pill"></span>
+      <button data-value="off" class="active">Off</button>
+      <button data-value="on">On</button>
+    </div>
+  </div>
+  <div class="mc-nav">
+    <a href="index.html">Index</a>
+    <a href="editor.html" class="current">Editor</a>
+    <a href="welcome.html">Welcome</a>
+    <a href="viewport-palette.html">Viewport palette</a>
+    <a href="tokens-preview.html">Tokens</a>
+    <a href="flourishes.html">Flourishes</a>
+  </div>
+</div>
+
+<script src="shared/main.js"></script>
+</body>
+</html>

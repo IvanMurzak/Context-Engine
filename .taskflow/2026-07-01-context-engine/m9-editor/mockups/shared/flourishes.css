@@ -1,0 +1,334 @@
+/* ==========================================================================
+   Context Editor — d1 Visual Direction Mockups — FLOURISHES (respin)
+   ==========================================================================
+   The owner rejected aurora variants A/B (shared/aurora.css) — the rotating
+   monochrome ink-alpha conic halo "looks bad." This file replaces it with a
+   SPREAD of ~6 distinct signature-flourish treatments for the Play / active-
+   action button, so the owner can pick one that clicks. See mockups/
+   flourishes.html for the live side-by-side comparison and mockups/README.md
+   for the framing.
+
+   Contract: put `class="flourish-btn"` + `data-flourish="<name>"` on the
+   button. Exactly one treatment renders per element, selected by the
+   `data-flourish` value — no ancestor attribute is required, so every
+   treatment can render simultaneously on flourishes.html (one button each)
+   AND a single button can swap treatments live via editor.html's "Flourish"
+   selector (shared/main.js just rewrites the attribute on one element).
+
+   House rules carried over from aurora.css / 06 §2, still true here:
+     - NO `box-shadow` anywhere. Every glow/bloom is a `background` gradient
+       + `filter: blur()` on a ::before/::after pseudo-element — the same
+       mechanism the original aurora used — never the shadow property.
+     - `prefers-reduced-motion: reduce` is honored for real (no JS) for every
+       treatment; `html.force-reduced-motion` mirrors it for the mockup's
+       manual Motion toggle.
+     - Monochrome options derive all color from `--ctx-ink` via color-mix()
+       (already established in components.css's .drop-zone-demo) so they
+       need zero new tokens and stay perfectly theme-reactive. Only
+       "northern-veil" introduces real hue — the one sanctioned, deliberately
+       rare break from pure monochrome (D12) — via the new --ctx-veil-* tokens
+       in tokens.css. "state-linked" introduces no new tokens either: it
+       reuses the SAME reserved status hues (good/warn/idle) doc 06 §2 already
+       binds the play bar to 1:1.
+   ========================================================================== */
+
+.flourish-btn {
+  position: relative;
+  isolation: isolate;
+}
+
+/* ==========================================================================
+   1. INK BLOOM — crisp monochrome glow
+   A tight radial bloom that breathes like a slow heartbeat, paired with a
+   crisp static ring right at the edge and a faint top-lit sheen inside the
+   button face itself. No rotation anywhere — the sharp inner ring is what
+   keeps this "tight, sharp, purposeful" instead of a smear. Pure monochrome.
+   ========================================================================== */
+.flourish-btn[data-flourish="ink-bloom"] {
+  background:
+    linear-gradient(180deg, color-mix(in srgb, var(--ctx-ink) 18%, transparent) 0%, transparent 58%),
+    var(--ctx-panel-2);
+}
+.flourish-btn[data-flourish="ink-bloom"]::before {
+  content: "";
+  position: absolute;
+  inset: -11px;
+  z-index: -1;
+  border-radius: inherit;
+  /* Most of a radial gradient's "core" sits UNDER the button's own opaque
+     fill and is never seen — only the tail past the button's own edge (here,
+     roughly the 53% stop for a 26px button in a 48px box) ever renders, and
+     `filter: blur()` diffuses whatever survives even further. The stop
+     placed AT that edge carries the real visible weight, so it's tuned much
+     higher than intuition from the raw percentage would suggest. */
+  background: radial-gradient(circle, color-mix(in srgb, var(--ctx-ink) 78%, transparent) 0%, color-mix(in srgb, var(--ctx-ink) 64%, transparent) 53%, transparent 100%);
+  filter: blur(7px);
+  animation: flourish-bloom-breathe 2.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  pointer-events: none;
+}
+.flourish-btn[data-flourish="ink-bloom"]::after {
+  content: "";
+  position: absolute;
+  inset: -4px;
+  z-index: -1;
+  border-radius: inherit;
+  border: 1px solid color-mix(in srgb, var(--ctx-ink) 72%, transparent);
+  pointer-events: none;
+}
+@keyframes flourish-bloom-breathe {
+  0%, 100% { opacity: 0.6; transform: scale(0.94); }
+  50%      { opacity: 1;   transform: scale(1.06); }
+}
+
+/* ==========================================================================
+   2. NORTHERN VEIL — subtle colored aurora
+   A real northern-lights wash: two independently-drifting sheets (a
+   green/violet primary + a fainter offset teal-blue secondary for parallax),
+   heavily blurred, low-alpha. The ONE option allowed to break pure-
+   monochrome — kept deliberately quiet so it reads as a hushed whisper of
+   color, never a light show. See tokens.css --ctx-veil-* for the palette
+   rationale.
+   ========================================================================== */
+.flourish-btn[data-flourish="northern-veil"]::before {
+  content: "";
+  position: absolute;
+  inset: -17px;
+  z-index: -1;
+  border-radius: inherit;
+  background:
+    radial-gradient(circle at 32% 30%, var(--ctx-veil-green) 0%, transparent 70%),
+    radial-gradient(circle at 70% 45%, var(--ctx-veil-violet) 0%, transparent 72%);
+  filter: blur(13px);
+  animation: flourish-veil-drift-a 13s ease-in-out infinite, flourish-veil-fade 6.5s ease-in-out infinite;
+  pointer-events: none;
+}
+.flourish-btn[data-flourish="northern-veil"]::after {
+  content: "";
+  position: absolute;
+  inset: -14px;
+  z-index: -2;
+  border-radius: inherit;
+  background: radial-gradient(circle at 45% 70%, var(--ctx-veil-blue) 0%, transparent 74%);
+  filter: blur(14px);
+  animation: flourish-veil-drift-b 9s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes flourish-veil-drift-a {
+  0%, 100% { transform: translate(-3%, -2%) scale(0.97) rotate(0deg); }
+  50%      { transform: translate(3%, 2%) scale(1.06) rotate(5deg); }
+}
+@keyframes flourish-veil-drift-b {
+  0%, 100% { transform: translate(2%, 1%) scale(1); }
+  50%      { transform: translate(-2%, -3%) scale(1.1); }
+}
+@keyframes flourish-veil-fade {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.95; }
+}
+
+/* ==========================================================================
+   3. SIGNAL RING — focus / glow ring
+   A resting 1px ink ring sits at the button's edge at all times (the same
+   visual grammar as :focus-visible's outline and the border-as-depth rule);
+   every ~3s a brighter ring "pings" outward from that edge and fades — crisp
+   geometry throughout, never blurred, never smeared.
+   ========================================================================== */
+.flourish-btn[data-flourish="signal-ring"]::after {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: inherit;
+  border: 1px solid color-mix(in srgb, var(--ctx-ink) 50%, transparent);
+  pointer-events: none;
+}
+.flourish-btn[data-flourish="signal-ring"]::before {
+  content: "";
+  position: absolute;
+  inset: -5px;
+  z-index: -1;
+  border-radius: inherit;
+  border: 1.5px solid color-mix(in srgb, var(--ctx-ink) 85%, transparent);
+  opacity: 0;
+  animation: flourish-ring-ping 3.2s cubic-bezier(0.16, 1, 0.3, 1) infinite;
+  pointer-events: none;
+}
+@keyframes flourish-ring-ping {
+  0%   { transform: scale(1);    opacity: 0.95; }
+  70%  { transform: scale(1.6);  opacity: 0; }
+  100% { transform: scale(1.6);  opacity: 0; }
+}
+
+/* ==========================================================================
+   4. LIVING LINE — breathing 1px border
+   The most minimal, most "us" option: no added element at all. The button's
+   OWN 1px border + fill quietly brighten and settle on a slow cycle — depth
+   language stays exactly what it already is (borders, never shadows), it
+   just breathes.
+   ========================================================================== */
+.flourish-btn[data-flourish="living-line"] {
+  animation: flourish-line-breathe 2.8s ease-in-out infinite;
+}
+@keyframes flourish-line-breathe {
+  0%, 100% { border-color: var(--ctx-line); background-color: var(--ctx-panel-2); }
+  50%      { border-color: var(--ctx-ink); background-color: color-mix(in srgb, var(--ctx-ink) 10%, var(--ctx-panel-2)); }
+}
+
+/* ==========================================================================
+   5. PASSING LIGHT — ink-gradient sheen sweep
+   A soft diagonal sheen glints across the button face every few seconds,
+   then rests — like light passing over brushed metal. Sits between the
+   button's own fill and its icon glyph (z-index -1 inside an isolated
+   stacking context), so the icon never washes out.
+   ========================================================================== */
+.flourish-btn[data-flourish="passing-light"]::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  border-radius: inherit;
+  background: linear-gradient(
+    115deg,
+    transparent 26%,
+    color-mix(in srgb, var(--ctx-ink) 60%, transparent) 46%,
+    color-mix(in srgb, var(--ctx-ink) 60%, transparent) 54%,
+    transparent 74%
+  );
+  background-size: 260% 260%;
+  background-position: -120% -120%;
+  animation: flourish-sheen-sweep 3.6s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+  animation-delay: 0.4s;
+  pointer-events: none;
+}
+@keyframes flourish-sheen-sweep {
+  0%   { background-position: -120% -120%; }
+  35%  { background-position: 120% 120%; }
+  100% { background-position: 120% 120%; }
+}
+
+/* ==========================================================================
+   6. PULSE OF WORK — state-linked halo (bonus 6th direction)
+   The glow's hue and rhythm mirror the button's REAL state — idle / compiling
+   / running / paused — reusing the exact status hues doc 06 §2 already
+   reserves for this semantic (warn = active work, good = running). Flourish
+   and status feedback become the same signal, introducing zero new colors.
+   `data-play-state` is set by shared/main.js's play-bar demo; absent it, the
+   idle (--ctx-idle) reading is the default.
+   ========================================================================== */
+.flourish-btn[data-flourish="state-linked"]::before {
+  content: "";
+  position: absolute;
+  inset: -5px;                 /* bloom size reduced ~50% (was -11px) per owner */
+  z-index: -1;
+  border-radius: inherit;
+  background: radial-gradient(circle, var(--ctx-idle) 0%, transparent 85%);
+  filter: blur(4px);           /* blur halved with the bloom (was 7px) */
+  opacity: 0.5;
+  transition: background var(--ctx-duration-slow) var(--ctx-ease-standard), opacity var(--ctx-duration-slow) var(--ctx-ease-standard);
+  /* idle / "Ready" = EXTREMELY slow breathe — slowest end of the activity-speed gradient */
+  animation: flourish-state-breathe 7s ease-in-out infinite;
+  pointer-events: none;
+}
+.flourish-btn[data-flourish="state-linked"][data-play-state="compiling"]::before {
+  background: radial-gradient(circle, var(--ctx-warn) 0%, transparent 85%);
+  opacity: 0.85;
+  animation: flourish-state-pulse 0.95s ease-in-out infinite; /* active work (Compiling) = FASTEST */
+}
+.flourish-btn[data-flourish="state-linked"][data-play-state="running"]::before {
+  background: radial-gradient(circle, var(--ctx-good) 0%, transparent 85%);
+  opacity: 0.75;
+  animation: flourish-state-breathe 2.6s ease-in-out infinite; /* running/playing = MIDDLE of the gradient */
+}
+.flourish-btn[data-flourish="state-linked"][data-play-state="paused"]::before {
+  background: radial-gradient(circle, var(--ctx-idle) 0%, transparent 85%);
+  opacity: 0.55;
+  animation: none; /* paused = frozen (no activity → no motion) */
+}
+.flourish-btn[data-flourish="state-linked"][data-play-state="error"]::before {
+  /* compile error blocks Play — the reserved `bad` hue, an insistent alert pulse:
+     slower than active Compiling (0.95s), faster than calm Running (2.6s) */
+  background: radial-gradient(circle, var(--ctx-bad) 0%, transparent 85%);
+  opacity: 0.92;
+  animation: flourish-state-pulse 1.4s ease-in-out infinite;
+}
+@keyframes flourish-state-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.95); }
+  50%      { opacity: 1;    transform: scale(1.1); }
+}
+@keyframes flourish-state-breathe {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 0.9; }
+}
+
+/* ==========================================================================
+   ORIGINAL — REJECTED (reference only, not one of the new options)
+   A byte-faithful reproduction of the retired aurora.css treatment (same
+   --ctx-aurora-a/b/c tokens, same 7s spin + 3.4s breathe), kept ONLY so the
+   owner can compare the new directions directly against what got rejected.
+   Never wired as a default anywhere.
+   ========================================================================== */
+.flourish-btn[data-flourish="original-rejected"]::before {
+  content: "";
+  position: absolute;
+  inset: -12px;
+  z-index: -1;
+  border-radius: inherit;
+  background: conic-gradient(
+    from 0deg,
+    var(--ctx-aurora-a) 0deg, transparent 65deg,
+    var(--ctx-aurora-b) 135deg, transparent 200deg,
+    var(--ctx-aurora-c) 270deg, transparent 330deg,
+    var(--ctx-aurora-a) 360deg
+  );
+  filter: blur(14px);
+  opacity: 0.85;
+  animation: flourish-original-spin 7s linear infinite, flourish-original-breathe 3.4s ease-in-out infinite;
+  pointer-events: none;
+}
+@keyframes flourish-original-spin { to { transform: rotate(1turn); } }
+@keyframes flourish-original-breathe {
+  0%, 100% { opacity: 0.5; }
+  50%      { opacity: 0.95; }
+}
+
+/* ==========================================================================
+   Reduced motion — REAL media query (no JS) + the manual mockup toggle.
+   Every treatment gets a tasteful static resting state, never just "nothing."
+   ========================================================================== */
+@media (prefers-reduced-motion: reduce) {
+  .flourish-btn[data-flourish="ink-bloom"]::before { animation: none; opacity: 0.85; transform: none; }
+  .flourish-btn[data-flourish="northern-veil"]::before,
+  .flourish-btn[data-flourish="northern-veil"]::after { animation: none; opacity: 0.85; transform: none; }
+  .flourish-btn[data-flourish="signal-ring"]::before { animation: none; opacity: 0.5; transform: scale(1); }
+  .flourish-btn[data-flourish="living-line"] {
+    animation: none;
+    border-color: color-mix(in srgb, var(--ctx-ink) 62%, var(--ctx-line));
+    background-color: color-mix(in srgb, var(--ctx-ink) 6%, var(--ctx-panel-2));
+  }
+  .flourish-btn[data-flourish="passing-light"]::before { animation: none; background-position: 15% 15%; }
+  .flourish-btn[data-flourish="state-linked"]::before,
+  .flourish-btn[data-flourish="state-linked"][data-play-state]::before { animation: none; }
+  .flourish-btn[data-flourish="original-rejected"]::before { animation: none; opacity: 0.65; transform: none; }
+}
+html.force-reduced-motion .flourish-btn[data-flourish="ink-bloom"]::before { animation: none; opacity: 0.85; transform: none; }
+html.force-reduced-motion .flourish-btn[data-flourish="northern-veil"]::before,
+html.force-reduced-motion .flourish-btn[data-flourish="northern-veil"]::after { animation: none; opacity: 0.85; transform: none; }
+html.force-reduced-motion .flourish-btn[data-flourish="signal-ring"]::before { animation: none; opacity: 0.5; transform: scale(1); }
+html.force-reduced-motion .flourish-btn[data-flourish="living-line"] {
+  animation: none;
+  border-color: color-mix(in srgb, var(--ctx-ink) 62%, var(--ctx-line));
+  background-color: color-mix(in srgb, var(--ctx-ink) 6%, var(--ctx-panel-2));
+}
+html.force-reduced-motion .flourish-btn[data-flourish="passing-light"]::before { animation: none; background-position: 15% 15%; }
+html.force-reduced-motion .flourish-btn[data-flourish="state-linked"]::before,
+html.force-reduced-motion .flourish-btn[data-flourish="state-linked"][data-play-state]::before { animation: none; }
+html.force-reduced-motion .flourish-btn[data-flourish="original-rejected"]::before { animation: none; opacity: 0.65; transform: none; }
+
+/* ---------------- flourishes.html-only label chip (harmless elsewhere) --- */
+.flourish-name-chip {
+  font-family: var(--ctx-font-mono);
+  font-size: 9.5px;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--ctx-muted-2);
+}

@@ -1,0 +1,109 @@
+/* ==========================================================================
+   Context Editor — d1 Visual Direction Mockups — BASE
+   Resets, typography defaults, focus/scrollbar treatment, theme cross-fade,
+   reduced-motion handling. MOCKUP-ONLY (see tokens.css header).
+   ========================================================================== */
+
+*, *::before, *::after { box-sizing: border-box; }
+
+html, body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  background: var(--ctx-canvas);
+  color: var(--ctx-ink);
+  font-family: var(--ctx-font-ui);
+  font-size: var(--ctx-text-base);
+  font-weight: var(--ctx-weight-regular);
+  letter-spacing: var(--ctx-tracking);
+  line-height: var(--ctx-line-height);
+  -webkit-font-smoothing: antialiased;
+  text-rendering: optimizeLegibility;
+}
+
+/* Tabular numerics everywhere data/ids/counters render (06 §2) */
+.tnum, .mono, code, .status-dot + .status-label .value,
+input[type="number"], .field-value, .fps, .clock, .badge-count {
+  font-variant-numeric: tabular-nums;
+}
+
+.mono {
+  font-family: var(--ctx-font-mono);
+  letter-spacing: 0;
+}
+
+h1, h2, h3, h4, p { margin: 0; }
+
+button {
+  font-family: inherit;
+  letter-spacing: inherit;
+}
+
+a { color: inherit; }
+
+svg { display: block; flex-shrink: 0; }
+
+/* No drop shadows anywhere (06 §2). This rule exists so a stray box-shadow
+   introduced by accident is visually obvious in review, not to be shipped. */
+.no-shadow-law { box-shadow: none !important; }
+
+/* Focus ring — 1px borders elsewhere, but focus needs a clearly separate
+   affordance; kept theme-aware and NOT a shadow (outline, not box-shadow). */
+:focus-visible {
+  outline: 2px solid var(--ctx-focus-ring-color);
+  outline-offset: 2px;
+  border-radius: var(--ctx-radius-sm);
+}
+
+/* Theme cross-fade (06 §2: 350ms). Applied broadly but only to color-ish
+   properties so layout never animates. Suspended until .ctx-ready is set
+   (post first paint) so the initial theme choice never visibly transitions,
+   and suspended entirely under reduced-motion. */
+.ctx-ready, .ctx-ready * {
+  transition: background-color var(--ctx-duration-theme) ease,
+              color var(--ctx-duration-theme) ease,
+              border-color var(--ctx-duration-theme) ease,
+              fill var(--ctx-duration-theme) ease,
+              stroke var(--ctx-duration-theme) ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .ctx-ready, .ctx-ready * { transition: none !important; animation: none !important; }
+}
+html.force-reduced-motion .ctx-ready,
+html.force-reduced-motion .ctx-ready * {
+  transition: none !important;
+  animation: none !important;
+}
+
+/* Scrollbars — thin, monochrome, no native chrome-colored default */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: var(--ctx-line) transparent;
+}
+*::-webkit-scrollbar { width: 10px; height: 10px; }
+*::-webkit-scrollbar-track { background: transparent; }
+*::-webkit-scrollbar-thumb {
+  background: var(--ctx-line);
+  border-radius: var(--ctx-radius-pill);
+  border: 2px solid var(--ctx-panel);
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--ctx-muted-2); }
+
+/* Layout utilities shared by every mockup page */
+.row { display: flex; align-items: center; }
+.col { display: flex; flex-direction: column; }
+.gap-1 { gap: var(--ctx-space-1); }
+.gap-2 { gap: var(--ctx-space-2); }
+.gap-3 { gap: var(--ctx-space-3); }
+.gap-4 { gap: var(--ctx-space-4); }
+.gap-6 { gap: var(--ctx-space-6); }
+.grow { flex: 1 1 auto; min-width: 0; min-height: 0; }
+.muted { color: var(--ctx-muted); }
+.muted-2 { color: var(--ctx-muted-2); }
+.visually-hidden {
+  position: absolute; width: 1px; height: 1px; overflow: hidden;
+  clip: rect(0 0 0 0); white-space: nowrap;
+}
