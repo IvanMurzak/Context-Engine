@@ -83,4 +83,33 @@ struct PointI
 [[nodiscard]] PointI to_logical_point(PointI physical, DpiScale scale);
 [[nodiscard]] PointI to_physical_point(PointI logical, DpiScale scale);
 
+#if defined(_WIN32)
+
+// The resolution state of the dynamically-loaded user32 DPI entry points (win32_window.cpp).
+//
+// Exposed as a seam for ONE regression: `context_editor` links with CEF's standard
+// `/DELAYLOAD:user32.dll`, so user32 is NOT resident when the resolver runs (the resolver runs
+// before the process has created a window or called any user32 function — that is its job), and a
+// `GetModuleHandleW`-based lookup returns null there. That null resolved every entry point below to
+// nullptr and silently pinned the whole shell to 96 DPI — a 150% desktop rendered the editor at
+// 1.0x, with the un-covered band of the window left black. `editor-shell-test_win32_dpi` rebuilds
+// that exact link condition (delay-loaded user32, no prior user32 call) and requires resolution to
+// succeed anyway.
+struct Win32DpiApiStatus
+{
+    bool set_process_dpi_awareness_context = false;
+    bool get_dpi_for_window = false;
+    bool adjust_window_rect_ex_for_dpi = false;
+};
+
+[[nodiscard]] Win32DpiApiStatus win32_dpi_api_status();
+
+// Applies DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 to the process. True when THIS call set it;
+// false when the entry point is missing (pre-1703 Windows) or the process awareness was already
+// fixed (a call can only succeed once per process — CEF also sets it during CefInitialize, which is
+// why the window backend applies it as early as it can). Callers treat false as non-fatal.
+[[nodiscard]] bool win32_apply_per_monitor_dpi_awareness();
+
+#endif // _WIN32
+
 } // namespace context::editor::shell

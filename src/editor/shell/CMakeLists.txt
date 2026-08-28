@@ -289,6 +289,29 @@ foreach(_t IN LISTS _context_shell_tests)
     add_test(NAME editor-shell-${_t} COMMAND context_editor_shell_${_t})
 endforeach()
 
+# --- the delay-loaded-user32 DPI resolver regression (2026-08-27) ---------------------------------
+# NOT part of the roster loop above, because its whole point is a LINK CONDITION the loop must not
+# inherit: `context_editor` links with CEF's standard `/DELAYLOAD:user32.dll`, under which the DPI
+# entry-point resolver used to come up empty (GetModuleHandleW on a not-yet-resident user32) and
+# silently pin the shell to 96 DPI on every scaled desktop. This target rebuilds that link line so
+# the resolver is exercised under the SHIPPING condition, not the test-default one.
+#
+# MSVC-only by necessity, not preference: /DELAYLOAD + delayimp are MSVC linker features, and the
+# local Strawberry-GCC dev gate cannot express them — the same split every CEF-linked target already
+# lives with. The CI `build (windows)` leg is MSVC, so the gate that matters runs it.
+if(WIN32 AND MSVC)
+    add_executable(context_editor_shell_test_win32_dpi tests/test_win32_dpi.cpp)
+    target_link_libraries(context_editor_shell_test_win32_dpi PRIVATE
+        context_editor_shell context_warnings delayimp)
+    target_link_options(context_editor_shell_test_win32_dpi PRIVATE
+        ${_context_shell_static_runtime} "/DELAYLOAD:user32.dll")
+    target_include_directories(context_editor_shell_test_win32_dpi PRIVATE
+        ${CMAKE_CURRENT_SOURCE_DIR}/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../client/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../render/tests)
+    add_test(NAME editor-shell-test_win32_dpi COMMAND context_editor_shell_test_win32_dpi)
+endif()
+
 # --- the SMOKE-TIER window seam (M9 e12a-x11-legs, issue #408) ------------------------------------
 # How a live smoke chooses between the honest offscreen shell and a REAL OS window — the seam that
 # lets the nine `editor-cef-smoke-shell*` scenarios run through a real X11 window on Linux instead of

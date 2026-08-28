@@ -115,11 +115,19 @@ struct Win32DpiApi
 
 const Win32DpiApi& win32_dpi_api()
 {
-    // Resolved once. `GetModuleHandleW` rather than LoadLibrary: user32 is already loaded in any
-    // process that has a window, and taking a second reference would leak it.
+    // Resolved once. `LoadLibraryW`, deliberately NOT `GetModuleHandleW`: `context_editor` links
+    // with CEF's standard `/DELAYLOAD:user32.dll`, and this resolver runs BEFORE the process has
+    // created any window or called any user32 entry point — that early call is its whole purpose
+    // (the awareness context must be set before the first window exists). Under delay-load, user32
+    // is not resident yet at that moment, so GetModuleHandleW returned null and every entry point
+    // below resolved to nullptr — which silently pinned the shell to 96 DPI (measured 2026-08-27: a
+    // 150% desktop rendered the editor at 1.0x, with the uncovered band of the window left black).
+    // The old "a second reference would leak" concern is moot: user32 never unloads from a GUI
+    // process, so the reference this takes changes nothing observable. Pinned by
+    // `editor-shell-test_win32_dpi`, which rebuilds the delay-load link condition.
     static const Win32DpiApi api = [] {
         Win32DpiApi resolved;
-        HMODULE user32 = ::GetModuleHandleW(L"user32.dll");
+        HMODULE user32 = ::LoadLibraryW(L"user32.dll");
         if (user32 == nullptr)
         {
             return resolved;
@@ -413,12 +421,10 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
 bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
 {
     const Win32DpiApi& api = win32_dpi_api();
-    if (api.set_process_dpi_awareness_context != nullptr)
-    {
-        // Per-monitor-v2: the window is told about DPI changes and non-client areas scale too.
-        // Failure is not fatal — an older Windows simply runs at system DPI awareness.
-        (void)api.set_process_dpi_awareness_context(per_monitor_aware_v2_context());
-    }
+    // Per-monitor-v2: the window is told about DPI changes and non-client areas scale too. Failure
+    // is not fatal — an older Windows runs at system DPI awareness, and a process whose awareness
+    // was already fixed (CEF sets it during CefInitialize too) keeps the value it has.
+    (void)win32_apply_per_monitor_dpi_awareness();
 
     HINSTANCE instance = ::GetModuleHandleW(nullptr);
 
@@ -584,6 +590,26 @@ void Win32WindowBackend::apply_placement(const WindowPlacement& placement)
 }
 
 } // namespace
+
+Win32DpiApiStatus win32_dpi_api_status()
+{
+    const Win32DpiApi& api = win32_dpi_api();
+    Win32DpiApiStatus status;
+    status.set_process_dpi_awareness_context = api.set_process_dpi_awareness_context != nullptr;
+    status.get_dpi_for_window = api.get_dpi_for_window != nullptr;
+    status.adjust_window_rect_ex_for_dpi = api.adjust_window_rect_ex_for_dpi != nullptr;
+    return status;
+}
+
+bool win32_apply_per_monitor_dpi_awareness()
+{
+    const Win32DpiApi& api = win32_dpi_api();
+    if (api.set_process_dpi_awareness_context == nullptr)
+    {
+        return false;
+    }
+    return api.set_process_dpi_awareness_context(per_monitor_aware_v2_context()) != FALSE;
+}
 
 std::unique_ptr<IWindowBackend> make_win32_window_backend(const WindowDesc& desc,
                                                           std::string& error)

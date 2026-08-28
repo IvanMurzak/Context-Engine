@@ -239,6 +239,28 @@ foreach(_sheet IN LISTS _ctx_webui_kit_stylesheets)
     list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/${_sheet}")
 endforeach()
 
+# --- 4c) stage the UI font faces (M9 e06a's files, finally SERVED) --------------------------------
+# Served as `context-editor://app/fonts/<file>` and pulled by app.css's @font-face. e06a shipped the
+# two variable faces into tokens/fonts/ and every theme names them first in its font stacks
+# (`'Geist', 'Inter', system-ui, …`) — but nothing ever staged the files or declared a @font-face,
+# so every build to date silently fell through the whole stack to the platform sans, and the drift
+# was caught by the owner's EYE (2026-08-27), not by any gate. The scheme side needs no change:
+# `.woff2` is already on the media-type allowlist (app_scheme.cpp) and the CSP already says
+# `font-src 'self'`. The webui-assets ctest asserts both halves (staged bytes + the @font-face that
+# references them) so this cannot regress silently again.
+set(_ctx_webui_fonts Geist-Variable.woff2 GeistMono-Variable.woff2)
+foreach(_font IN LISTS _ctx_webui_fonts)
+    add_custom_command(
+        OUTPUT "${_ctx_webui_assets}/fonts/${_font}"
+        COMMAND "${CMAKE_COMMAND}" -E make_directory "${_ctx_webui_assets}/fonts"
+        COMMAND "${CMAKE_COMMAND}" -E copy_if_different
+                "${_ctx_webui_tokens}/fonts/${_font}" "${_ctx_webui_assets}/fonts/${_font}"
+        DEPENDS "${_ctx_webui_tokens}/fonts/${_font}"
+        COMMENT "context_editor_webui: staging UI font ${_font}"
+        VERBATIM)
+    list(APPEND _ctx_webui_staged_documents "${_ctx_webui_assets}/fonts/${_font}")
+endforeach()
+
 # ALL so a plain `cmake --build` produces the asset set — the bundle is a build output on every leg,
 # exactly like editor/client's generated schema.
 add_custom_target(context_editor_webui ALL

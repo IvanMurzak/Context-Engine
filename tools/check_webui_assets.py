@@ -70,6 +70,17 @@ NODE_MARKERS = ('"node:', "'node:", "#!/usr/bin/env node")
 APP_DOCUMENT = "index.html"
 APP_STYLESHEET = "app.css"
 
+# The UI font faces (M9 e06a's files, SERVED since 2026-08-27). Every built-in theme's font stacks
+# lead with these families ('Geist', 'Inter', system-ui, …), so the served set must both STAGE the
+# variable faces (editor/webui/CMakeLists.txt § 4c) and DECLARE a @font-face for each in app.css —
+# either half missing drops the whole editor to the platform sans SILENTLY (font-display never
+# errors, a font stack never errors; the drift was caught by the owner's eye, not by any gate).
+# Family -> the asset-dir-relative url the declaration must pull it from.
+REQUIRED_FONT_FACES = {
+    "Geist": "fonts/Geist-Variable.woff2",
+    "Geist Mono": "fonts/GeistMono-Variable.woff2",
+}
+
 # The cross-language constants (check 5) — deliberately NOT counted in this sentence: the count is
 # `len(SCHEME_CONSTANTS)` three lines down, and a hand-maintained copy of it in prose is a number
 # that rots (it already had, reading "four" while the table held six). Each entry is
@@ -437,6 +448,63 @@ def check_dockview(asset_dir: Path, manifest: dict) -> list[str]:
             failures.append(
                 f"dockview asset '{name}' FAILED its pin: expected {expected}, got {actual} — the "
                 f"staged file changed after fetch_dockview.py verified it")
+    return failures
+
+
+_FONT_FACE_BLOCK_RE = re.compile(r"@font-face\s*\{([^}]*)\}")
+_FONT_FAMILY_RE = re.compile(r"font-family\s*:\s*['\"]([^'\"]+)['\"]")
+_FONT_SRC_URL_RE = re.compile(r"url\(\s*['\"]?([^'\")]+)['\"]?\s*\)")
+
+
+def check_font_faces(asset_dir: Path) -> list[str]:
+    """The served font set: every @font-face url resolves to staged bytes, and the families the
+    themes lead with are actually declared (REQUIRED_FONT_FACES).
+
+    Both directions, because each half rots differently and BOTH rot silently: a @font-face whose
+    url points at nothing makes the browser fall straight through the font stack (no error, no
+    console line — `font-display: swap` by design never blocks), and a staged file that no
+    declaration names is dead weight that reads as coverage. The url is compared against the staged
+    layout literally because the two halves live in different files (app.css vs CMakeLists.txt) with
+    nothing else holding them together.
+    """
+    failures: list[str] = []
+    stylesheet = asset_dir / APP_STYLESHEET
+    if not stylesheet.is_file():
+        return [f"served stylesheet missing: {stylesheet}"]
+    try:
+        text = stylesheet.read_text(encoding="utf-8", errors="replace")
+    except OSError as exc:
+        return [f"cannot read {stylesheet}: {exc}"]
+
+    declared: dict[str, str] = {}
+    for block in _FONT_FACE_BLOCK_RE.finditer(text):
+        body = block.group(1)
+        family = _FONT_FAMILY_RE.search(body)
+        src = _FONT_SRC_URL_RE.search(body)
+        if family is None or src is None:
+            failures.append(
+                f"{APP_STYLESHEET}: a @font-face block lacks a quoted font-family or a src url() — "
+                f"an unparseable declaration loads nothing")
+            continue
+        declared[family.group(1)] = src.group(1)
+        staged = asset_dir / src.group(1)
+        if not staged.is_file() or staged.stat().st_size == 0:
+            failures.append(
+                f"{APP_STYLESHEET}: @font-face '{family.group(1)}' pulls '{src.group(1)}' but no "
+                f"such staged asset exists — the browser falls back to the platform sans with no "
+                f"error anywhere")
+
+    for family, expected_url in REQUIRED_FONT_FACES.items():
+        if family not in declared:
+            failures.append(
+                f"{APP_STYLESHEET}: no @font-face declares '{family}' — the themes' font stacks "
+                f"lead with it, so without the declaration the whole editor silently renders in "
+                f"the platform fallback")
+        elif declared[family] != expected_url:
+            failures.append(
+                f"{APP_STYLESHEET}: @font-face '{family}' pulls '{declared[family]}' but the build "
+                f"stages '{expected_url}' — the css and the staging list live in different files "
+                f"and must not drift")
     return failures
 
 
@@ -1174,6 +1242,7 @@ def run(asset_dir: Path, manifest_path: Path, bundle_name: str) -> int:
 
     failures = check_bundle(asset_dir / bundle_name)
     failures.extend(check_dockview(asset_dir, manifest))
+    failures.extend(check_font_faces(asset_dir))
 
     if failures:
         for failure in failures:
@@ -1181,8 +1250,8 @@ def run(asset_dir: Path, manifest_path: Path, bundle_name: str) -> int:
         return 1
 
     member_count = len(manifest.get("members", {}))
-    print(f"[check_webui_assets] OK: {bundle_name} + {member_count} pinned dockview asset(s) "
-          f"verified in {asset_dir}")
+    print(f"[check_webui_assets] OK: {bundle_name} + {member_count} pinned dockview asset(s) + "
+          f"{len(REQUIRED_FONT_FACES)} served font face(s) verified in {asset_dir}")
     return 0
 
 

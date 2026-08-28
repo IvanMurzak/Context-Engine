@@ -39,6 +39,22 @@ export { editorCoreInfo, isRpcMethod, isEventTopic, isRetriable };
 DOCKVIEW_JS = b"/* dockview-core */\n"
 DOCKVIEW_CSS = b".dv-dockview{}\n"
 
+# The served-font halves (2026-08-27): app.css declares the two families the themes lead with, and
+# the staged fonts/ dir holds the bytes the declarations pull. The gate holds them in lockstep.
+GOOD_FONT_STYLESHEET = """\
+@font-face {
+    font-family: 'Geist';
+    src: url('fonts/Geist-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+}
+@font-face {
+    font-family: 'Geist Mono';
+    src: url('fonts/GeistMono-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+}
+"""
+FONT_FILES = ("Geist-Variable.woff2", "GeistMono-Variable.woff2")
+
 
 def _sha(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
@@ -60,13 +76,21 @@ def _manifest(tmp_path: Path, *, js: bytes = DOCKVIEW_JS, css: bytes = DOCKVIEW_
 
 
 def _assets(tmp_path: Path, *, bundle: str | None = GOOD_BUNDLE,
-            js: bytes = DOCKVIEW_JS, css: bytes = DOCKVIEW_CSS) -> Path:
+            js: bytes = DOCKVIEW_JS, css: bytes = DOCKVIEW_CSS,
+            stylesheet: str | None = GOOD_FONT_STYLESHEET,
+            fonts: tuple[str, ...] = FONT_FILES) -> Path:
     asset_dir = tmp_path / "app"
     asset_dir.mkdir(parents=True, exist_ok=True)
     if bundle is not None:
         (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
     (asset_dir / "dockview-core.min.js").write_bytes(js)
     (asset_dir / "dockview.css").write_bytes(css)
+    if stylesheet is not None:
+        (asset_dir / "app.css").write_text(stylesheet, encoding="utf-8")
+    if fonts:
+        (asset_dir / "fonts").mkdir(exist_ok=True)
+        for font in fonts:
+            (asset_dir / "fonts" / font).write_bytes(b"wOF2fake-bytes")
     return asset_dir
 
 
@@ -139,6 +163,47 @@ def test_altered_dockview_css_fails(tmp_path: Path) -> None:
     asset_dir = _assets(tmp_path)
     (asset_dir / "dockview.css").write_bytes(b".dv-dockview{content:'evil'}\n")
     assert check_webui_assets.run(asset_dir, manifest, "editor-core.js") == 1
+
+
+# --- served font faces (2026-08-27) ---------------------------------------------------------------
+# Each case plants ONE half of the drift that actually shipped: e06a's faces existed in the repo
+# while nothing staged or declared them, and the editor silently rendered in the platform sans.
+
+def test_missing_staged_font_fails(tmp_path: Path, capsys) -> None:
+    """@font-face declared, bytes never staged — the browser falls back with no error anywhere."""
+    asset_dir = _assets(tmp_path, fonts=("Geist-Variable.woff2",))  # the Mono bytes are missing
+    assert check_webui_assets.run(asset_dir, _manifest(tmp_path), "editor-core.js") == 1
+    assert "GeistMono-Variable.woff2" in capsys.readouterr().err
+
+
+def test_empty_staged_font_fails(tmp_path: Path) -> None:
+    """A zero-byte font is a fetch that 'succeeds' and a face that never renders."""
+    asset_dir = _assets(tmp_path)
+    (asset_dir / "fonts" / "Geist-Variable.woff2").write_bytes(b"")
+    assert check_webui_assets.run(asset_dir, _manifest(tmp_path), "editor-core.js") == 1
+
+
+def test_missing_font_face_declaration_fails(tmp_path: Path, capsys) -> None:
+    """Bytes staged, family never declared — exactly as silent as the missing-bytes half."""
+    no_mono = GOOD_FONT_STYLESHEET[:GOOD_FONT_STYLESHEET.rindex("@font-face")]
+    asset_dir = _assets(tmp_path, stylesheet=no_mono)
+    assert check_webui_assets.run(asset_dir, _manifest(tmp_path), "editor-core.js") == 1
+    assert "Geist Mono" in capsys.readouterr().err
+
+
+def test_font_face_url_drift_fails(tmp_path: Path, capsys) -> None:
+    """The css and the staging list live in different files; a rename on one side must red."""
+    drifted = GOOD_FONT_STYLESHEET.replace("fonts/Geist-Variable.woff2", "fonts/Geist.woff2")
+    # The drifted target IS staged, so the only failure left is the lockstep drift itself.
+    asset_dir = _assets(tmp_path, stylesheet=drifted, fonts=FONT_FILES + ("Geist.woff2",))
+    assert check_webui_assets.run(asset_dir, _manifest(tmp_path), "editor-core.js") == 1
+    assert "drift" in capsys.readouterr().err
+
+
+def test_missing_app_stylesheet_fails_the_asset_gate(tmp_path: Path) -> None:
+    """app.css is part of the served set; without it no font face exists at all."""
+    asset_dir = _assets(tmp_path, stylesheet=None)
+    assert check_webui_assets.run(asset_dir, _manifest(tmp_path), "editor-core.js") == 1
 
 
 # --- config errors -------------------------------------------------------------------------------
