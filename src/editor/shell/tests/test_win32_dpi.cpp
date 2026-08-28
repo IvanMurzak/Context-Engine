@@ -60,10 +60,26 @@ void test_resolver_finds_all_three_entry_points_under_delay_load()
 }
 
 // The reason the resolver exists at all: applying per-monitor-v2 must succeed as the FIRST setter
-// in a fresh process (there is no CEF here to have set it earlier). Session-0 safe — the awareness
-// context is process state, not window state, so this holds on a service-session CI runner too.
+// in a fresh process (there is no CEF here to have set it earlier) — but ONLY in an interactive
+// window session. A SERVICE session refuses the transition outright: the self-hosted CI runner
+// (LocalSystem, Session 0) returned FALSE from the very same call on run 33133287819 while both
+// resolver checks above passed, disproving this file's first claim that the apply half was
+// "Session-0 safe". So the hard assertion holds exactly where the property is provable — every
+// interactive run, which includes the local MSVC gate and any desktop box — and Session 0 degrades
+// to a LOGGED partial skip, the same shape the x11/cocoa smokes use for a missing display. The
+// delay-load regression this executable exists for is fully discriminated by the two checks above,
+// which run everywhere.
 void test_per_monitor_v2_is_applied()
 {
+    DWORD session = 0;
+    if (::ProcessIdToSessionId(::GetCurrentProcessId(), &session) == 0 || session == 0)
+    {
+        std::fprintf(stderr, "[test_win32_dpi] SKIP apply-half: service session (session %lu) "
+                             "refuses the awareness transition; the resolver checks above still "
+                             "ran\n",
+                     session);
+        return;
+    }
     CHECK(win32_apply_per_monitor_dpi_awareness());
 }
 
