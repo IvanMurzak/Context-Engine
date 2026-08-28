@@ -423,35 +423,20 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
             if (caption !== null) {
                 regions.push(caption);
             }
-            if (minButton !== null) {
-                const region = physicalRegion(
-                    minButton.element,
-                    CHROME_REGION_MIN_ID,
-                    REGION_KIND_CAPTION_MIN,
-                    ratio,
-                );
-                if (region !== null) {
-                    regions.push(region);
+            const controlRegions: readonly (readonly [
+                KitButton | null,
+                string,
+                ShellRegion["kind"],
+            ])[] = [
+                [minButton, CHROME_REGION_MIN_ID, REGION_KIND_CAPTION_MIN],
+                [maxButton, CHROME_REGION_MAX_ID, REGION_KIND_CAPTION_MAX],
+                [closeButton, CHROME_REGION_CLOSE_ID, REGION_KIND_CAPTION_CLOSE],
+            ];
+            for (const [button, id, kind] of controlRegions) {
+                if (button === null) {
+                    continue;
                 }
-            }
-            if (maxButton !== null) {
-                const region = physicalRegion(
-                    maxButton.element,
-                    CHROME_REGION_MAX_ID,
-                    REGION_KIND_CAPTION_MAX,
-                    ratio,
-                );
-                if (region !== null) {
-                    regions.push(region);
-                }
-            }
-            if (closeButton !== null) {
-                const region = physicalRegion(
-                    closeButton.element,
-                    CHROME_REGION_CLOSE_ID,
-                    REGION_KIND_CAPTION_CLOSE,
-                    ratio,
-                );
+                const region = physicalRegion(button.element, id, kind, ratio);
                 if (region !== null) {
                     regions.push(region);
                 }
