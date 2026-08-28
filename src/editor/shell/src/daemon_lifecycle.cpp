@@ -118,6 +118,11 @@ std::filesystem::path locate_context_binary(const std::filesystem::path& editor_
         dir / exe,                             // install layout: the CLI ships beside the editor
         dir / ".." / ".." / "cli" / exe,       // dev build tree: <build>/editor/shell -> <build>/cli
         dir / ".." / "cli" / exe,
+        // CEF dev build tree: the stage target puts the editor one level deeper, in a per-config
+        // subdirectory (<build>/editor/shell/Release), so <build>/cli is a THIRD level up. Without
+        // this candidate a CEF build never finds the freshly-built CLI and the editor silently
+        // opens read-only unless someone hand-copies context(.exe) beside it.
+        dir / ".." / ".." / ".." / "cli" / exe,
     };
     for (const fs::path& candidate : candidates)
     {
