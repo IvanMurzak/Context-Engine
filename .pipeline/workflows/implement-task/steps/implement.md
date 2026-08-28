@@ -46,7 +46,11 @@ and leave the result committed locally on the run branch. Nothing is pushed.
    also run `python -m pytest tools/tests bench/tests` from the worktree root
    until green — CI's required `python tests` check runs exactly that, so a
    failure there is otherwise discovered only at `land`, after a full rollup is
-   spent.
+   spent. Any `ctest` run covering the `webui-*` family needs the browser env
+   prefixed PER COMMAND (env does not persist between Bash calls):
+   `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
+   — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
+   fails "no Chromium-family browser found" alone in a green suite.
 6. Commit the work as one conventional commit, or a few logically separate
    ones. Do NOT push, and do NOT open a PR.
 

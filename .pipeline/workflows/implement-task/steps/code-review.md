@@ -12,25 +12,32 @@ Nothing is pushed.
   the local gate.
 - The `implement` step committed the task's changes on this branch; the review
   target is the branch diff `origin/main..HEAD` inside the worktree.
-- The `code-review` skill determines "the current diff" from the shell's current
-  repository — which is why entering the worktree FIRST matters: the Bash tool's
-  working directory persists between calls, so the skill's git commands then
-  target the worktree, and `--fix` applies its fixes there.
+- **A skill does NOT inherit your shell's cwd.** The Skill tool forks a
+  background agent rooted at the MAIN project root, so a bare `code-review`
+  invocation reviews the main checkout's diff and applies its `--fix` edits
+  there — the out-of-worktree write this pipeline forbids (observed: it reviewed
+  an unrelated `origin/main` commit and edited `.gitignore` in the main
+  checkout). Only an explicit path target aims the skill at the worktree.
 
 ## Inputs
 
 - The worktree with the implement commits present:
   `git log --oneline origin/main..HEAD` is non-empty.
-- A clean working tree (`git status --porcelain` empty).
+- No uncommitted work outside the pipeline's own tree — from the worktree root,
+  `git status --porcelain -- . ':!.pipeline'` is empty. Modified `.pipeline/**`
+  files are expected (the improver edits step docs between steps): leave them
+  uncommitted, and never treat them as a failed precondition.
 
 ## Steps
 
 1. Enter the worktree (preamble §1). Verify both Inputs preconditions; if either
    fails, stop and report.
-2. Invoke the skill via the Skill tool: skill `code-review`, args `high --fix`.
-   The intended review target is this branch's full diff against `main` (all
-   commits made by the earlier steps). If the skill requires an explicit target,
-   give it the run's `worktree-*` branch name (`$WORKTREE_BRANCH`).
+2. Invoke the skill via the Skill tool: skill `code-review`, args
+   `high --fix $worktree_path` — the path target is MANDATORY (see Context),
+   never the bare `high --fix`. The intended review target is this branch's full
+   diff against `main` (all commits made by the earlier steps): confirm from the
+   skill's own scope report that it reviewed `origin/main...HEAD` in the
+   worktree, and re-invoke with the path target if it did not.
 3. After the skill completes, run `git status` and `git rev-parse
    --show-toplevel` to confirm any applied fixes landed inside the worktree —
    not in the main checkout. If a fix landed outside the worktree, move it in
@@ -38,8 +45,13 @@ Nothing is pushed.
 4. If fixes were applied: re-run the local gate (preamble §4) to green — and,
    when the branch diff touches Python under `tools/` or `bench/`, also
    `python -m pytest tools/tests bench/tests` from the worktree root, which
-   `ctest` does not cover and CI's required `python tests` check runs. A review
-   fix that reddens the build or tests must be repaired — or reverted, with the
+   `ctest` does not cover and CI's required `python tests` check runs. Any
+   `ctest` run covering the `webui-*` family needs the browser env prefixed PER
+   COMMAND (env does not persist between Bash calls):
+   `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
+   — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
+   fails "no Chromium-family browser found" alone in a green suite. A review fix
+   that reddens the build or tests must be repaired — or reverted, with the
    reasoning included in your report — never left red.
 5. Commit the applied fixes as one or more conventional commits (`fix:` for
    correctness findings, `refactor:` for reuse/simplification findings), citing
@@ -48,10 +60,12 @@ Nothing is pushed.
 
 ## Success Criteria
 
-- The `code-review` skill ran at level `high` with `--fix` over the branch diff
-  (report its finding count, including zero).
-- The working tree is clean; every applied fix is committed; the local gate is
-  green over the step's final state — including
+- The `code-review` skill ran at level `high` with `--fix` over the WORKTREE's
+  branch diff — its own scope report names `origin/main...HEAD` in the worktree,
+  not the main checkout (report its finding count, including zero).
+- Every applied fix is committed — `git status --porcelain -- . ':!.pipeline'`
+  is empty (uncommitted `.pipeline/**` doc edits are excluded by design); the
+  local gate is green over the step's final state — including
   `python -m pytest tools/tests bench/tests` when Python under `tools/` or
   `bench/` is in the diff.
 - Nothing was pushed and no PR exists.
