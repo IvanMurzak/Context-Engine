@@ -1,0 +1,19 @@
+src/editor/shell/tests/test_daemon_lifecycle.cpp
+  s_69263eeafd9048::t_ec41fff8ae225f 182-187,190,199
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "880482946ceac6ca47f24e4a4e006d554d18e11e",
+  "prompts": {},
+  "sessions": {
+    "s_69263eeafd9048": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08312237-372a-43db-9db9-271ce020c7f0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
