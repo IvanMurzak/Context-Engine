@@ -72,6 +72,44 @@ void test_document_round_trips()
     CHECK(back.layout.at("dock").as_string() == "left");
 }
 
+void test_a_fresh_state_round_trips_null_layout_and_panels()
+{
+    // THE #474 DISK ROUND-TRIP. `to_json` used to encode an unset layout/panels as `{}`, so a fresh
+    // project's null-ness survived the SESSION but not the RESTART: the reloaded store answered `{}`
+    // where the fresh one answered null, the bridge handed that `{}` to editor-core, and Dockview's
+    // `fromJSON` — which clears the live grid before parsing — wiped the default dock to an empty
+    // window on every second boot.
+    EditorState fresh;
+    const Json doc = fresh.to_json();
+    // Absence is the encoding, not an empty object — the rule the undo/presence members follow.
+    CHECK(!doc.contains("layout"));
+    CHECK(!doc.contains("panels"));
+    const EditorState back = EditorState::from_json(doc);
+    CHECK(back.layout.is_null());
+    CHECK(back.panels.is_null());
+
+    // The same claim through a REAL file: a boot that persisted only a placement (the presence
+    // flush at editor start writes exactly such a document) must reload with the layout still
+    // null — not `{}`, which the TS side cannot tell from a real arrangement.
+    const fs::path root = shelltest::make_temp_project("context-shell-state", "null-layout");
+    {
+        EditorStateStore store(root, 0);
+        store.load();
+        store.set_placement(0, placement(0, 0, 1280, 800), 1'000);
+        CHECK(store.flush_now());
+    }
+    {
+        EditorStateStore reloaded(root);
+        bool loaded = false;
+        reloaded.load(&loaded);
+        CHECK(loaded);
+        CHECK(reloaded.state().layout.is_null());
+        CHECK(reloaded.state().panels.is_null());
+        CHECK(reloaded.state().windows.size() == 1u);
+    }
+    shelltest::cleanup(root);
+}
+
 void test_a_maximized_window_still_records_its_restore_rect()
 {
     // Restoring a maximized window with no restore rect leaves it stuck full-screen the first time
@@ -1020,6 +1058,7 @@ int main()
     test_path_is_the_editor_owned_file();
     test_presence_marker_is_written_by_the_shell_and_read_back();
     test_document_round_trips();
+    test_a_fresh_state_round_trips_null_layout_and_panels();
     test_a_maximized_window_still_records_its_restore_rect();
     test_malformed_and_missing_documents_degrade_rather_than_refuse();
     test_writes_are_debounced();
