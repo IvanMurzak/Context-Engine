@@ -1,0 +1,3 @@
+# Pipeline run droppings (journals, rendered copies, feedback) — never committed.
+.runtime/
+.feedback/

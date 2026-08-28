@@ -1,0 +1,30 @@
+schema: 2
+
+name: implement-task
+description: Implement one Context-Engine task in an isolated run worktree, harden it with /code-review high --fix and /simplify (committing locally at each step), then land it on main behind a pipeline ci-wait green-CI gate — the PR is opened only at the land step so intermediate commits never spend GitHub Actions runs.
+
+execution: sequential
+isolation: run
+base_branch: main
+
+steps:
+  - name: implement
+    body:
+      - _shared/worktree-preamble.md
+      - steps/implement.md
+
+  - name: code-review
+    body:
+      - _shared/worktree-preamble.md
+      - steps/code-review.md
+
+  - name: simplify
+    body:
+      - _shared/worktree-preamble.md
+      - steps/simplify.md
+
+  - name: land
+    body:
+      - _shared/worktree-preamble.md
+      - steps/land.md
+    self_improve: false
