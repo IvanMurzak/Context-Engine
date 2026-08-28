@@ -1,0 +1,25 @@
+src/editor/webui/core/src/chrome.ts
+  s_7b2854368302f3::t_67ab69b8d4aa12 260-268,272
+src/editor/webui/core/src/test/chrome.test.ts
+  s_7b2854368302f3::t_86cd68ee67a36c 480-482,485-486,490-491
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_7b2854368302f3::t_029c880fa0ae54 907-913,922,924-925,940-942
+  s_7b2854368302f3::t_9c27ce77e74781 749
+  s_7b2854368302f3::t_be2c5f6e5d4465 796-799
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "6d6c93b168dbaadc82f26b35f0565caf85c1a790",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
