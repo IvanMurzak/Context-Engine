@@ -21,21 +21,12 @@ GPU and no GUI, and what you play in the editor is what ships.
 
 ## The editor
 
-Requires CMake ≥ 3.25 and **MSVC on Windows / clang on Linux+macOS** — the editor's CEF prebuilt
-cannot link under GCC/MinGW.
-
-**Windows** (from a *Developer PowerShell for VS*):
-
-```sh
-cmake -S src -B src/build/editor -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONTEXT_BUILD_GUI_CEF=ON
-cmake --build src/build/editor --target context context_editor context_editor_webui
-```
-
-**Linux / macOS:**
+Requires CMake ≥ 3.25 and Python 3; on Windows also Visual Studio with the C++ workload (the
+editor's CEF prebuilt needs MSVC there, clang on Linux/macOS). One command builds it from any
+shell — on Windows it finds Visual Studio and imports its environment by itself:
 
 ```sh
-CC=clang CXX=clang++ cmake -S src -B src/build/editor -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONTEXT_BUILD_GUI_CEF=ON
-cmake --build src/build/editor --target context context_editor context_editor_webui
+python tools/build_editor.py
 ```
 
 The editor lands in `src/build/editor/editor/shell/Release/` and spawns or attaches the project
@@ -56,8 +47,8 @@ src/build/editor/editor/shell/Release/context_editor --project samples/platforme
 ```
 
 `--devtools` enables Chromium DevTools, `--headless` runs the shell without an OS window,
-`--help` lists everything. Add `-DCONTEXT_BUILD_RENDER_WGPU=ON` at configure time for GPU
-presentation (without it the editor presents through the CPU fallback).
+`--help` lists everything. `python tools/build_editor.py --gpu` builds with GPU presentation
+(without it the editor presents through the CPU fallback).
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/determinism-dark.svg"><img src="docs/img/readme/determinism-light.svg" width="100%" alt="Same inputs, same state-hash — on every machine, every run"/></picture>
 
