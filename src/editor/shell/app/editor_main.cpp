@@ -15,6 +15,7 @@
 #include "context/editor/shell/banners.h"
 #include "context/editor/shell/browser.h"
 #include "context/editor/shell/chrome_facts.h" // a1: a maximized flip -> an editor.ui chrome fact
+#include "context/editor/shell/cocoa_chrome.h" // c1: the macOS hybrid mode + measured inset query
 #include "context/editor/shell/cross_window_drag.h"
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
@@ -227,18 +228,28 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
     // --- the chrome contract (editor-window-chrome a1, target design 02 §1 / §5) ------------------
     // The control verbs reach THIS window's backend through the registry, so they stay valid for a
     // retired session (the lookup answers nullptr and the verb degrades to `accepted:false`) — the
-    // same lifetime rationale the handlers above rely on. INTERIM HONESTY (tasks/README.md, binding):
-    // the provider reports `mode: "system"` + inset 0 on every backend; b1 flips win32 -> "custom"
-    // and c1 flips cocoa -> "hybrid" in the PRs that implement the behaviour, never here first.
+    // same lifetime rationale the handlers above rely on. INTERIM HONESTY (tasks/README.md,
+    // binding): the provider reports what each backend actually DOES. c1 flipped cocoa: a live
+    // macOS window answers `hybrid` with the MEASURED traffic-light inset (cocoa_chrome.h — the
+    // query re-reads the window's real style at call time, so the flip can never outlive the
+    // behaviour). win32 still reports the `system` default until b1 lands its frameless NC path;
+    // x11 stays `system` permanently (D6); headless — every CI smoke — stays `system` too.
     const shell::WindowId self_id = wb.self_id();
     wb.bind_chrome_state(
         [&manager, self_id]() -> shell::ChromeState
         {
-            shell::ChromeState state; // defaulted: mode system, inset 0 (the a1 truth)
+            shell::ChromeState state; // defaulted: mode system, inset 0
             if (shell::EditorWindow* window = manager.window(self_id))
             {
                 state.maximized = window->backend().placement().maximized;
                 state.focused = window->focused();
+                shell::CocoaChromeState cocoa;
+                if (shell::cocoa_hybrid_chrome(window->backend(), cocoa))
+                {
+                    state.mode = shell::ChromeMode::hybrid;
+                    state.controls_inset_left = cocoa.inset_left;
+                    state.controls_inset_right = cocoa.inset_right;
+                }
             }
             return state;
         });

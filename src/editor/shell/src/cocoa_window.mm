@@ -36,12 +36,15 @@
 
 #if defined(__APPLE__)
 
+#include "context/editor/shell/cocoa_chrome.h"
+
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
 
 #include <algorithm>
 #include <cmath>
+#include <cstring>
 #include <memory>
 #include <string>
 #include <vector>
@@ -377,9 +380,21 @@ public:
         mailbox_.close_requested = true;
     }
 
-    // Called by whichever backend is pumping, for an event addressed to THIS window.
-    void handle(NSEvent* event);
+    // Called by whichever backend is pumping, for an event addressed to THIS window. Returns TRUE
+    // when the event was CONSUMED by the c1 caption consult (handed to performWindowDragWithEvent:
+    // or zoom:), in which case the pump must NOT forward it to [NSApp sendEvent:] — that hand-off
+    // IS its AppKit consumption — and no ShellEvent was queued for it.
+    [[nodiscard]] bool handle(NSEvent* event);
     [[nodiscard]] NSWindow* window() const { return window_; }
+
+    // --- the c1 hybrid-chrome surface (cocoa_chrome.h; reached via the name()-keyed free
+    // --- functions at the bottom of this file) ---------------------------------------------------
+    void bind_caption_regions(const RegionMap* regions) { caption_regions_ = regions; }
+    [[nodiscard]] CocoaCaptionStats caption_stats() const
+    {
+        return CocoaCaptionStats{caption_drags_, caption_zooms_};
+    }
+    [[nodiscard]] bool hybrid_chrome(CocoaChromeState& out) const;
 
 private:
     void destroy();
@@ -398,6 +413,13 @@ private:
     // The modifier mask as of the PREVIOUS event, which is the only way a FlagsChanged can be read
     // as a press or a release (see translate_ns_event).
     std::uint64_t modifier_flags_ = 0;
+    // c1: the window's LIVE region map (the InputArbiter's own — cocoa_bind_caption_regions), so
+    // the pump can consult the published `caption` rects while the NSEvent is still in hand. Read
+    // ONLY inside handle(), which only runs from pump(), so the EditorWindow member-destruction
+    // order (its arbiter dies before this backend) can never race a read.
+    const RegionMap* caption_regions_ = nullptr;
+    std::size_t caption_drags_ = 0;
+    std::size_t caption_zooms_ = 0;
     bool alive_ = true;
 };
 
@@ -430,8 +452,16 @@ bool CocoaWindowBackend::create(const WindowDesc& desc, std::string& error)
                                  static_cast<CGFloat>(desc.placement->height));
         }
 
+        // HYBRID CHROME (editor-window-chrome c1, target design 02 §4): the content view spans the
+        // FULL window and the titlebar draws transparent over it, so the a2 web titlebar strip is
+        // the visible top of the window while the native TRAFFIC LIGHTS stay exactly where macOS
+        // puts them, floating above the strip's measured inset (cocoa_chrome.h). Titled stays in
+        // the mask — it is what makes the standard buttons exist at all — and the title string is
+        // still SET below (Mission Control, the Dock and the window menu read it); only the
+        // in-titlebar rendering is hidden, because the strip renders the title itself.
         const NSUInteger style = NSWindowStyleMaskTitled | NSWindowStyleMaskClosable |
-                                 NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable;
+                                 NSWindowStyleMaskMiniaturizable | NSWindowStyleMaskResizable |
+                                 NSWindowStyleMaskFullSizeContentView;
         window_ = [[NSWindow alloc] initWithContentRect:content
                                               styleMask:style
                                                 backing:NSBackingStoreBuffered
@@ -445,6 +475,8 @@ bool CocoaWindowBackend::create(const WindowDesc& desc, std::string& error)
         // ARC — where the strong reference above is also released — is one release too many and
         // crashes on teardown. See the file header, shape 5.
         [window_ setReleasedWhenClosed:NO];
+        [window_ setTitlebarAppearsTransparent:YES];
+        [window_ setTitleVisibility:NSWindowTitleHidden];
         [window_ setTitle:cocoa_string(desc.title)];
 
         view_ = [[NSView alloc] initWithFrame:[[window_ contentView] bounds]];
@@ -543,7 +575,72 @@ NsWindowGeometry CocoaWindowBackend::read_geometry() const
     return geometry;
 }
 
-void CocoaWindowBackend::handle(NSEvent* event)
+bool CocoaWindowBackend::hybrid_chrome(CocoaChromeState& out) const
+{
+    if (window_ == nil)
+    {
+        return false;
+    }
+    @autoreleasepool
+    {
+        // INTERIM HONESTY, MADE STRUCTURAL (tasks/README.md): `chrome.state.mode` reports what the
+        // window actually DOES, so hybrid is answered only while the hybrid style really is live
+        // on the NSWindow — read back at call time, never assumed from "create() set it". Revert
+        // the style and this returns false, which the composition root serves as `system`/0.
+        if (([window_ styleMask] & NSWindowStyleMaskFullSizeContentView) == 0 ||
+            [window_ titlebarAppearsTransparent] == NO)
+        {
+            return false;
+        }
+        // The traffic-light cluster, MEASURED from the standard buttons' real frames (02 §4) —
+        // never a hardcoded 70-something points, which drifts with the OS release and with the
+        // user's accessibility sizing. Frames are converted to WINDOW coordinates through each
+        // button's superview (the titlebar container view, NOT the content view); only the x
+        // extent matters for a horizontal inset, so Cocoa's y flip is irrelevant here.
+        double min_x = 0.0;
+        double max_x = 0.0;
+        bool any_button = false;
+        const NSWindowButton kinds[] = {NSWindowCloseButton, NSWindowMiniaturizeButton,
+                                        NSWindowZoomButton};
+        for (const NSWindowButton kind : kinds)
+        {
+            NSButton* button = [window_ standardWindowButton:kind];
+            if (button == nil || [button superview] == nil)
+            {
+                continue;
+            }
+            const NSRect frame = [[button superview] convertRect:[button frame] toView:nil];
+            const double left = static_cast<double>(NSMinX(frame));
+            const double right = static_cast<double>(NSMaxX(frame));
+            if (!any_button || left < min_x)
+            {
+                min_x = left;
+            }
+            if (!any_button || right > max_x)
+            {
+                max_x = right;
+            }
+            any_button = true;
+        }
+        out = CocoaChromeState{};
+        if (any_button)
+        {
+            // With FullSizeContentView the content view spans the full frame, so its width IS the
+            // width the a2 strip lays out against — the right denominator for the RTL-side test.
+            const double width =
+                view_ != nil ? static_cast<double>([view_ bounds].size.width)
+                             : static_cast<double>([window_ frame].size.width);
+            out = ns_hybrid_controls_inset(
+                min_x, max_x, width,
+                ns_dpi_from_backing_scale(static_cast<double>([window_ backingScaleFactor])));
+        }
+        // A window with no standard buttons at all still HAS hybrid chrome (content under a
+        // transparent titlebar); its honest inset is the {0, 0} `out` was reset to above.
+    }
+    return true;
+}
+
+bool CocoaWindowBackend::handle(NSEvent* event)
 {
     const NSEventType type = [event type];
     NsEvent flat;
@@ -613,7 +710,7 @@ void CocoaWindowBackend::handle(NSEvent* event)
         // Everything else — periodic, app-defined, tablet, cursor-update, the AppKit-internal
         // families. Not decoded, and (unlike the cases above) not even inspected: asking an
         // arbitrary NSEvent for a mouse or key property raises.
-        return;
+        return false;
     }
 
     const NsViewGeometry view_geometry{geometry_.height_points, geometry_.dpi, modifier_flags_};
@@ -621,10 +718,49 @@ void CocoaWindowBackend::handle(NSEvent* event)
     // Recorded for the NEXT FlagsChanged diff, and only for the event types whose mask was actually
     // read — the `default:` arm above returns before reaching here rather than storing a zero.
     modifier_flags_ = flat.modifier_flags;
+
+    // THE c1 CAPTION CONSULT (target design 02 §4). A decoded LEFT PRESS that lands in a published
+    // `caption` region is the OS's, not the browser's: the single press hands THIS NSEvent to
+    // performWindowDragWithEvent: (the OS then owns the drag, exactly as HTCAPTION does on
+    // Windows), the double-click is zoom: — and either way the press is consumed WHOLE, right
+    // here, so no ShellEvent is queued (the browser never sees a half-press to get a stuck hover
+    // from — ROADMAP risk 3, the same claim b1 makes NC-side) and the pump skips its
+    // [NSApp sendEvent:] forward for it (the hand-off IS the event's AppKit consumption; see the
+    // pump). This must run at NSEvent time, not at dispatch time, because only here does the real
+    // NSEvent still exist. The decision itself is the pure caption_press_action, leg-tested
+    // against the SAME last-match-wins hit-test the arbiter routes by, so the two can never
+    // disagree about who owns a press. Every other event — moves, releases, keys, the right
+    // button — flows on untouched.
+    if (type == NSEventTypeLeftMouseDown && caption_regions_ != nullptr && window_ != nil)
+    {
+        for (std::size_t i = 0; i < batch.count; ++i)
+        {
+            if (batch.events[i].kind != ShellEventKind::pointer)
+            {
+                continue;
+            }
+            switch (caption_press_action(batch.events[i].pointer, *caption_regions_))
+            {
+            case CaptionPressAction::drag:
+                ++caption_drags_;
+                [window_ performWindowDragWithEvent:event];
+                return true;
+            case CaptionPressAction::zoom:
+                ++caption_zooms_;
+                [window_ zoom:nil];
+                return true;
+            case CaptionPressAction::none:
+                break;
+            }
+            break; // one LeftMouseDown decodes at most one pointer fact; nothing more to consult
+        }
+    }
+
     for (std::size_t i = 0; i < batch.count; ++i)
     {
         pending_.push_back(batch.events[i]);
     }
+    return false;
 }
 
 void CocoaWindowBackend::drain_geometry()
@@ -698,21 +834,28 @@ bool CocoaWindowBackend::pump(std::vector<ShellEvent>& out)
             // like the Win32 pump's NULL hwnd filter. An event with no window (an application-level
             // one) belongs to nobody here and is simply forwarded.
             NSWindow* owner = [event window];
+            bool consumed = false;
             if (owner != nil)
             {
                 for (CocoaWindowBackend* backend : cocoa_windows())
                 {
                     if (backend != nullptr && backend->window() == owner)
                     {
-                        backend->handle(event);
+                        consumed = backend->handle(event);
                         break;
                     }
                 }
             }
-            // ALWAYS forwarded, decoded or not. The Shell OBSERVES this stream; swallowing it breaks
-            // window dragging, the menu, the IME and every standard key equivalent (file header,
-            // shape 4).
-            [NSApp sendEvent:event];
+            // ALWAYS forwarded, decoded or not — with EXACTLY ONE carve-out (editor-window-chrome
+            // c1): a caption press handle() consumed was handed to performWindowDragWithEvent: /
+            // zoom: INSTEAD, which is that event's AppKit consumption — forwarding it again would
+            // dispatch the same press twice. For every other event the rule holds unchanged: the
+            // Shell OBSERVES this stream, and swallowing it breaks window dragging, the menu, the
+            // IME and every standard key equivalent (file header, shape 4).
+            if (!consumed)
+            {
+                [NSApp sendEvent:event];
+            }
         }
         drain_geometry();
         drain_mailbox();
@@ -794,6 +937,40 @@ void CocoaWindowBackend::apply_placement(const WindowPlacement& placement)
 }
 
 } // namespace
+
+// --- the c1 hybrid-chrome query/wiring surface (cocoa_chrome.h) ----------------------------------
+//
+// Keyed on name() == "cocoa" — the one string only the real backend above answers — so the
+// downcast to the anonymous-namespace type is confined to this TU and needs no RTTI. A headless
+// backend (every mac CI smoke) and every other platform's backend answer the honest false/no-op.
+
+bool cocoa_hybrid_chrome(const IWindowBackend& backend, CocoaChromeState& out)
+{
+    if (std::strcmp(backend.name(), "cocoa") != 0)
+    {
+        return false;
+    }
+    return static_cast<const CocoaWindowBackend&>(backend).hybrid_chrome(out);
+}
+
+void cocoa_bind_caption_regions(IWindowBackend& backend, const RegionMap* regions)
+{
+    if (std::strcmp(backend.name(), "cocoa") != 0)
+    {
+        return;
+    }
+    static_cast<CocoaWindowBackend&>(backend).bind_caption_regions(regions);
+}
+
+bool cocoa_caption_stats(const IWindowBackend& backend, CocoaCaptionStats& out)
+{
+    if (std::strcmp(backend.name(), "cocoa") != 0)
+    {
+        return false;
+    }
+    out = static_cast<const CocoaWindowBackend&>(backend).caption_stats();
+    return true;
+}
 
 std::unique_ptr<IWindowBackend> make_cocoa_window_backend(const WindowDesc& desc,
                                                            std::string& error)

@@ -47,11 +47,12 @@ enum class RegionKind
     native,
     // The web-drawn titlebar's chrome regions (editor-window-chrome a1, target design 02 §6): the
     // caption DRAG surface and the three window-control rects, published by editor-core's titlebar
-    // (a2's regionProvider) in physical client pixels like every other region. Their native
-    // consumers are b1's Windows NC hit-test (caption -> HTCAPTION, the controls -> HT*BUTTON) and
-    // c1's macOS caption-press drag — until those land, dispatch stays honestly empty
-    // (shell.cpp's InputTarget::native arm). Controls publish AFTER the caption rect, so
-    // back-to-front last-match-wins needs no carve-out token.
+    // (a2's regionProvider) in physical client pixels like every other region. Native consumers:
+    // c1's macOS caption consult is LIVE — the Cocoa pump reads this map at NSEvent time and hands
+    // a caption press to performWindowDragWithEvent:/zoom: (cocoa_chrome.h) — while b1's Windows NC
+    // hit-test (caption -> HTCAPTION, the controls -> HT*BUTTON) is still to land, so on Windows
+    // dispatch stays honestly empty (shell.cpp's InputTarget::native arm). Controls publish AFTER
+    // the caption rect, so back-to-front last-match-wins needs no carve-out token.
     caption,
     caption_min,
     caption_max,

@@ -55,6 +55,7 @@
 // --require-display, under which a missing session, a refused window and a missing OS blitter are
 // all hard failures.
 
+#include "context/editor/shell/cocoa_chrome.h"
 #include "context/editor/shell/dpi.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
@@ -813,6 +814,180 @@ int main(int argc, char** argv)
                 "the injected resize came back through AppKit's own geometry, not a synthesized "
                 "event, and the window really SHRANK");
 
+    // ------------------------------------ 6c. the c1 HYBRID CHROME (style, inset, caption consult)
+    //
+    // editor-window-chrome c1 (target design 02 §4), proven against the REAL NSWindow — the ONE CI
+    // context that has one (the live CEF smokes run headless on macOS, so `mode:"hybrid"` is
+    // assertable nowhere else). Three claims, each with a real failure path:
+    //
+    //   * THE STYLE IS LIVE, NOT ASSUMED. `cocoa_hybrid_chrome` re-reads FullSizeContentView +
+    //     titlebarAppearsTransparent off the window at call time (interim honesty made structural),
+    //     so reverting the create()-time flip reddens this line — no self-report can satisfy it.
+    //   * THE INSET IS MEASURED, AND POSITIVE. It comes from the real standardWindowButton frames
+    //     through the leg-tested arithmetic; a nil-button or dropped-measurement regression reads 0
+    //     and fails the `> 0` half the DoD names.
+    //   * THE CAPTION CONSULT CONSUMES THE PRESS WHOLE — AND ONLY THE PRESS. The suppression claim
+    //     is two-sided: no marked press reaches the browser and no implicit capture leaks (the
+    //     stuck-hover shape, ROADMAP risk 3), while the very NEXT event (the release) flows through
+    //     ordinary arbitration and a non-caption press still lands in the browser afterwards.
+    shell::CocoaChromeState chrome;
+    COCOA_CHECK(shell::cocoa_hybrid_chrome(*backend, chrome),
+                "the live window reports HYBRID chrome - FullSizeContentView + the transparent "
+                "titlebar are really set on the NSWindow");
+    COCOA_CHECK(chrome.inset_left > 0u,
+                "controlsInset.left measured from the real traffic-light frames is positive");
+    COCOA_CHECK(chrome.inset_left < backend->client_size().width / 2u,
+                "the measured inset is sane - less than half the window");
+    // The GH macOS runners run an en-US (LTR) session, so the cluster sits LEFT; the RTL mirror is
+    // pinned by the leg-tested arithmetic (test_cocoa_chrome), not asserted against this desktop.
+    COCOA_CHECK(chrome.inset_right == 0u,
+                "an LTR desktop insets the left edge only");
+
+    // The consult reads the arbiter's LIVE region map — wired by the EditorWindow constructor
+    // itself (shell.cpp), so this smoke exercises the production wiring, not a private copy of it.
+    shell::CocoaCaptionStats caption_before;
+    COCOA_CHECK(shell::cocoa_caption_stats(*backend, caption_before),
+                "the caption stats are readable off the live cocoa backend");
+
+    // Settle, then publish a caption drag surface over the TOP HALF — generous, because a posted
+    // location is only approximately delivered (file header, claim 2) and every sample below sits
+    // deep inside its half. Wholesale replace, per the region contract: the viewport region from
+    // step 3 is gone, which is exactly what frees the bottom half for the forwarding drill.
+    const bool settled_for_chrome =
+        pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
+    COCOA_CHECK(settled_for_chrome, "the geometry came to rest before the caption drills");
+    const render::Extent2D chrome_client = backend->client_size();
+    editor->input().regions().publish({shell::ShellRegion{
+        "chrome.caption",
+        render::Rect2D{render::Origin2D{0, 0},
+                       render::Extent2D{chrome_client.width, chrome_client.height / 2u}},
+        shell::RegionKind::caption}});
+    // Everything the browser receives from here on is judged against this baseline — the two
+    // consumed presses below must never appear after it.
+    const std::size_t chrome_samples_baseline = browser->pointers().size();
+
+    // --- double-click on the caption = zoom: (the platform convention) ---------------------------
+    shell::ShellEvent zoom_press;
+    zoom_press.kind = shell::ShellEventKind::pointer;
+    zoom_press.pointer.action = shell::PointerAction::down;
+    zoom_press.pointer.button = shell::MouseButton::left;
+    zoom_press.pointer.click_count = 2; // Cocoa counts clicks ON the event; 2 is the double-click's press
+    zoom_press.pointer.position =
+        shell::PointI{static_cast<std::int32_t>(chrome_client.width / 2u),
+                      static_cast<std::int32_t>(chrome_client.height / 4u)};
+    apply_marker(zoom_press.pointer.modifiers);
+    COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, zoom_press),
+                "a double-click caption press was accepted for injection");
+    shell::ShellEvent zoom_release = zoom_press;
+    zoom_release.pointer.action = shell::PointerAction::up;
+    COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, zoom_release),
+                "the double-click's release was accepted for injection");
+    const bool zoom_consumed = pump_until(manager, clock_us, [&] {
+        shell::CocoaCaptionStats stats;
+        return shell::cocoa_caption_stats(*backend, stats) &&
+               stats.zooms >= caption_before.zooms + 1;
+    });
+    COCOA_CHECK(zoom_consumed, "the double-click reached the pump's caption consult as zoom:");
+    const bool zoom_observed =
+        pump_until(manager, clock_us, [&] { return backend->placement().maximized; });
+    COCOA_CHECK(zoom_observed, "zoom: really zoomed - placement().maximized flipped true");
+
+    // Restore the frame before the drag drill, so its caption rect is published against a settled
+    // geometry (a posted location is resolved against the frame at DEQUEUE time — claim 2).
+    backend->set_maximized(false);
+    const bool unzoomed =
+        pump_until(manager, clock_us, [&] { return !backend->placement().maximized; });
+    COCOA_CHECK(unzoomed, "set_maximized(false) un-zoomed the window for the drag drill");
+    const bool settled_after_zoom =
+        pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
+    COCOA_CHECK(settled_after_zoom, "the geometry came to rest after the zoom round trip");
+
+    // --- a single caption press hands the drag to the OS, consumed WHOLE -------------------------
+    const render::Extent2D drag_client = backend->client_size();
+    editor->input().regions().publish({shell::ShellRegion{
+        "chrome.caption",
+        render::Rect2D{render::Origin2D{0, 0},
+                       render::Extent2D{drag_client.width, drag_client.height / 2u}},
+        shell::RegionKind::caption}});
+    shell::CocoaCaptionStats drag_before;
+    COCOA_CHECK(shell::cocoa_caption_stats(*backend, drag_before),
+                "the caption stats are readable before the drag drill");
+    shell::ShellEvent drag_press = zoom_press;
+    drag_press.pointer.click_count = 1;
+    drag_press.pointer.position =
+        shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u),
+                      static_cast<std::int32_t>(drag_client.height / 4u)};
+    COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
+                "a single caption press was accepted for injection");
+    const bool drag_consumed = pump_until(manager, clock_us, [&] {
+        shell::CocoaCaptionStats stats;
+        return shell::cocoa_caption_stats(*backend, stats) &&
+               stats.drags >= drag_before.drags + 1;
+    });
+    COCOA_CHECK(drag_consumed,
+                "the caption press was handed to performWindowDragWithEvent: by the pump");
+    // The matching release is NOT consumed: it flows through ordinary arbitration (the caption
+    // region claims it, the native arm drops it) — the positive half of "for THAT press only".
+    const int dispatches_before_release = editor->input().pointer_dispatches();
+    shell::ShellEvent drag_release = drag_press;
+    drag_release.pointer.action = shell::PointerAction::up;
+    COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_release),
+                "the caption press's release was accepted for injection");
+    const bool release_arbitrated = pump_until(manager, clock_us, [&] {
+        return editor->input().pointer_dispatches() > dispatches_before_release;
+    });
+    COCOA_CHECK(release_arbitrated,
+                "the release flowed through ordinary arbitration - only the press was consumed");
+
+    // --- the suppression claims (ROADMAP risk 3: no stuck hover) ---------------------------------
+    {
+        int marked_downs = 0;
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        for (std::size_t i = chrome_samples_baseline; i < samples.size(); ++i)
+        {
+            if (has_marker(samples[i].modifiers) &&
+                samples[i].action == shell::PointerAction::down)
+            {
+                ++marked_downs;
+            }
+        }
+        COCOA_CHECK(marked_downs == 0,
+                    "neither consumed caption press reached the browser - no half-press, no stuck "
+                    "hover");
+        COCOA_CHECK(!editor->input().has_pointer_capture(),
+                    "no implicit pointer capture leaked from a consumed press");
+    }
+
+    // --- and a NON-caption press still reaches the browser afterwards ----------------------------
+    const std::size_t forward_baseline = browser->pointers().size();
+    shell::ShellEvent forward_press = drag_press;
+    forward_press.pointer.position =
+        shell::PointI{static_cast<std::int32_t>(drag_client.width -
+                                                drag_client.width / 4u),
+                      static_cast<std::int32_t>(drag_client.height -
+                                                drag_client.height / 4u)};
+    COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, forward_press),
+                "a non-caption press was accepted for injection");
+    shell::ShellEvent forward_release = forward_press;
+    forward_release.pointer.action = shell::PointerAction::up;
+    COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, forward_release),
+                "the non-caption release was accepted for injection");
+    const bool forwarded = pump_until(manager, clock_us, [&] {
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        for (std::size_t i = forward_baseline; i < samples.size(); ++i)
+        {
+            if (has_marker(samples[i].modifiers) &&
+                samples[i].action == shell::PointerAction::down)
+            {
+                return true;
+            }
+        }
+        return false;
+    });
+    COCOA_CHECK(forwarded,
+                "a press OUTSIDE the caption still reaches the browser - the always-forward rule "
+                "holds for every other event");
+
     // ----------------------------------------------------- 7. teardown persists the session
     manager.shutdown();
     COCOA_CHECK(manager.state_store().write_count() >= 1,
@@ -828,8 +1003,9 @@ int main(int argc, char** argv)
         return 1;
     }
     std::printf("[editor-shell-cocoa] PASS: real NSWindow, %s present, %zu live panels rendered, "
-                "granted resize observed, AppKit-carried pointer + key round trip, session "
-                "persisted\n",
-                blitter_name.c_str(), panels::hostable_panel_ids().size());
+                "granted resize observed, AppKit-carried pointer + key round trip, hybrid chrome "
+                "(measured inset %u px) + caption drag/zoom consult, session persisted\n",
+                blitter_name.c_str(), panels::hostable_panel_ids().size(),
+                static_cast<unsigned>(chrome.inset_left));
     return 0;
 }

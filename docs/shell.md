@@ -319,9 +319,23 @@ default resolves nothing, which makes today's behaviour "everything reaches the 
 v1. A CHAR event is never offered to the keymap: its RAWKEYDOWN already was, and offering both would
 give one physical keystroke two chances to be claimed.
 
-The native path's consumer — camera controls, picking, gizmo gestures driving the existing
+The native path's VIEWPORT consumer — camera controls, picking, gizmo gestures driving the existing
 `viewport_edit_model` verbs over the bridge — arrives with **e11**. Until then the arbitration is real
-and every sample is accounted for; there is simply no native consumer yet.
+and every sample is accounted for; the dispatch arm stays empty.
+
+**The macOS caption consult (editor-window-chrome c1, target design 02 §4).** The one live native
+consumer of the a1 `caption` region kind: the Cocoa window is created with
+`NSWindowStyleMaskFullSizeContentView` + a transparent, title-hidden titlebar, so the a2 web
+titlebar strip is the visible top of the window while the native traffic lights float above its
+measured inset (`chrome.state.controlsInset`, derived from the real `standardWindowButton:` frames
+— `cocoa_chrome.h`). The Cocoa pump consults the window's live region map at **NSEvent time** — the
+only moment `performWindowDragWithEvent:` still has the event in hand: a single left press on a
+published `caption` rect is handed to the OS drag, a double-click is `zoom:`, and either way the
+press is consumed whole (never enqueued, never forwarded to `sendEvent:` — the hand-off IS its
+AppKit consumption), so the browser can never hold a stuck hover from a half-press. The decision
+itself (`caption_press_action`) is pure, uses the arbiter's own last-match-wins hit-test, and runs
+in `editor-shell-test_cocoa_chrome` on all three legs; the windowed proof rides
+`editor-shell-cocoa-window`'s c1 step on the macOS `editor-cef-smoke` job.
 
 ## 4. The compositor (03 §4)
 
