@@ -239,7 +239,10 @@ export class LayoutPersistence {
             } catch {
                 // A CORRUPT layout blob (Dockview's `fromJSON` throws on an invalid grid — a downgrade,
                 // a hand-edit, a schema change) degrades to the defaults `start` already opened, exactly
-                // like the per-panel degrade below. It must NOT abort the whole restore: an abort here
+                // like the per-panel degrade below — REAL only because `restoreLayout` rolls the wipe
+                // back: `fromJSON` clears the grid before it throws, so without that rollback this
+                // catch would keep an empty dock while claiming to have kept the defaults (#474).
+                // It must NOT abort the whole restore: an abort here
                 // propagates to boot's catch, `attach` never runs, and persistence is dead for the
                 // session with the bad blob never overwritten. Degrading instead lets `attach` run and
                 // the next publish replace the blob — self-healing, per this module's failure-tolerant

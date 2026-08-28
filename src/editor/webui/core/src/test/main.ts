@@ -31,6 +31,7 @@ import { uimirrorBroadcastTests } from "./uimirror_broadcast.test.js";
 import { notificationTests } from "./notifications.test.js";
 import { dragTests } from "./drag.test.js";
 import { extPanelTests } from "./extpanel.test.js";
+import { layoutRestoreTests } from "./layoutrestore.test.js";
 import { panelPortTests } from "./panelport.test.js";
 import { panelVerbsTests } from "./panelverbs.test.js";
 import { panelStateTests } from "./panelstate.test.js";
@@ -68,6 +69,7 @@ void runTests([
     ...notificationTests,
     ...dragTests,
     ...extPanelTests,
+    ...layoutRestoreTests,
     ...panelPortTests,
     ...panelVerbsTests,
     ...panelStateTests,

@@ -1252,12 +1252,39 @@ export class PanelHost {
         return this.#api?.toJSON() ?? null;
     }
 
-    /** Restore an arrangement Dockview produced. False when there is no docking root to restore into. */
+    /**
+     * Restore an arrangement Dockview produced. False when there is no docking root to restore
+     * into, or when the blob is not an arrangement that could show anything: no `grid` record, or
+     * no panels (issue #474 — a pre-fix Shell persisted `{}` for every fresh project, and an empty
+     * arrangement is indistinguishable from that poisoned blob, so both degrade to the defaults
+     * `start` opened rather than booting an empty window).
+     *
+     * NON-DESTRUCTIVE ON FAILURE. `fromJSON` CLEARS the live grid before parsing, so without the
+     * rollback a corrupt blob destroys the defaults first and throws second — the caller's degrade
+     * path then keeps a wiped dock while believing it kept the defaults. The error still propagates
+     * for the caller's accounting; only the wipe is undone.
+     */
     restoreLayout(state: unknown): boolean {
-        if (this.#api === null || state === null || state === undefined) {
+        if (this.#api === null || !isRecord(state) || !isRecord(state["grid"])) {
             return false;
         }
-        this.#api.fromJSON(state);
+        const panels = state["panels"];
+        if (!isRecord(panels) || Object.keys(panels).length === 0) {
+            return false;
+        }
+        const previous = this.#api.toJSON();
+        try {
+            this.#api.fromJSON(state);
+        } catch (error) {
+            try {
+                this.#api.fromJSON(previous);
+            } catch {
+                // The rollback source is the arrangement that was LIVE a moment ago, so this is not
+                // expected to throw; if it somehow does, the wipe already happened and there is
+                // nothing better left to restore.
+            }
+            throw error;
+        }
         return true;
     }
 

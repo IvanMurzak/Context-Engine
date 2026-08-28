@@ -163,8 +163,20 @@ Json EditorState::to_json() const
         array.push_back(placement_to_json(placement));
     }
     doc.set("windows", array);
-    doc.set("layout", layout.is_null() ? Json::object() : layout);
-    doc.set("panels", panels.is_null() ? Json::object() : panels);
+    // A fresh project's layout/panels blobs are NULL, and null must ROUND-TRIP as null — the same
+    // absence-is-honest rule `undo` and `presence` below already follow (`from_json`'s total `at()`
+    // reads an absent member back as null). These two used to be encoded as `{}` instead, which
+    // turned "no layout yet" into "restore this empty layout" on the next boot: the bridge hands
+    // `{}` to editor-core, whose Dockview `fromJSON` clears the live grid before parsing — so a
+    // fresh project's SECOND launch wiped the default dock to an empty window (issue #474).
+    if (!layout.is_null())
+    {
+        doc.set("layout", layout);
+    }
+    if (!panels.is_null())
+    {
+        doc.set("panels", panels);
+    }
     // The e09c session undo journal, as its canonical serialization (see the header). Emitted ONLY
     // when there is one: an empty key would be indistinguishable from an empty journal for a reader,
     // and the absence IS the honest "nothing recorded yet" a fresh project restores.
