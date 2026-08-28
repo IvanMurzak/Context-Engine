@@ -22,6 +22,11 @@ export * from "./extpanel.js";
 export * from "./hydration.js";
 export * from "./panelhost.js";
 export * from "./window.js";
+// editor-window-chrome a2 — the four-strip frame, the titlebar content, and the first real
+// regionProvider. Re-exported for the same load-bearing build reason as the rest of the barrel:
+// `webui-assets` asserts the entry's symbols survive into the bundle, and the DOM tier drives the
+// mount/publisher through these exports.
+export * from "./chrome.js";
 export * from "./editorstate.js";
 export * from "./when.js";
 export * from "./commands.js";

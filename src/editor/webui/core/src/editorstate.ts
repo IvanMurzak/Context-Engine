@@ -184,9 +184,11 @@ export class EditorStateClient {
 /**
  * Supplies the window's native regions on each layout change (03 §6).
  *
- * Today the editor has NO viewport panels (those are e11), so the default provider returns an EMPTY
- * set — but the publish still fires on every layout change so a removed region's stale rect is
- * cleared, and so e11 inherits a wired, tested channel rather than building one.
+ * REAL since editor-window-chrome a2: boot hands this the titlebar's chrome provider (chrome.ts),
+ * which measures the caption drag surface + window-control rects in custom/hybrid chrome — the
+ * DEFAULT here stays the empty set, for a document with no strips (an older page, a bare harness).
+ * The publish fires on every layout change either way, so a removed region's stale rect is cleared,
+ * and e11's viewport rects extend the SAME provider rather than building a second channel.
  */
 export type RegionProvider = () => readonly ShellRegion[];
 
@@ -390,8 +392,8 @@ export class LayoutPersistence {
         // The layout blob and the region map ride the SAME layout-change signal (03 §6) but are two
         // independent publishes, so send both at once rather than one after the other. The Shell
         // replaces its per-window region map wholesale, so a removed viewport's rect never outlives
-        // it. Empty today (no viewport panels — those are e11); publishing the PATH is what e05d2
-        // delivers.
+        // it. Since a2 the provider is the titlebar's chrome regions (chrome.ts — empty only when
+        // no strips mounted or the mode has no drag duty); e11's viewport rects join the same set.
         await Promise.all([
             this.#stateClient.publish(layout, panels),
             this.#stateClient.publishRegions(this.#regionProvider()),
