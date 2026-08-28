@@ -1,0 +1,19 @@
+src/editor/shell/tests/test_win32_dpi.cpp
+  s_3541a29968aef3::t_cd6b0c2743db60 63-71,74-82
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "89bed9c926e8bd294fcc3180a54ce688f4649dc5",
+  "prompts": {},
+  "sessions": {
+    "s_3541a29968aef3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1baf8c1-a742-47fa-b538-543e01c6d205",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
