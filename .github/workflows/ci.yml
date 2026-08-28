@@ -1607,7 +1607,17 @@ jobs:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
     continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
-    timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
+    # 75, up from the 30 the sibling toolchain jobs use, and DERIVED not picked (issue #476): a
+    # runner-image roll rolls the default MSVC/AppleClang and with it vcpkg's ABI hash, so the first
+    # run after a roll legitimately rebuilds glslang + SPIRV-Cross + SPIRV-Tools from source.
+    # Measured on the 2026-08 windows-latest image: that cold build exceeds 30 minutes (cancelled at
+    # 30:12 on three consecutive runs — 33133287819 / 33140034437 / 33143575573). And because the
+    # cache SAVE below only ever runs on main, a budget below the cold build is a ratchet with no
+    # pawl: the archive for the new image can never be written, so the leg stays red
+    # DETERMINISTICALLY — every future run cold, every future run cancelled — until a human
+    # intervenes. 75 is ~2x the observed cold build; warm runs stay minutes-class, so as a stall
+    # backstop this is still the `build` job's "generous multiple, not a tight budget".
+    timeout-minutes: 75
     defaults:
       run:
         shell: bash
@@ -1695,7 +1705,13 @@ jobs:
       # (VCPKG_MANIFEST_FEATURES=shader-crosscompile) under the vcpkg toolchain ($VCPKG_ROOT) and sets
       # CONTEXT_BUILD_SHADER_CROSSCOMPILE=ON. GH-hosted runners preinstall vcpkg as
       # $VCPKG_INSTALLATION_ROOT (same as the bench-baseline job).
+      # STEP-level timeout, deliberately below the job budget: a vcpkg overrun then FAILS the step —
+      # which `continue-on-error` absorbs on the advisory mac/win legs — instead of letting the
+      # job-level backstop CANCEL the job. A cancellation is NOT absorbed by continue-on-error and
+      # flips the WHOLE RUN's conclusion to 'cancelled', which is how an "advisory" leg painted
+      # every rollup red for a month (issue #476's second finding).
       - name: Configure (shader-crosscompile toolchain, vcpkg)
+        timeout-minutes: 65
         run: |
           mkdir -p "$VCPKG_DEFAULT_BINARY_CACHE"
           export VCPKG_ROOT="$VCPKG_INSTALLATION_ROOT"
@@ -1717,8 +1733,17 @@ jobs:
 
       # SAVE the shadercc vcpkg + WGSL tool archives ONLY on main (P3); the dirs are populated by the
       # configure + tool-staging steps above. PR legs skip these — no per-branch duplicates.
+      # `always() && main`, not plain `main`: vcpkg's binary cache is PER-PACKAGE, so even a main
+      # run whose configure step failed or timed out holds real progress worth keeping — without
+      # always(), a cold build that dies late leaves the NEXT run exactly as cold, which is the
+      # no-pawl ratchet #476 documents. This is safe for the vcpkg cache specifically because its
+      # archives are self-validating (ABI-hash-keyed; a missing package just rebuilds); the tint/naga
+      # tool saves below deliberately do NOT get always() — a partial tool dir under their exact pin
+      # key would satisfy the cache hit and no-op the fetch, poisoning every later run.
+      # (Residual, accepted: an exact key is immutable, so progress saved by a failed run is never
+      # EXTENDED by later saves — the 75-minute budget above is what makes that scenario rare.)
       - name: vcpkg binary cache (save, main only)
-        if: github.ref == 'refs/heads/main'
+        if: always() && github.ref == 'refs/heads/main'
         uses: actions/cache/save@v6
         with:
           path: .vcpkg-bincache
