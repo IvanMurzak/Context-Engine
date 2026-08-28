@@ -1,0 +1,33 @@
+src/editor/shell/CMakeLists.txt
+  s_3541a29968aef3::t_cf9f9c8bdc00f1 292-314
+src/editor/shell/include/context/editor/shell/dpi.h
+  s_3541a29968aef3::t_6b842ff2eda87c 86-114
+src/editor/shell/src/win32_window.cpp
+  s_3541a29968aef3::t_c9fc6370215c03 118-127,130,424-427,594-613
+src/editor/shell/tests/test_win32_dpi.cpp
+  s_3541a29968aef3::t_8bc35bcd0b623e 1-80
+src/editor/webui/CMakeLists.txt
+  s_3541a29968aef3::t_58a6c9c74ee1a9 242-263
+src/editor/webui/app/app.css
+  s_3541a29968aef3::t_af24f59a0ccf7f 22-49
+tools/check_webui_assets.py
+  s_3541a29968aef3::t_bc477633df71b6 73-83,454-510,1245,1253-1254
+tools/tests/test_check_webui_assets.py
+  s_3541a29968aef3::t_1a408d32b260ca 42-57,79-81,88-93,168-208
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2ed55f79dee265f6a2be0a0ef0d2799b64267fca",
+  "prompts": {},
+  "sessions": {
+    "s_3541a29968aef3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "b1baf8c1-a742-47fa-b538-543e01c6d205",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
