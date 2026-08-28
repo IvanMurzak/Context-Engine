@@ -60,6 +60,13 @@ import {
 import { ShellPackageGrants } from "./packagegrants.js";
 import { PANEL_UI_DELIVER_VERB, PackageUiFanout } from "./packageui.js";
 import { WindowClient, type ChromeState, type WindowSeed } from "./window.js";
+import {
+    findChromeStripElements,
+    startChromeStrips,
+    subscribeChromeFacts,
+    type ChromeMount,
+    type ChromeStrips,
+} from "./chrome.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
 import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
@@ -121,10 +128,10 @@ export const EDITOR_BANNERS_ID = "editor-banners";
  *
  * The same diagnosability discipline `data-editor-session` follows, and like it a TEST SURFACE: the
  * DOM tier reads it to prove the live boot really fetched the chrome contract (a value only the
- * served state could produce), because until a2 mounts the strips the fetched state has no other
- * observable. A SNAPSHOT of the boot read, deliberately: runtime `maximized` flips arrive as
+ * served state could produce), independent of whether the served document carries the a2 strip
+ * elements. A SNAPSHOT of the boot read, deliberately: runtime `maximized` flips arrive as
  * `editor.ui.chrome` facts (uibus.ts `UI_TOPIC_CHROME`), and the a2 strips consume the VALUE this
- * boot hands them, not this attribute.
+ * boot hands them (`startChromeStrips` below), not this attribute.
  */
 export const CHROME_ATTRIBUTE = "data-editor-chrome";
 
@@ -148,7 +155,8 @@ function reportChrome(state: ChromeState): void {
  * live smoke's counters are deterministic. The Shell in that smoke binds no handlers, so each
  * answers the honest `accepted:false` — the claim the smoke asserts is the ROUTING (the counters
  * move and `bridge.refused() == 0` holds), not the OS effect, which only a windowed backend has.
- * Inert in the shipping editor: nothing dispatches these verbs until a2's titlebar controls.
+ * Inert in the shipping editor: without the flag nothing here fires, and the a2 titlebar controls
+ * dispatch these verbs only on a user activation (chrome.ts), so the smoke counters stay exact.
  */
 async function runChromeSmoke(client: WindowClient): Promise<void> {
     if (typeof location === "undefined" || !location.search.includes("ctx-smoke-chrome")) {
@@ -297,6 +305,41 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // are settled before boot reports ready.
         await runChromeSmoke(chromeClient);
 
+        // --- the chrome strips (editor-window-chrome a2, target design 02 §2 / §6) ---------------
+        // Mounted BEFORE the welcome branch, deliberately: the mockup's frame is the app's frame,
+        // so the strips render in BOTH welcome and project modes (the play-bar slot hides on the
+        // welcome screen — no session to control). The titlebar's palette button dispatches through
+        // the LATE-BOUND registry (`liveRegistry` is filled once startCommandLayer runs, and stays
+        // undefined on the welcome path — the dispatch is then an honest no-op, never a throw).
+        // The regionProvider + publisher this wires are the a2 deliverable: the SAME provider is
+        // handed to LayoutPersistence below, so the layout-change and resize/DPI publish paths can
+        // never disagree about the region set. NEVER fatal, like every boot feed: a document
+        // without the strip elements (an older served page, a bare harness) renders exactly what it
+        // did before a2.
+        let liveRegistry: CommandRegistry | undefined;
+        let chromeStrips: ChromeStrips | undefined;
+        try {
+            const stripElements =
+                typeof document === "undefined" ? null : findChromeStripElements(document);
+            if (stripElements !== null) {
+                const chromeStateClient = new EditorStateClient(bridge);
+                chromeStrips = await startChromeStrips(stripElements, {
+                    state: chromeState,
+                    projectName: welcomeState?.projectName ?? "",
+                    welcome:
+                        welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME,
+                    controls: chromeClient,
+                    executeCommand: (commandId: string): void => {
+                        void liveRegistry?.execute(commandId);
+                    },
+                    publishRegions: (regions): Promise<boolean> =>
+                        chromeStateClient.publishRegions(regions),
+                });
+            }
+        } catch {
+            // Reported by the absence of `data-editor-strips`; the editor is up and usable.
+        }
+
         // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
         // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
         // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
@@ -348,7 +391,11 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
-        const panels = await startPanels(bridge, theme, config, whenContext);
+        const panels = await startPanels(bridge, theme, config, whenContext, chromeStrips, (
+            registry,
+        ): void => {
+            liveRegistry = registry;
+        });
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
         // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
@@ -407,6 +454,15 @@ async function startPanels(
     theme: ThemeEngine | undefined,
     config: UserConfigSnapshot,
     whenContext: () => WhenContext,
+    // a2: the mounted chrome strips (undefined when the document carries none). Two duties here:
+    // the strip's regionProvider feeds LayoutPersistence (so a Dockview layout change republishes
+    // the SAME region set the resize/DPI publisher does), and the mount is threaded into the
+    // window mechanism so the `editor.ui.chrome` maximized fact can flip the titlebar glyph.
+    chrome: ChromeStrips | undefined,
+    // a2: called with the command registry once the command layer is up (undefined on a failure),
+    // so the titlebar's palette button — which mounted BEFORE the registry existed — resolves its
+    // late-bound dispatch. A callback for the same reason `attachUiFanout` is one.
+    onRegistry: (registry: CommandRegistry | undefined) => void,
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -534,6 +590,10 @@ async function startPanels(
                         panelHost: host,
                         panelClient: client,
                         stateClient,
+                        // a2: the FIRST real regionProvider (02 §6) — the titlebar's caption +
+                        // control rects. The spread keeps the option absent (the empty default)
+                        // when no strips mounted, per exactOptionalPropertyTypes.
+                        ...(chrome === undefined ? {} : { regionProvider: chrome.provider }),
                     });
                     const restoreReport = await persistence.restore();
                     // Report the restore OUTCOME to the Shell (e05d4). The restart smoke asserts this
@@ -567,6 +627,7 @@ async function startPanels(
                                     .delivered,
                         });
                     },
+                    chrome?.mount,
                 );
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
@@ -574,6 +635,9 @@ async function startPanels(
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
                 commandRegistry = startCommandLayer(host, client, windowClient, theme, whenContext);
+                // a2: resolve the titlebar palette button's late-bound dispatch (see the strips
+                // block in bootEditorCore) — from here on the button opens the real palette.
+                onRegistry(commandRegistry);
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
                 runSettingsSmoke(settings.mount());
@@ -917,6 +981,12 @@ async function startWindowMechanism(
     // CALLBACK rather than a returned value, because the bus is created inside a `try` that may never
     // reach the end, and a fan-out attached only on the happy path is one a caller cannot reason about.
     attachUiFanout: (bus: EditorUiBus) => void,
+    // a2: the mounted titlebar (undefined when the document has no strips). Subscribed here — not
+    // at mount — because the `editor.ui.chrome` maximized fact arrives over THIS window's bus,
+    // which only exists once this mechanism is up, and because the subscription filter needs the
+    // window id `window.list` reports. On the welcome path (no window mechanism) the glyph simply
+    // keeps the boot snapshot, which is the honest state of a window nothing is relaying to.
+    chromeMount?: ChromeMount,
 ): Promise<number> {
     let windowId = 0;
     let detail = "single window";
@@ -953,6 +1023,12 @@ async function startWindowMechanism(
             // method `PackageEventPump` pushes daemon batches through, so a package's two streams
             // arrive over ONE port with one lifetime and one failure mode. Only the VERB differs.
             attachUiFanout(uiBus);
+            // a2: flip the titlebar's max/restore glyph on the `editor.ui.chrome` maximized fact
+            // (02 §1) — the Shell's placement poll observes the flip and unicasts the envelope to
+            // the affected window over the ui.mirror relay; the poll below drains it onto this bus.
+            if (chromeMount !== undefined) {
+                subscribeChromeFacts(uiBus, windowId, chromeMount);
+            }
             // M9 e09b-3 — THE LOUD SURFACE. The editor's ONE notification host, attached to this
             // window's bus. Every refused write the Shell publishes (an L-30 drop, a write-path
             // refusal) arrives over the mirror poll below, lands on the bus, and is rendered here as

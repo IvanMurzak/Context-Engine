@@ -141,6 +141,15 @@ std::uint64_t now_us()
 // variables is what preserves the painted REGION this coverage floor is calibrated against — see the
 // lockstep note on app.css's `.dockview-theme-dark` block, and the T1 tripwire test "the five
 // Dockview BACKGROUND variables share one token".
+//
+// ⚠ RECALIBRATED FOR THE a2 STRIPS (editor-window-chrome, target design 02 §2), DELIBERATELY. The
+// four-strip frame makes the dock 102px shorter: in this smoke's 640x480 window the dock now covers
+// ~79% of the frame (378 of 480 rows) instead of all of it, the titlebar (38px) and statusbar (24px)
+// paint `colors.panel2` (#141414 — NOT counted by this scan), and the play-bar slot (40px) paints
+// `colors.panel` (#0a0a0a — counted). The tenth-of-the-frame floor below therefore still clears
+// with several-fold margin, and the wait loop's identical floor keeps its non-vacuous bound. Any
+// coverage delta BEYOND the strips' own pixels is a real regression, never an expectation to widen
+// (ROADMAP risk 1) — which is why the floor's VALUE is unchanged rather than loosened.
 constexpr std::uint8_t kAppBackgroundB = 0x0a;
 constexpr std::uint8_t kAppBackgroundG = 0x0a;
 constexpr std::uint8_t kAppBackgroundR = 0x0a;
@@ -469,6 +478,25 @@ int main(int argc, char** argv)
     // refusals that trip this smoke's `refused() == 0` invariant (the e06d regression).
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
+    // a2 (editor-window-chrome, target design 02 §2 / §6): serve CUSTOM chrome to the live renderer.
+    // This is the smoke-tier counterpart of the DOM tier's injected `chrome.state` values — the
+    // interim-honesty rule (tasks/README.md) binds the BACKENDS, which all truthfully report
+    // `system` until b1/c1 land; a test injecting a mode through the provider seam is exactly what
+    // `bind_chrome_state` exists for. Under `custom` the titlebar renders the window-controls
+    // cluster and a2's regionProvider publishes the caption + control rects, so THIS smoke can
+    // prove the region path end to end (the a2 assertions below); under the unbound `system`
+    // default the provider honestly publishes an empty set and there would be nothing to observe.
+    // The control CLUSTER renders but is never clicked here — the pointer samples below land in the
+    // dock, and boot's `ctx-smoke-chrome` seam drives the three verbs programmatically — so the
+    // exactly-once counters in the a1 block stay exact.
+    window_move_bridge.bind_chrome_state(
+        []() -> shell::ChromeState
+        {
+            shell::ChromeState state;
+            state.mode = shell::ChromeMode::custom;
+            state.focused = true;
+            return state;
+        });
     SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
 
     // --- the per-user config read surface (e06d) ------------------------------------------------
@@ -701,6 +729,71 @@ int main(int argc, char** argv)
                     "the ctx-smoke-chrome seam drove window.focus exactly once");
     }
 
+    // --- the a2 region assertions (editor-window-chrome, target design 02 §6) --------------------
+    //
+    // THE END-TO-END PROOF THAT THE regionProvider IS REAL. The e05d2 channel (editor.regions.publish
+    // -> EditorStateBridge -> this window's RegionMap) has been live since it landed, but the
+    // provider was an empty default — every publish carried zero regions, so nothing could tell a
+    // wired channel from a stub one. Under the CUSTOM chrome served above, a2's titlebar measures
+    // its caption drag surface + the three window-control rects and publishes them at boot (awaited
+    // by startChromeStrips BEFORE the panels come up, so by the time the wait loop above broke they
+    // are here). The ids are the grep-stable chrome.ts constants — a rename on either side reds this
+    // rather than silently unbinding the proof. The PHYSICAL-px claim is asserted two ways: every
+    // rect lies inside the compositor's own physical surface extent, and the caption strip spans a
+    // substantial share of the physical width at physical y == 0 — while the dpr ARITHMETIC (CSS px
+    // times an injected ratio of 2) is pinned in the DOM tier, which can inject a ratio no headless
+    // CI display would give this smoke. The DPI-change TRIGGER is likewise the DOM tier's (a real
+    // matchMedia resolution flip cannot be driven through an OSR browser from here); the resize
+    // trigger is proven live, below, on the same generation observable.
+    std::uint64_t regions_generation_before_resize = 0;
+    {
+        const shell::RegionMap& map = editor->input().regions();
+        SMOKE_CHECK(map.generation() >= 1,
+                    "the live renderer published the region map at boot (a2's initial publish)");
+        const shell::ShellRegion* caption = map.find("chrome.caption");
+        const shell::ShellRegion* min_region = map.find("chrome.caption-min");
+        const shell::ShellRegion* max_region = map.find("chrome.caption-max");
+        const shell::ShellRegion* close_region = map.find("chrome.caption-close");
+        SMOKE_CHECK(caption != nullptr, "the caption drag surface arrived in the region map");
+        SMOKE_CHECK(min_region != nullptr, "the minimize control rect arrived");
+        SMOKE_CHECK(max_region != nullptr, "the maximize control rect arrived");
+        SMOKE_CHECK(close_region != nullptr, "the close control rect arrived");
+        SMOKE_CHECK(map.size() == 4, "the map is exactly the four chrome regions, wholesale");
+        // Caption FIRST, controls after — the publish order 02 §6 pins so back-to-front
+        // last-match-wins resolves a control click above the drag surface with no carve-out token.
+        SMOKE_CHECK(!map.regions().empty() && map.regions().front().id == "chrome.caption",
+                    "the caption publishes FIRST (the last-match-wins arbitration order)");
+        if (caption != nullptr && min_region != nullptr && max_region != nullptr &&
+            close_region != nullptr)
+        {
+            SMOKE_CHECK(caption->kind == shell::RegionKind::caption &&
+                            min_region->kind == shell::RegionKind::caption_min &&
+                            max_region->kind == shell::RegionKind::caption_max &&
+                            close_region->kind == shell::RegionKind::caption_close,
+                        "each region carries its closed-vocabulary kind");
+            const render::Extent2D composed = editor->compositor().size();
+            const auto inside = [composed](const shell::ShellRegion& region)
+            {
+                return region.rect.size.width > 0 && region.rect.size.height > 0 &&
+                       region.rect.origin.x + region.rect.size.width <= composed.width &&
+                       region.rect.origin.y + region.rect.size.height <= composed.height;
+            };
+            SMOKE_CHECK(inside(*caption) && inside(*min_region) && inside(*max_region) &&
+                            inside(*close_region),
+                        "every chrome rect lies inside the PHYSICAL composited surface");
+            SMOKE_CHECK(caption->rect.origin.y == 0,
+                        "the caption strip starts at the physical top of the window");
+            SMOKE_CHECK(caption->rect.size.width > composed.width / 2u,
+                        "the caption drag surface spans a substantial share of the physical width");
+            // The controls sit OUTSIDE (to the right of) the drag surface — what makes carve-out
+            // tokens unnecessary before last-match-wins is even consulted.
+            SMOKE_CHECK(min_region->rect.origin.x >=
+                            caption->rect.origin.x + caption->rect.size.width,
+                        "the caption drag surface ends before the first control begins");
+        }
+        regions_generation_before_resize = map.generation();
+    }
+
     // Input round-trip into the LIVE browser. NOTE what this does and does NOT prove: the counters
     // asserted below are OUR InputArbiter's, incremented before the browser is called, so they pin
     // the arbitration half only. What makes this a LIVE-browser assertion is that CEF accepts the
@@ -798,6 +891,41 @@ int main(int argc, char** argv)
     SMOKE_CHECK(editor->compositor().size().width == backend_raw->client_size().width &&
                     editor->compositor().size().height == backend_raw->client_size().height,
                 "the compositor took the size the window actually got");
+
+    // --- the a2 resize REPUBLISH (target design 02 §6) -------------------------------------------
+    // The live resize above moved every strip rect, so a2's ChromeRegionPublisher must fire on the
+    // renderer's own `resize` event (debounced ~100ms) and republish WHOLESALE — observed here as
+    // the RegionMap's generation bumping (input.h: bumped on every publish) and the caption rect
+    // TRACKING the new physical width. This is the trigger no layout-change publish covers: nothing
+    // touched Dockview's layout, only the window's size. The republish rides the same async IPC as
+    // everything above, so wait for it rather than reading the map after one pump.
+    {
+        const auto republish_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (std::chrono::steady_clock::now() < republish_deadline)
+        {
+            if (!manager.pump_once(now_us()))
+            {
+                break;
+            }
+            if (editor->input().regions().generation() > regions_generation_before_resize &&
+                editor->input().regions().find("chrome.caption") != nullptr)
+            {
+                break;
+            }
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+        const shell::RegionMap& map = editor->input().regions();
+        SMOKE_CHECK(map.generation() > regions_generation_before_resize,
+                    "the live resize made a2's publisher republish the region map (the generation "
+                    "bumped)");
+        const shell::ShellRegion* caption = map.find("chrome.caption");
+        SMOKE_CHECK(caption != nullptr, "the republished map still carries the caption");
+        const render::Extent2D composed = editor->compositor().size();
+        SMOKE_CHECK(caption != nullptr &&
+                        caption->rect.origin.x + caption->rect.size.width <= composed.width &&
+                        caption->rect.size.width > composed.width / 2u,
+                    "the republished caption rect TRACKS the resized physical client width");
+    }
 
     // Read the presented-frame count BEFORE shutdown: shutdown() -> EditorWindow::close() ->
     // WindowCompositor::detach() destroys the blitter, and nothing is presented during teardown, so

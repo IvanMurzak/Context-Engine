@@ -119,6 +119,118 @@ html[data-theme-transition="true"] * {
     position: relative;
 }
 
+/* --- the four-strip frame (editor-window-chrome a2, target design 02 §2) ----------------------- *
+ *
+ * The mockup's frame: titlebar (38px) / play-bar slot (40px) / dock / statusbar (24px), a flex
+ * column on the SHIPPED document's body only (`.ctx-app-frame` — index.html carries the class; the
+ * T1 harness body does not, so the test document's layout is untouched). The strips are app chrome
+ * in the banners pattern below: the strip itself is styled HERE from theme tokens, every CONTROL
+ * inside it is a kit component, and chrome.ts fills the titlebar at boot from `chrome.state`.
+ *
+ * ⚠ THE DOCK IS 102px SHORTER THAN IT WAS — deliberately (02 §2). The live CEF smokes' per-pixel
+ * background-coverage floor was recalibrated in the same change (cef_shell_smoke.cpp): the dock
+ * still fills ~79% of the window and the titlebar/statusbar read `colors.panel2`, so the `panel`
+ * floor clears with room; a delta beyond the strips' own pixels is a real regression. */
+.ctx-app-frame {
+    display: flex;
+    flex-direction: column;
+}
+
+/* Inside the flex frame the dock takes what the strips leave — `height: 100%` of the body would
+ * overflow by exactly the strips' 102px, which is why the base rule above is overridden here. */
+.ctx-app-frame #editor-root {
+    flex: 1 1 auto;
+    height: auto;
+    min-height: 0;
+}
+
+.ctx-titlebar {
+    flex: 0 0 auto;
+    height: 38px;
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+    padding: 0 var(--ctx-shape-space-sm, 8px) 0 var(--ctx-shape-space-md, 12px);
+    background: var(--ctx-colors-panel2, #141414);
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    border-bottom: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+    box-sizing: border-box;
+    /* The strip doubles as the caption DRAG surface in custom/hybrid chrome (02 §6): selecting the
+     * title text mid-drag would fight the OS gesture, so the strip is not a text-selection surface. */
+    user-select: none;
+}
+
+/* HYBRID chrome (macOS, once c1 lands): the OS draws the traffic lights over our strip, so the
+ * strip pads by the measured inset chrome.ts writes as custom properties (CSS px — the physical
+ * `controlsInset` divided by the devicePixelRatio). Zero in every other mode, where the properties
+ * are absent and the fallback keeps the ordinary padding. */
+.ctx-titlebar[data-chrome-mode="hybrid"] {
+    padding-left: var(--ctx-chrome-inset-left, 12px);
+    padding-right: var(--ctx-chrome-inset-right, 8px);
+}
+
+/* The caption drag surface: brand + title + the strip's flexible middle. Its OWN element so the a2
+ * regionProvider measures exactly this rect as the `caption` region — the palette button and the
+ * window controls sit OUTSIDE it and therefore need no carve-out (chrome.ts § regions). */
+.ctx-titlebar__drag {
+    flex: 1 1 auto;
+    min-width: 0;
+    height: 100%;
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+}
+
+.ctx-titlebar__brand {
+    flex: none;
+    width: 16px;
+    height: 16px;
+    border-radius: var(--ctx-shape-radius-sm, 4px);
+    background: var(--ctx-colors-ink, var(--editor-fg));
+    opacity: 0.9;
+}
+
+.ctx-titlebar__title {
+    font-size: var(--ctx-typography-size-sm, 13px);
+    color: var(--ctx-colors-muted, #93a1b1);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* The window-controls cluster (custom chrome only). LAYOUT ONLY, the `.ctx-settings` discipline:
+ * the buttons inside are stock kit components and nothing here paints one. */
+.ctx-titlebar__controls {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+/* The play-bar SLOT (02 §2): an empty 40px shell until d1 fills it, hidden on the welcome screen
+ * (chrome.ts sets `hidden` — no session to control there). The explicit `[hidden]` rule is what
+ * keeps the hide working once d1 gives this strip a `display: flex` of its own. */
+.ctx-playbar {
+    flex: 0 0 auto;
+    height: 40px;
+    background: var(--ctx-colors-panel, #0a0a0a);
+    border-bottom: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+    box-sizing: border-box;
+}
+
+.ctx-playbar[hidden] {
+    display: none;
+}
+
+/* The statusbar (02 §8): an empty 24px shell until d2 gives it truthful content. */
+.ctx-statusbar {
+    flex: 0 0 auto;
+    height: 24px;
+    background: var(--ctx-colors-panel2, #141414);
+    border-top: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+    box-sizing: border-box;
+}
+
 /* --- the docking surface (M9 e05d1) ---------------------------------------------------------- *
  *
  * `dockview.css` (the pinned, SHA-verified stylesheet staged beside this file) ships the docking
@@ -731,15 +843,20 @@ html .dockview-theme-dark {
     flex: 0 0 auto;
 }
 
-/* The editor-path banner host: a fixed overlay across the top of the window (index.html explains why
+/* The editor-path banner host: a fixed overlay across the top of the DOCK (index.html explains why
  * it is not a flex sibling of the docking root).
+ *
+ * Pinned BELOW the titlebar (38px) + play-bar (40px) strips since a2: a banner that covered the
+ * titlebar would hide the very window controls (and palette opener) it might be asking the user to
+ * reach, and the strips are permanent chrome while a banner is a transient notice — notices overlay
+ * CONTENT. The offset is the two strips' fixed heights, which live a few rules up in this file.
  *
  * `pointer-events: none` on the HOST and `auto` on each banner is what keeps an EMPTY strip — the
  * state every CEF smoke and every healthy editor is in — completely inert: it covers the top of the
  * dock in the layer stack but swallows no click, so tab strips and panel headers keep working. */
 .ctx-banners-host {
     position: fixed;
-    top: 0;
+    top: 78px;
     left: 0;
     right: 0;
     z-index: 40;
