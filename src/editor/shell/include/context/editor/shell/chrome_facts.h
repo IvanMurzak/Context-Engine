@@ -47,12 +47,13 @@ namespace context::editor::shell
 // stops flipping — restored by a typo, with both builds green.
 inline constexpr const char* kUiTopicChrome = "editor.ui.chrome";
 
-// The `origin` stamped on a Shell-published chrome envelope. The same value — and the same
-// load-bearing rationale — as write_notice.h § THE ORIGIN IS `shell`: each window's bus drops an
+// The `origin` stamped on a Shell-published chrome envelope — the shared `kShellUiOrigin`
+// (ui_mirror.h), aliased under this topic's own name so it can never drift from the write notice's.
+// The load-bearing rationale is write_notice.h § THE ORIGIN IS `shell`: each window's bus drops an
 // envelope whose origin equals its own (the broadcasting loop breaker), and a window's bus origin
 // is its numeric window id, so a fact stamped with the target window's id would be swallowed by
 // exactly the window it is for. `shell` is not a window id and can never collide with one.
-inline constexpr const char* kChromeFactOrigin = "shell";
+inline constexpr const char* kChromeFactOrigin = kShellUiOrigin;
 
 // Build the `{seq, topic, origin, payload}` mirror envelope for one maximized flip. PURE and
 // separately exposed so the T1 suite asserts the wire shape without a store — the same discipline

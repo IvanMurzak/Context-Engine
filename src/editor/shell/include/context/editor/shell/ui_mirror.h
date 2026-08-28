@@ -38,12 +38,39 @@
 #include "context/editor/shell/window_registry.h" // WindowId
 
 #include <cstddef>
+#include <cstdint>
 #include <map>
 #include <utility>
 #include <vector>
 
 namespace context::editor::shell
 {
+
+// The `origin` stamped on every SHELL-published `editor.ui` envelope (the write notice, the chrome
+// fact — every topic whose publisher is the C++ Shell rather than a window). Load-bearing, not
+// cosmetic: each window's bus drops an envelope whose origin equals its own (the broadcasting loop
+// breaker), and a window's bus origin is its numeric window id — so a Shell fact stamped with a
+// window id would be swallowed by exactly the window it is for; `shell` can never collide with one.
+// The full rationale lives in write_notice.h § THE ORIGIN IS `shell`; the per-topic constants
+// (kWriteNoticeOrigin, kChromeFactOrigin) alias this ONE definition so the invariant cannot drift
+// between Shell-published topics.
+inline constexpr const char* kShellUiOrigin = "shell";
+
+// Seal one Shell-published `{seq, topic, origin, payload}` mirror envelope — the ONE wire shape
+// every Shell-published topic shares (write_notice.cpp and chrome_facts.cpp both seal through
+// here). The PAYLOAD stays with each topic's own builder; this owns only the envelope contract, so
+// the store below still carries envelopes verbatim and never interprets them.
+[[nodiscard]] inline contract::Json shell_ui_envelope(const char* topic, contract::Json payload,
+                                                      std::uint64_t seq)
+{
+    contract::Json envelope = contract::Json::object();
+    envelope.set("seq", contract::Json(seq));
+    envelope.set("topic", contract::Json(topic));
+    // NEVER a window id — see the kShellUiOrigin note above.
+    envelope.set("origin", contract::Json(kShellUiOrigin));
+    envelope.set("payload", std::move(payload));
+    return envelope;
+}
 
 // The per-window mailbox of in-transit `editor.ui` envelopes. ONE per app (referenced by every
 // window's `WindowBridge`), because an envelope published by window A must be readable by window B —

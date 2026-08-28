@@ -75,9 +75,10 @@ namespace context::editor::shell
 // this task exists to end, restored by a typo.
 inline constexpr const char* kUiTopicWriteNotice = "editor.ui.write-notice";
 
-// The `origin` stamped on a Shell-published envelope. See § THE ORIGIN IS `shell` above for why this
-// must not be a window id.
-inline constexpr const char* kWriteNoticeOrigin = "shell";
+// The `origin` stamped on a Shell-published envelope — the shared `kShellUiOrigin` (ui_mirror.h),
+// aliased under this topic's own name so the invariant cannot drift between Shell-published topics.
+// See § THE ORIGIN IS `shell` above for why this must not be a window id.
+inline constexpr const char* kWriteNoticeOrigin = kShellUiOrigin;
 
 // The three notice KINDS, and the whole reason they are distinguished: they mean different things to
 // the human and therefore take different hues (06 §2 binds the hues 1:1 to semantics).

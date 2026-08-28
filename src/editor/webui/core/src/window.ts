@@ -146,12 +146,6 @@ export const DEFAULT_CHROME_STATE: ChromeState = {
     window: CHROME_WINDOW_PRIMARY,
 };
 
-/** A non-negative finite number, else 0 — an inset is a reserved width, never a debt. */
-function readInset(source: Record<string, unknown>, key: string): number {
-    const value = source[key];
-    return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
-}
-
 /**
  * Parse a `chrome.state` result, TOTAL against a malformed or partial envelope: an unknown mode or
  * window token degrades to the `system`/`primary` defaults rather than throwing — the strip must
@@ -172,9 +166,14 @@ export function parseChromeState(value: unknown): ChromeState {
     const inset = isRecord(value["controlsInset"]) ? value["controlsInset"] : {};
     return {
         mode: parsedMode,
-        controlsInset: { left: readInset(inset, "left"), right: readInset(inset, "right") },
-        maximized: value["maximized"] === true,
-        focused: value["focused"] === true,
+        // Clamped non-negative on top of the shared total reader: an inset is a reserved width,
+        // never a debt.
+        controlsInset: {
+            left: Math.max(0, readNumber(inset, "left")),
+            right: Math.max(0, readNumber(inset, "right")),
+        },
+        maximized: readBoolean(value, "maximized"),
+        focused: readBoolean(value, "focused"),
         window: parsedRole,
     };
 }
@@ -358,14 +357,7 @@ export class WindowClient {
      * `DEFAULT_CHROME_STATE`, the honest "stock OS frame" answer the strips render unchanged.
      */
     async chromeState(): Promise<ChromeState> {
-        try {
-            return parseChromeState(await this.#bridge.call(CHROME_STATE_METHOD));
-        } catch (error) {
-            if (error instanceof BridgeError) {
-                return DEFAULT_CHROME_STATE;
-            }
-            throw error;
-        }
+        return this.#tolerant(CHROME_STATE_METHOD, parseChromeState, DEFAULT_CHROME_STATE);
     }
 
     /** Ask the Shell to minimize THIS window. A refusal resolves to `accepted:false`, never throws. */
@@ -375,21 +367,18 @@ export class WindowClient {
 
     /** Toggle THIS window's maximized state. `maximized` is the NEW state, meaningful when accepted. */
     async toggleMaximize(): Promise<ToggleMaximizeResult> {
-        try {
-            const result = await this.#bridge.call(WINDOW_TOGGLE_MAXIMIZE_METHOD);
-            if (!isRecord(result)) {
-                return { accepted: false, maximized: false };
-            }
-            return {
-                accepted: readBoolean(result, "accepted"),
-                maximized: readBoolean(result, "maximized"),
-            };
-        } catch (error) {
-            if (error instanceof BridgeError) {
-                return { accepted: false, maximized: false };
-            }
-            throw error;
-        }
+        const fallback: ToggleMaximizeResult = { accepted: false, maximized: false };
+        return this.#tolerant(
+            WINDOW_TOGGLE_MAXIMIZE_METHOD,
+            (result) =>
+                isRecord(result)
+                    ? {
+                          accepted: readBoolean(result, "accepted"),
+                          maximized: readBoolean(result, "maximized"),
+                      }
+                    : fallback,
+            fallback,
+        );
     }
 
     /** Ask the Shell to raise/focus THIS window (routes `request_activation`). Refusal-tolerant. */
@@ -397,19 +386,27 @@ export class WindowClient {
         return this.#control(WINDOW_FOCUS_METHOD);
     }
 
-    /**
-     * One `{accepted}` control verb. The single home of the refusal policy (editorstate.ts's
-     * `#callTolerant` rationale): a Shell with no chrome surface — a build predating a1 — answers
-     * `unknown_method`, which is the same honest `accepted:false` a bound-but-window-less handler
-     * gives; any other error is a real bug and propagates.
-     */
+    /** One `{accepted}` control verb (`window.minimize` / `window.focus`), on the shared policy. */
     async #control(method: string): Promise<WindowControlResult> {
+        return this.#tolerant(
+            method,
+            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
+            { accepted: false },
+        );
+    }
+
+    /**
+     * One refusal-tolerant chrome call — the single home of the refusal policy (editorstate.ts's
+     * `#callTolerant` rationale): a Shell with no chrome surface — a build predating a1 — answers
+     * `unknown_method` (a `BridgeError`), which degrades to `fallback`, the same honest answer a
+     * bound-but-window-less handler gives; any other error is a real bug and propagates.
+     */
+    async #tolerant<T>(method: string, parse: (result: unknown) => T, fallback: T): Promise<T> {
         try {
-            const result = await this.#bridge.call(method);
-            return { accepted: isRecord(result) && readBoolean(result, "accepted") };
+            return parse(await this.#bridge.call(method));
         } catch (error) {
             if (error instanceof BridgeError) {
-                return { accepted: false };
+                return fallback;
             }
             throw error;
         }

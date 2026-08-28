@@ -14,13 +14,9 @@ contract::Json chrome_maximized_envelope(WindowId window, bool maximized, std::u
     payload.set("windowId", contract::Json(static_cast<std::uint64_t>(window)));
     payload.set("maximized", contract::Json(maximized));
 
-    contract::Json envelope = contract::Json::object();
-    envelope.set("seq", contract::Json(seq));
-    envelope.set("topic", contract::Json(kUiTopicChrome));
-    // NEVER a window id — see chrome_facts.h § the origin (write_notice.h's rationale).
-    envelope.set("origin", contract::Json(kChromeFactOrigin));
-    envelope.set("payload", std::move(payload));
-    return envelope;
+    // The shared Shell-published seal (ui_mirror.h `shell_ui_envelope`) — origin NEVER a window id;
+    // see chrome_facts.h § the origin (write_notice.h's rationale).
+    return shell_ui_envelope(kUiTopicChrome, std::move(payload), seq);
 }
 
 std::size_t ChromeFactRelay::publish_maximized(WindowId window, bool maximized)

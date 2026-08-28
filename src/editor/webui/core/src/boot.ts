@@ -282,8 +282,15 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // exactly what a stock OS frame implies. Reported on <html data-editor-chrome> (the
         // renderer's out-of-band diagnostic channel + the DOM tier's test surface); runtime
         // `maximized` flips arrive separately, as `editor.ui.chrome` facts over the mirror relay.
+        //
+        // The welcome read (consumed by the branch below) is ISSUED CONCURRENTLY: the two reads are
+        // independent by design — that independence is exactly why the chrome fetch sits before the
+        // welcome branch — so boot pays one bridge round-trip of latency here, not two.
         const chromeClient = new WindowClient(bridge);
-        const chromeState = await chromeClient.chromeState();
+        const [chromeState, welcomeState] = await Promise.all([
+            chromeClient.chromeState(),
+            new WelcomeClient(bridge).state(),
+        ]);
         reportChrome(chromeState);
         // The `?ctx-smoke-chrome` seam (a NO-OP without the flag): drive the three control verbs so
         // the live boot smoke can assert their routing end to end. Awaited so the smoke's counters
@@ -293,10 +300,10 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
         // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
         // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
-        // is no welcome surface: `state()` returns null on an `unknown_method` refusal, which is
-        // exactly what the CEF boot smokes (which install no welcome surface) get — so they mount
-        // panels unchanged. Only an explicit `mode: "welcome"` diverts to the front door.
-        const welcomeState = await new WelcomeClient(bridge).state();
+        // is no welcome surface: `welcomeState` (fetched above, beside the chrome read) is null on
+        // an `unknown_method` refusal, which is exactly what the CEF boot smokes (which install no
+        // welcome surface) get — so they mount panels unchanged. Only an explicit `mode: "welcome"`
+        // diverts to the front door.
         if (welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME) {
             const container =
                 typeof document === "undefined" ? null : document.getElementById(EDITOR_ROOT_ID);

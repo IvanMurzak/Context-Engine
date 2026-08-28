@@ -44,6 +44,10 @@ void the_envelope_is_one_chrome_fact_with_every_member_present()
     // compared to itself would hold for whatever value it drifted to.
     CHECK(envelope.at("topic").as_string() == "editor.ui.chrome");
     CHECK(envelope.at("origin").as_string() == "shell");
+    // The origin is NOT the subject window's id (write_notice.h § THE ORIGIN IS `shell`, inherited
+    // with its rationale, and test_write_notice's shape): every bus origin is `String(windowId)`,
+    // so a fact stamped with the TARGET's id would be swallowed by exactly the window it is for.
+    CHECK(envelope.at("origin").as_string() != "3");
     CHECK(envelope.at("seq").as_int() == 7);
     CHECK(envelope.at("payload").at("windowId").as_int() == 3);
     CHECK(envelope.at("payload").at("maximized").as_bool());
@@ -54,23 +58,6 @@ void the_envelope_is_one_chrome_fact_with_every_member_present()
     CHECK(restored.at("payload").contains("maximized"));
     CHECK(restored.at("payload").at("maximized").as_bool() == false);
     CHECK(restored.at("payload").at("windowId").as_int() == 0);
-}
-
-void the_origin_is_never_a_window_id()
-{
-    // The loop-breaker collision (write_notice.h § THE ORIGIN IS `shell`): every bus origin is
-    // `String(windowId)`, so the origin must not parse as the subject window's id — or any id.
-    const Json envelope = chrome_maximized_envelope(5, true, 1);
-    const std::string origin = envelope.at("origin").as_string();
-    CHECK(origin != "5");
-    CHECK(origin != "0");
-    CHECK(!origin.empty());
-    bool numeric = true;
-    for (const char c : origin)
-    {
-        numeric = numeric && c >= '0' && c <= '9';
-    }
-    CHECK(!numeric);
 }
 
 void delivery_is_unicast_to_the_affected_window()
@@ -121,7 +108,6 @@ void unbound_is_honest_not_silent()
 int main()
 {
     the_envelope_is_one_chrome_fact_with_every_member_present();
-    the_origin_is_never_a_window_id();
     delivery_is_unicast_to_the_affected_window();
     unbound_is_honest_not_silent();
     SHELL_TEST_MAIN_END();
