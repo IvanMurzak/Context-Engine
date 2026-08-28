@@ -32,6 +32,12 @@ bench/results/
 # authored file state).
 .editor/
 
+# Claude Code subagent persistent memory — written relative to the cwd's git root, so agents
+# running inside this submodule leak it here. Never committed: the software superproject's
+# CLAUDE.md mandates every submodule gitignore `**/.claude/agent-memory/` (canonical agent
+# memory lives at the software repo root).
+**/.claude/agent-memory/
+
 # IDE / editor
 .vs/
 .vscode/
