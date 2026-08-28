@@ -45,10 +45,10 @@ Linux needs no native task (D6): its menu-bar-mode strip is a2+d3 behavior.
 | Task (spec) | needs | repo/base | imp/cx | model | Status | Run / PR | Updated |
 |---|---|---|---|---|---|---|---|
 | [a1-chrome-contract](tasks/a1-chrome-contract.md) — `chrome.state`, window-control surface, backend virtuals, caption vocabulary, ten smokes | — | . / main | 8/8 | top | ✅ done | [#480](https://github.com/IvanMurzak/Context-Engine/pull/480) merged `5531288`, 42/42 CI | 2026-08-28 |
-| [a2-strips-scaffold](tasks/a2-strips-scaffold.md) — four-strip flex frame, titlebar content, first real `regionProvider`, smoke-coverage update | a1 | . / main | 8/8 | top | 🔵 in-progress | pipeline implement-task | 2026-08-28 |
-| [b1-windows-frameless](tasks/b1-windows-frameless.md) — NC takeover, pure `hit_test_frame`, Snap Layouts, DWM dark mode, mode→`custom` | a1, a2 | . / main | 8/8 | top | ⬜ pending | | 2026-08-28 |
-| [c1-macos-hybrid](tasks/c1-macos-hybrid.md) — transparent titlebar, measured inset, caption-drag handoff, mode→`hybrid` | a1, a2 | . / main | 7/8 | top | ⬜ pending | | 2026-08-28 |
-| [d1-playbar-strip](tasks/d1-playbar-strip.md) — mockup strip, `session.control`, `simTick`, `data-play-state` writer, `play.*` commands | a1, a2 | . / main | 8/8 | top | ⬜ pending | | 2026-08-28 |
+| [a2-strips-scaffold](tasks/a2-strips-scaffold.md) — four-strip flex frame, titlebar content, first real `regionProvider`, smoke-coverage update | a1 | . / main | 8/8 | top | ✅ done | [#481](https://github.com/IvanMurzak/Context-Engine/pull/481) merged `494f18e`, 42/42 CI | 2026-08-28 |
+| [b1-windows-frameless](tasks/b1-windows-frameless.md) — NC takeover, pure `hit_test_frame`, Snap Layouts, DWM dark mode, mode→`custom` | a1, a2 | . / main | 8/8 | top | 🔵 in-progress | pipeline implement-task | 2026-08-28 |
+| [c1-macos-hybrid](tasks/c1-macos-hybrid.md) — transparent titlebar, measured inset, caption-drag handoff, mode→`hybrid` | a1, a2 | . / main | 7/8 | top | 🔵 in-progress | pipeline implement-task | 2026-08-28 |
+| [d1-playbar-strip](tasks/d1-playbar-strip.md) — mockup strip, `session.control`, `simTick`, `data-play-state` writer, `play.*` commands | a1, a2 | . / main | 8/8 | top | 🔵 in-progress | pipeline implement-task | 2026-08-28 |
 | [d2-statusbar](tasks/d2-statusbar.md) — daemon link state, problems count, theme/project identity | a2 | . / main | 6/5 | mid | ⬜ pending | | 2026-08-28 |
 | [d3-menu-system](tasks/d3-menu-system.md) — declarative model, web menubar + NSMenu via `menu.publish`, new commands, a11y | a1, a2, c1 | . / main | 9/8 | top | ⬜ pending | | 2026-08-28 |
 | [e1-playbar-dock-retirement](tasks/e1-playbar-dock-retirement.md) — remove panel anchors, amend enumerated frozen gates owner-visibly | d1 | . / main | 7/8 | top | ⬜ pending | | 2026-08-28 |
