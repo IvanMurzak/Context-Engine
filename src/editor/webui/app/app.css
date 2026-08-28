@@ -19,6 +19,34 @@
  * this file stays the minimum that makes the window legible and the composite assertable.
  */
 
+/* --- the UI font faces (M9 e06a's files, served since 2026-08-27) ------------------------------ *
+ *
+ * Every theme's `typography.fontUi` / `fontMono` stack names these families FIRST ('Geist', 'Inter',
+ * system-ui, …), and e06a shipped the two variable faces into tokens/fonts/ — but until these
+ * declarations existed nothing ever LOADED them, so the whole editor silently fell through the
+ * stack to the platform sans. The files are staged beside this sheet (editor/webui/CMakeLists.txt
+ * § 4c) and pulled over `context-editor://app/fonts/…` — same-origin, so the strict `font-src
+ * 'self'` CSP admits them, and `.woff2` is on the scheme's media-type allowlist. `font-weight:
+ * 100 900` declares the variable axis range so every tokenised weight (430/520/600) interpolates
+ * instead of faux-bolding; `font-display: swap` keeps first paint on the fallback rather than
+ * blocking on the font fetch — the swap is local-scheme fast anyway. The webui-assets ctest holds
+ * these two blocks and the staged bytes in lockstep. */
+@font-face {
+    font-family: 'Geist';
+    src: url('fonts/Geist-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
+@font-face {
+    font-family: 'Geist Mono';
+    src: url('fonts/GeistMono-Variable.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+}
+
 :root {
     /* The PRE-THEME placeholder pair. Before e06b these WERE the editor's colours and the composited
      * value the live CEF smokes asserted per pixel; now the theme engine's tokens override them the
