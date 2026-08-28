@@ -155,6 +155,51 @@ void test_spawn_or_attach_with_nothing_reachable_is_read_only_not_fatal()
     shelltest::cleanup(project);
 }
 
+// ------------------------------------------------------------------- locating the CLI to spawn
+
+// The CLI's platform spelling, mirrored from locate_context_binary itself: the test writes fixture
+// binaries under the name the resolver actually looks for.
+const char* context_exe_name()
+{
+#if defined(_WIN32)
+    return "context.exe";
+#else
+    return "context";
+#endif
+}
+
+void test_locate_context_binary_resolves_every_supported_layout()
+{
+    const fs::path root = shelltest::make_temp_project("context-e14a", "locate");
+    const char* exe = context_exe_name();
+
+    // Nothing on disk => the sibling best-guess, so spawn reports a clear error about THAT path.
+    const fs::path bare_editor = root / "nowhere" / "context_editor";
+    CHECK(locate_context_binary(bare_editor) ==
+          (root / "nowhere" / exe).lexically_normal());
+
+    // Dev build tree: <build>/editor/shell/context_editor -> <build>/cli/context.
+    shelltest::write_file(root / "cli" / exe, "cli");
+    const fs::path dev_editor = root / "editor" / "shell" / "context_editor";
+    CHECK(locate_context_binary(dev_editor) == (root / "cli" / exe).lexically_normal());
+
+    // CEF dev build tree: the stage target parks the editor a per-config level DEEPER
+    // (<build>/editor/shell/Release), so the CLI is a third level up. This is the layout every
+    // CONTEXT_BUILD_GUI_CEF build produces, and until this candidate existed the resolver missed
+    // the freshly-built CLI there — the editor opened read-only unless context(.exe) was
+    // hand-copied beside it.
+    const fs::path cef_editor = root / "editor" / "shell" / "Release" / "context_editor";
+    CHECK(locate_context_binary(cef_editor) == (root / "cli" / exe).lexically_normal());
+
+    // Install layout wins over the build-tree lookups: a CLI SHIPPED beside the editor is the one
+    // to spawn, never a stray build tree that happens to sit three levels up.
+    shelltest::write_file(root / "editor" / "shell" / "Release" / exe, "staged-cli");
+    CHECK(locate_context_binary(cef_editor) ==
+          (root / "editor" / "shell" / "Release" / exe).lexically_normal());
+
+    shelltest::cleanup(root);
+}
+
 } // namespace
 
 int main()
@@ -165,5 +210,6 @@ int main()
     test_reconnect_controller_enters_read_only_and_backs_off();
     test_reconnect_controller_fixed_delay_policy();
     test_spawn_or_attach_with_nothing_reachable_is_read_only_not_fatal();
+    test_locate_context_binary_resolves_every_supported_layout();
     SHELL_TEST_MAIN_END();
 }

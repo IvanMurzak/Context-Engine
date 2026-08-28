@@ -21,23 +21,30 @@ GPU and no GUI, and what you play in the editor is what ships.
 
 ## The editor
 
-Requires CMake ≥ 3.25 and a C++20 compiler — **MSVC on Windows, clang on Linux/macOS** (the
-editor's CEF prebuilt cannot link under GCC/MinGW). All build files live in `src/` — note the
-explicit `-S src`:
+Requires CMake ≥ 3.25 and **MSVC on Windows / clang on Linux+macOS** — the editor's CEF prebuilt
+cannot link under GCC/MinGW.
+
+**Windows** (from a *Developer PowerShell for VS*):
 
 ```sh
-cmake -S src --preset dev -DCONTEXT_BUILD_GUI_CEF=ON
-cd src
-cmake --build --preset dev --target context_editor context_editor_webui
+cmake -S src -B src/build/editor -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONTEXT_BUILD_GUI_CEF=ON
+cmake --build src/build/editor --target context context_editor context_editor_webui
 ```
 
-The binary lands in `src/build/dev/editor/shell/Release/`, with the `context` CLI staged beside
-it — the editor spawns or attaches the project daemon by itself.
+**Linux / macOS:**
+
+```sh
+CC=clang CXX=clang++ cmake -S src -B src/build/editor -G Ninja -DCMAKE_BUILD_TYPE=Release -DCONTEXT_BUILD_GUI_CEF=ON
+cmake --build src/build/editor --target context context_editor context_editor_webui
+```
+
+The editor lands in `src/build/editor/editor/shell/Release/` and spawns or attaches the project
+daemon by itself.
 
 **Run (release mode):**
 
 ```sh
-src/build/dev/editor/shell/Release/context_editor --project samples/platformer-2d
+src/build/editor/editor/shell/Release/context_editor --project samples/platformer-2d
 ```
 
 A bare launch (no `--project`) opens the welcome screen.
@@ -45,7 +52,7 @@ A bare launch (no `--project`) opens the welcome screen.
 **Run (dev mode):**
 
 ```sh
-src/build/dev/editor/shell/Release/context_editor --project samples/platformer-2d --devtools
+src/build/editor/editor/shell/Release/context_editor --project samples/platformer-2d --devtools
 ```
 
 `--devtools` enables Chromium DevTools, `--headless` runs the shell without an OS window,

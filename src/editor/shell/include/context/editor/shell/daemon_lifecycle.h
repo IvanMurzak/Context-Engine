@@ -138,8 +138,9 @@ private:
 };
 
 // Best-effort resolution of the `context` daemon binary to spawn, relative to the editor executable.
-// Checks the install-layout sibling and the dev build-tree layout (`<build>/editor/shell` ->
-// `<build>/cli`); returns the first that exists, else a sibling best-guess so spawn reports a clear
+// Checks the install-layout sibling and both dev build-tree layouts (`<build>/editor/shell` ->
+// `<build>/cli`, and the CEF stage layout `<build>/editor/shell/<config>` -> `<build>/cli`);
+// returns the first that exists, else a sibling best-guess so spawn reports a clear
 // error. A caller (or a test) that knows the path passes it directly to spawn_or_attach instead.
 [[nodiscard]] std::filesystem::path
 locate_context_binary(const std::filesystem::path& editor_executable);
