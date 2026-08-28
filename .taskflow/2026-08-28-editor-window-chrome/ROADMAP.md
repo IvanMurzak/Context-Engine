@@ -1,0 +1,88 @@
+# ROADMAP — editor window chrome
+
+> **Status: TASKS CUT — ready for `taskflow-execute`.**
+> Design set authored 2026-08-28 (owner decisions D1–D7, README.md). The `taskflow-review` stage
+> was **skipped by explicit owner decision** (2026-08-28) — the set was accepted as authored.
+> Task specs are immutable and live in [`tasks/`](tasks/README.md); this board is the ONLY live
+> state and only `taskflow-execute` updates it after verification.
+
+## Waves
+
+```
+W1  A: a1-chrome-contract → a2-strips-scaffold          (foundation, serial)
+W2  B: b1-windows-frameless ∥ C: c1-macos-hybrid ∥ D: d1-playbar-strip
+W3  D: d2-statusbar → d3-menu-system (d3 also gated on c1) ∥ E: e1-playbar-dock-retirement ∥ F: f1-secondary-window-chrome
+W4  G: g1-verification-closeout                          (after everything)
+```
+
+DAG: a1→a2; a2→{b1,c1,d1,d2,f1}; a1→{b1,c1,d1,d3}; c1→d3; d1→e1; {b1,c1}→f1; all→g1.
+Groups are conflict domains (rationale in [`tasks/README.md`](tasks/README.md)): D is serial
+because d1/d2/d3 share `app.css`/`boot.ts`/`commands.ts` and d1+d3 both edit all ten smoke files.
+Linux needs no native task (D6): its menu-bar-mode strip is a2+d3 behavior.
+
+## Standing gates for every task
+
+- Standard flow: isolated worktree, PR, full 42-check CI green before merge, plant-verified tests
+  (R-QA-013 — a behavior change ships with the tests that pin it, both halves proven).
+- **The ten-smoke rule**: any new boot-time bridge surface (`chrome.state`, `window.minimize`,
+  `window.toggle-maximize`, `window.focus`, `session.control`, `menu.publish`) is installed in all
+  ten live CEF smokes in the same PR (`window_bridge.h:5-10`), or `bridge.refused() == 0` reds
+  them.
+- **Vocabulary mirrors move together**: `RegionKind` tokens change in all four sites
+  (`input.h` / `editor_state_bridge.h` / `editorstate.ts` / the `webui-panel-contract` gate) in
+  one commit.
+- **Frozen-gate amendments (e1) are owner-visible**: the PR body enumerates every amended
+  m5/m85 gate with the e06d five-gate-partition precedent cited.
+- Pure decision functions (`hit_test_frame`, region arbitration extensions) are tested on all
+  three OS legs via the existing `editor-shell-test_*` families — no ci.yml `--target` edits for
+  plain families; new CEF smoke registrations (if any) pay the "Not Run = RED" bookkeeping.
+- **Interim-honesty staging** (tasks/README.md): `chrome.state.mode` reports what the backend
+  DOES — all backends ship `"system"` in a1; b1/c1 flip win32/cocoa in the PRs that implement the
+  behavior; x11 stays `"system"`.
+
+## Board
+
+| Task (spec) | needs | repo/base | imp/cx | model | Status | Run / PR | Updated |
+|---|---|---|---|---|---|---|---|
+| [a1-chrome-contract](tasks/a1-chrome-contract.md) — `chrome.state`, window-control surface, backend virtuals, caption vocabulary, ten smokes | — | . / main | 8/8 | top | ⬜ pending | | 2026-08-28 |
+| [a2-strips-scaffold](tasks/a2-strips-scaffold.md) — four-strip flex frame, titlebar content, first real `regionProvider`, smoke-coverage update | a1 | . / main | 8/8 | top | ⬜ pending | | 2026-08-28 |
+| [b1-windows-frameless](tasks/b1-windows-frameless.md) — NC takeover, pure `hit_test_frame`, Snap Layouts, DWM dark mode, mode→`custom` | a1, a2 | . / main | 8/8 | top | ⬜ pending | | 2026-08-28 |
+| [c1-macos-hybrid](tasks/c1-macos-hybrid.md) — transparent titlebar, measured inset, caption-drag handoff, mode→`hybrid` | a1, a2 | . / main | 7/8 | top | ⬜ pending | | 2026-08-28 |
+| [d1-playbar-strip](tasks/d1-playbar-strip.md) — mockup strip, `session.control`, `simTick`, `data-play-state` writer, `play.*` commands | a1, a2 | . / main | 8/8 | top | ⬜ pending | | 2026-08-28 |
+| [d2-statusbar](tasks/d2-statusbar.md) — daemon link state, problems count, theme/project identity | a2 | . / main | 6/5 | mid | ⬜ pending | | 2026-08-28 |
+| [d3-menu-system](tasks/d3-menu-system.md) — declarative model, web menubar + NSMenu via `menu.publish`, new commands, a11y | a1, a2, c1 | . / main | 9/8 | top | ⬜ pending | | 2026-08-28 |
+| [e1-playbar-dock-retirement](tasks/e1-playbar-dock-retirement.md) — remove panel anchors, amend enumerated frozen gates owner-visibly | d1 | . / main | 7/8 | top | ⬜ pending | | 2026-08-28 |
+| [f1-secondary-window-chrome](tasks/f1-secondary-window-chrome.md) — compact strip, frameless factory windows, per-window regions | a2, b1, c1 | . / main | 7/6 | mid | ⬜ pending | | 2026-08-28 |
+| [g1-verification-closeout](tasks/g1-verification-closeout.md) — live assertions, `docs/shell.md`, e16 handoff, residue audit | all | . / main | 7/6 | mid | ⬜ pending | | 2026-08-28 |
+
+## Known risks (named now, owned by tasks)
+
+1. **CEF smoke pixel-coverage floor** moves when the dock shrinks by 102px (`index.html:66-70`) —
+   a2 updates expectations deliberately; a coverage delta outside the strips' own pixels is a
+   real regression, not an expectation to widen.
+2. **Frameless-maximized overhang** (the classic 8px spill) — b1's maximized-inset branch, pinned
+   by a test at both DPI 96 and 150%.
+3. **Caption drag vs CEF input** — a caption press must never half-reach the browser (a stuck
+   hover in the strip). b1/c1 assert the suppression in the live smokes.
+4. **m5-exit amendments** (e1) touch frozen gates — owner-visible per the standing gate above.
+5. **`chrome.state` on the welcome screen** — strips render there too (02 §2); the welcome smokes
+   (`editor-shell-welcome-t2`) join a2's update set.
+6. Play-state staleness after daemon restart (CE #356) is INHERITED by the strip — documented in
+   d1, fixed upstream, not here.
+
+## Progress log
+
+- **2026-08-28** — Set created. Trigger: owner ran the freshly-built editor and reported the
+  chrome divergence from the d1 mockups; investigation showed the mockups' chrome was never
+  decomposed into M9 tasks (no owner among e11c–e17). Electron evaluated and rejected in
+  conversation (L-15/L-41 stand; D5). Owner decisions D1–D7 recorded, including FULL menu (D1,
+  overriding the lighter recommendation) and skipping the interim DWM-dark phase (D7). Three
+  evidence sweeps completed (shell window/input seams; webui chrome seams; playbar blast radius
+  incl. the m5-exit gate coupling). Documents 01/02/03 authored.
+- **2026-08-28** — **Owner skipped `taskflow-review`** (explicit decision at task-cut time): the
+  set is accepted as authored. Task specs cut (`taskflow-tasks`): planning rows c01–c10 →
+  immutable specs a1/a2/b1/c1/d1/d2/d3/e1/f1/g1 in [`tasks/`](tasks/README.md); groups =
+  conflict domains (D serialized: shared webui files + ten-smoke edits); complexity re-scored at
+  cut (a1/a2/c1/d1 cx 7→8 so tier and score agree); **interim-honesty staging** for
+  `chrome.state.mode` added as a binding cross-task rule. Key `file:line` anchors re-verified
+  against HEAD `62463fc`. **Next: `taskflow-execute`.**
