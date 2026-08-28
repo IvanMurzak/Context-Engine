@@ -1,0 +1,62 @@
+docs/shell.md
+  s_7b2854368302f3::t_84178aefde37fb 322,324-338
+src/editor/shell/src/cocoa_window.mm
+  s_7b2854368302f3::t_e99371845f735f 643
+  s_7b2854368302f3::t_b10f2bb8600741 39-40,47
+  s_7b2854368302f3::t_aea4908deac0e4 578-642
+  s_7b2854368302f3::t_5c1ec5323a206f 713,721-758,763
+  s_7b2854368302f3::t_189fb111e4a747 383-387,390-398,416-422
+  s_7b2854368302f3::t_078b0c7e7fe29e 455-461,463-464,478-479
+  s_7b2854368302f3::t_66738dfa2c9ed9 837,844,849-858
+  s_7b2854368302f3::t_32c2ed50759580 941-974
+src/editor/shell/src/cocoa_window.cpp
+  s_7b2854368302f3::t_6327714ae9690d 18-19,33-40,42-49
+  s_7b2854368302f3::t_32bc12d7182682 41
+  s_7b2854368302f3::t_53d95e02db02c6 3-7
+  s_7b2854368302f3::t_23174f14eb6924 50
+src/editor/shell/src/shell.cpp
+  s_7b2854368302f3::t_37519e3e394c41 93-100
+  s_7b2854368302f3::t_f5eaacaf252689 223-228
+  s_7b2854368302f3::t_28aa5c4bb96d8a 6-7
+src/editor/shell/include/context/editor/shell/window_bridge.h
+  s_7b2854368302f3::t_1d047b1680066e 168-169
+  s_7b2854368302f3::t_be55267e02670f 94-98
+src/editor/shell/smoke/shell_cocoa_smoke_main.cpp
+  s_7b2854368302f3::t_6e1ec7bb8dee83 817-990
+  s_7b2854368302f3::t_b66dc17975cda5 1006-1009
+  s_7b2854368302f3::t_e70720648084c5 58
+src/editor/shell/CMakeLists.txt
+  s_7b2854368302f3::t_70ab7bc8df206d 273-275
+  s_7b2854368302f3::t_f315b071818a6f 49
+src/editor/shell/include/context/editor/shell/input.h
+  s_7b2854368302f3::t_3b065ceb72ae0f 50-55
+src/editor/shell/tests/test_cocoa_chrome.cpp
+  s_7b2854368302f3::t_cc7715f2626db4 153-157,159,162
+  s_7b2854368302f3::t_966f8bd5804490 1-152,158,160-161,163-205
+src/editor/shell/src/cocoa_chrome.cpp
+  s_7b2854368302f3::t_0a82caab097bdd 33
+  s_7b2854368302f3::t_a9446fd9cc7faf 62
+  s_7b2854368302f3::t_e96e71568b17c5 1-32,34-53,56-61,63-74
+  s_7b2854368302f3::t_9f92553a3b32a7 54-55
+src/editor/shell/include/context/editor/shell/cocoa_chrome.h
+  s_7b2854368302f3::t_aa57f783bb5505 1-109
+src/editor/shell/app/editor_main.cpp
+  s_7b2854368302f3::t_f47fae015ce417 18
+  s_7b2854368302f3::t_ec48931a670ee1 231-236,241,246-252
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "63d453587f23dd4629f20ef81ead1bbf9ead881a",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
