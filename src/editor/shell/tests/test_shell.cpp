@@ -37,7 +37,8 @@ struct Harness
     present::MemoryBlitter* blitter = nullptr;
     std::unique_ptr<EditorWindow> window;
 
-    explicit Harness(render::Extent2D logical = render::Extent2D{800, 600})
+    explicit Harness(render::Extent2D logical = render::Extent2D{800, 600},
+                     std::uint64_t placement_poll_us = 0)
     {
         WindowDesc desc;
         desc.logical_size = logical;
@@ -48,7 +49,9 @@ struct Harness
 
         EditorWindowConfig config;
         config.compositor.import_options.force_software = true;
-        config.placement_poll_us = 0; // poll every pump so the tests need no clock advance
+        // 0 (the default) polls every pump so most tests need no clock advance; a case about the
+        // poll INTERVAL itself (the a1 chrome-fact boot seed) passes the real one.
+        config.placement_poll_us = placement_poll_us;
         window = std::make_unique<EditorWindow>(std::move(backend_owned), std::move(browser_owned),
                                                 config);
 
@@ -430,20 +433,28 @@ void test_a_window_restored_maximized_fires_no_boot_fact()
     manager.on_chrome_maximized([&relay](WindowId id, bool maximized)
                                 { (void)relay.publish_maximized(id, maximized); });
 
-    Harness harness;
+    // The REAL poll interval, deliberately (not the Harness's poll-every-pump 0): the hazard this
+    // test exists for is the window between adoption and the first poll, where the EditorWindow's
+    // cached placement predates the restore — with interval 0 the cache re-syncs on the very first
+    // pump and a baseline seeded from the wrong source could never be caught.
+    Harness harness(render::Extent2D{800, 600}, 250'000);
     // Maximized BEFORE adoption — the restored-placement shape (add() applies a remembered
     // placement before the first frame; here the backend simply already carries the state).
     harness.backend->set_maximized(true);
     manager.add(std::move(harness.window));
 
+    // Pumps INSIDE the first poll interval, then one past it: quiet throughout — no fact minted
+    // from the adoption itself, neither before nor at the first real poll.
     CHECK(manager.pump_once(1'000));
     CHECK(manager.pump_once(2'000));
+    CHECK(relay.published() == 0);
+    CHECK(manager.pump_once(251'000)); // the first real poll runs here
     CHECK(relay.published() == 0);
 
     // The un-maximize IS a change, and still fires exactly once — the baseline was the true state,
     // not a default false that would have eaten this flip as "no change".
     harness.backend->set_maximized(false);
-    CHECK(manager.pump_once(3'000));
+    CHECK(manager.pump_once(502'000)); // past the next poll deadline, so the flip is observed
     CHECK(relay.published() == 1);
     CHECK(mirror.take(manager.last_minted_id()).at(0).at("payload").at("maximized").as_bool() ==
           false);

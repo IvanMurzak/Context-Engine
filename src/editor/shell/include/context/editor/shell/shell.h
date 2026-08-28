@@ -122,6 +122,13 @@ public:
     [[nodiscard]] bool placement_dirty() const { return placement_dirty_; }
     [[nodiscard]] const WindowPlacement& last_placement() const { return last_placement_; }
     void clear_placement_dirty() { placement_dirty_ = false; }
+    // Re-read `last_placement()` from the backend NOW, without marking it dirty. For a caller that
+    // just mutated the backend's placement behind the poll's back — the manager's adoption-time
+    // restore (add_session applies the remembered placement AFTER this window's constructor cached
+    // the pre-restore one) — so every consumer of `last_placement()` (the persistence write, and
+    // a1's chrome-fact flip compare) starts from the same truth the backend reports, instead of a
+    // stale cache that disagrees until the first poll interval elapses.
+    void sync_placement_baseline() { last_placement_ = backend_->placement(); }
 
     // Single-shot close: ask the browser to close AND drain it (the browser host's own close), then
     // detach the compositor and the backend. Correct for a window torn down on its own; the manager's

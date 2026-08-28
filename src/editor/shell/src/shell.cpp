@@ -392,10 +392,16 @@ WindowId WindowManager::add_session(std::unique_ptr<EditorWindow> window,
     entry.bridge = std::move(session.bridge);
     entry.daemon_client = std::move(session.daemon_client);
     entry.window = std::move(window);
-    // Seed the chrome-fact baseline from the backend's REAL placement (after the remembered
-    // placement above was applied), so a window restored maximized does not fire a spurious flip on
-    // its first poll — the sink reports CHANGES; `chrome.state` reports the initial state.
-    entry.last_maximized = entry.window->backend().placement().maximized;
+    // Re-sync the window's placement cache with the backend: the restore above mutated the backend
+    // AFTER the EditorWindow constructor cached its placement, and pump_once's chrome-fact compare
+    // reads that cache — seeding the baseline from one source while comparing against the other
+    // would fire a spurious flip on every pump until the first poll refreshed the cache. (It also
+    // keeps the first poll from re-persisting the placement that was just restored.)
+    entry.window->sync_placement_baseline();
+    // Seed the chrome-fact baseline from the SAME source pump_once compares against — the freshly
+    // synced cache — so a window restored maximized does not fire a spurious flip at boot; the sink
+    // reports CHANGES; `chrome.state` reports the initial state.
+    entry.last_maximized = entry.window->last_placement().maximized;
     windows_.push_back(std::move(entry));
     return windows_.back().id;
 }
