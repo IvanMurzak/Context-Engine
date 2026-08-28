@@ -1,0 +1,27 @@
+src/editor/shell/src/daemon_lifecycle.cpp
+  s_69263eeafd9048::t_e8c501c5739047 121-125
+src/editor/shell/tests/test_daemon_lifecycle.cpp
+  s_69263eeafd9048::t_9ce6120eda2297 158-202,213
+README.md
+  s_69263eeafd9048::t_320154d309fe90 25-27,31-37,41-42
+  s_69263eeafd9048::t_12f479d71f2c60 38
+  s_69263eeafd9048::t_2c826376e7206b 24,30,47,55
+src/editor/shell/include/context/editor/shell/daemon_lifecycle.h
+  s_69263eeafd9048::t_f5f8d32f4e833e 141-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e4f4cb790f55a8537027dbfdc520be077b963280",
+  "prompts": {},
+  "sessions": {
+    "s_69263eeafd9048": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "08312237-372a-43db-9db9-271ce020c7f0",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
