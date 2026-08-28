@@ -16,8 +16,9 @@
 // in every mount-level case and red exactly there.
 
 import { assert, assertEqual, delay, waitFor, type TestCase } from "./harness.js";
-import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
+import { ShellBridge } from "../bridge.js";
 import { EDITOR_ROOT_ID, bootEditorCore } from "../boot.js";
+import { baseAnswers, mockShell } from "./boot.test.js";
 import {
     CHROME_CONTROL_ATTRIBUTE,
     CHROME_INSET_LEFT_PROPERTY,
@@ -39,6 +40,8 @@ import {
     LABEL_MINIMIZE,
     LABEL_PALETTE,
     LABEL_RESTORE,
+    PLAYBAR_CLASS,
+    STATUSBAR_CLASS,
     TITLEBAR_CLASS,
     TITLEBAR_DRAG_CLASS,
     TITLEBAR_TITLE_CLASS,
@@ -78,10 +81,10 @@ function stripFixture(): { elements: ChromeStripElements; dispose(): void } {
     titlebar.className = TITLEBAR_CLASS;
     const playbar = document.createElement("div");
     playbar.id = EDITOR_PLAYBAR_ID;
-    playbar.className = "ctx-playbar";
+    playbar.className = PLAYBAR_CLASS;
     const statusbar = document.createElement("footer");
     statusbar.id = EDITOR_STATUSBAR_ID;
-    statusbar.className = "ctx-statusbar";
+    statusbar.className = STATUSBAR_CLASS;
     document.body.append(titlebar, playbar, statusbar);
     return {
         elements: { titlebar, playbar, statusbar },
@@ -604,48 +607,32 @@ export const chromeTests: readonly TestCase[] = [
             root.id = EDITOR_ROOT_ID;
             document.body.append(root);
             const publishedRegions: unknown[] = [];
-            const answers: Record<string, unknown> = {
-                "shell.hello": { nonce: "a2-nonce" },
-                "shell.ready": {},
-                "welcome.state": { mode: "project", projectName: "Sprocket Quest" },
-                "chrome.state": {
-                    mode: "custom",
-                    controlsInset: { left: 0, right: 0 },
-                    maximized: false,
-                    focused: true,
-                    window: "primary",
+            // boot.test.ts's mock Shell (ONE copy of the deny-by-default envelope), with the a2
+            // answers overriding its project-mode base and a hook recording what the region
+            // channel actually carried.
+            const shell = mockShell(
+                {
+                    ...baseAnswers(),
+                    "shell.hello": { nonce: "a2-nonce" },
+                    "welcome.state": { mode: "project", projectName: "Sprocket Quest" },
+                    "chrome.state": {
+                        mode: "custom",
+                        controlsInset: { left: 0, right: 0 },
+                        maximized: false,
+                        focused: true,
+                        window: "primary",
+                    },
+                    "editor.regions.publish": {},
                 },
-                "editor.regions.publish": {},
-            };
-            const query: BridgeQueryFunction = (request: BridgeQuery): number => {
-                const parsed = JSON.parse(request.request) as {
-                    id: number;
-                    method: string;
-                    params?: { regions?: unknown[] };
-                };
-                if (parsed.method === "editor.regions.publish") {
-                    publishedRegions.push(...(parsed.params?.regions ?? []));
-                }
-                const has = Object.prototype.hasOwnProperty.call(answers, parsed.method);
-                request.onSuccess(
-                    JSON.stringify(
-                        has
-                            ? { jsonrpc: "2.0", id: parsed.id, result: answers[parsed.method] }
-                            : {
-                                  jsonrpc: "2.0",
-                                  id: parsed.id,
-                                  error: {
-                                      code: -32601,
-                                      message: "unknown method",
-                                      data: { reason: "bridge.unknown_method" },
-                                  },
-                              },
-                    ),
-                );
-                return 1;
-            };
+                (method: string, params: unknown): void => {
+                    if (method === "editor.regions.publish") {
+                        const regions = (params as { regions?: unknown[] } | undefined)?.regions;
+                        publishedRegions.push(...(regions ?? []));
+                    }
+                },
+            );
             try {
-                const report = await bootEditorCore(new ShellBridge(query));
+                const report = await bootEditorCore(new ShellBridge(shell.query));
                 assert(report.ready, "the editor boots");
                 // THE WIRING CLAIM: the REAL boot mounted the strips from the SERVED chrome state…
                 assert(
@@ -685,9 +672,9 @@ export const chromeTests: readonly TestCase[] = [
             const root = document.createElement("main");
             root.id = EDITOR_ROOT_ID;
             document.body.append(root);
-            const answers: Record<string, unknown> = {
+            const shell = mockShell({
+                ...baseAnswers(),
                 "shell.hello": { nonce: "a2-welcome-nonce" },
-                "shell.ready": {},
                 "welcome.state": { mode: "welcome", recents: [], templates: [] },
                 "chrome.state": {
                     mode: "system",
@@ -697,29 +684,9 @@ export const chromeTests: readonly TestCase[] = [
                     window: "primary",
                 },
                 "editor.regions.publish": {},
-            };
-            const query: BridgeQueryFunction = (request: BridgeQuery): number => {
-                const parsed = JSON.parse(request.request) as { id: number; method: string };
-                const has = Object.prototype.hasOwnProperty.call(answers, parsed.method);
-                request.onSuccess(
-                    JSON.stringify(
-                        has
-                            ? { jsonrpc: "2.0", id: parsed.id, result: answers[parsed.method] }
-                            : {
-                                  jsonrpc: "2.0",
-                                  id: parsed.id,
-                                  error: {
-                                      code: -32601,
-                                      message: "unknown method",
-                                      data: { reason: "bridge.unknown_method" },
-                                  },
-                              },
-                    ),
-                );
-                return 1;
-            };
+            });
             try {
-                const report = await bootEditorCore(new ShellBridge(query));
+                const report = await bootEditorCore(new ShellBridge(shell.query));
                 assert(report.ready, "the front door boots");
                 assert(
                     root.querySelector(".welcome-screen") !== null,

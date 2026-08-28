@@ -38,12 +38,23 @@ type Answers = Record<string, unknown>;
 /**
  * A mock Shell. Anything absent from `answers` is refused exactly as the real router's
  * deny-by-default does (`bridge.unknown_method`), which is what every boot feed degrades on.
+ * EXPORTED: chrome.test.ts's boot cases drive the same envelope logic, so there is ONE copy of the
+ * refusal shape to keep in lockstep with the real router. `onRequest` lets a case observe a call's
+ * params (e.g. record what `editor.regions.publish` carried) without rebuilding the shell.
  */
-function mockShell(answers: Answers): { query: BridgeQueryFunction; methods: string[] } {
+export function mockShell(
+    answers: Answers,
+    onRequest?: (method: string, params: unknown) => void,
+): { query: BridgeQueryFunction; methods: string[] } {
     const methods: string[] = [];
     const query: BridgeQueryFunction = (request: BridgeQuery): number => {
-        const parsed = JSON.parse(request.request) as { id: number; method: string };
+        const parsed = JSON.parse(request.request) as {
+            id: number;
+            method: string;
+            params?: unknown;
+        };
         methods.push(parsed.method);
+        onRequest?.(parsed.method, parsed.params);
         const has = Object.prototype.hasOwnProperty.call(answers, parsed.method);
         const envelope = has
             ? { jsonrpc: "2.0", id: parsed.id, result: answers[parsed.method] }
@@ -69,8 +80,9 @@ function mockShell(answers: Answers): { query: BridgeQueryFunction; methods: str
  * `panel.list` is deliberately ABSENT. With no roster PanelHost never creates a docking root, so no
  * Dockview instance and no palette overlay are left in the shared test document — and the property
  * under test is upstream of the panels anyway (`startSession` runs before `startPanels`).
+ * EXPORTED for the same reason `mockShell` is: chrome.test.ts's boot cases spread-and-override it.
  */
-function baseAnswers(): Answers {
+export function baseAnswers(): Answers {
     return {
         "shell.hello": { nonce: "e08d-nonce" },
         "shell.ready": {},

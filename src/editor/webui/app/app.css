@@ -131,6 +131,16 @@ html[data-theme-transition="true"] * {
  * background-coverage floor was recalibrated in the same change (cef_shell_smoke.cpp): the dock
  * still fills ~79% of the window and the titlebar/statusbar read `colors.panel2`, so the `panel`
  * floor clears with room; a delta beyond the strips' own pixels is a real regression. */
+:root {
+    /* The strip heights, declared ONCE. Every rule that needs them — each strip's `height` and the
+     * banner host's offset below — reads these, so the frame's geometry has a single source of
+     * truth rather than literals kept in lockstep by hand. On `:root` (not `.ctx-app-frame`) so the
+     * T1 harness fixtures, whose body does not carry the frame class, get the shipped heights too. */
+    --ctx-chrome-titlebar-height: 38px;
+    --ctx-chrome-playbar-height: 40px;
+    --ctx-chrome-statusbar-height: 24px;
+}
+
 .ctx-app-frame {
     display: flex;
     flex-direction: column;
@@ -146,7 +156,7 @@ html[data-theme-transition="true"] * {
 
 .ctx-titlebar {
     flex: 0 0 auto;
-    height: 38px;
+    height: var(--ctx-chrome-titlebar-height);
     display: flex;
     align-items: center;
     gap: var(--ctx-shape-space-sm, 8px);
@@ -212,7 +222,7 @@ html[data-theme-transition="true"] * {
  * keeps the hide working once d1 gives this strip a `display: flex` of its own. */
 .ctx-playbar {
     flex: 0 0 auto;
-    height: 40px;
+    height: var(--ctx-chrome-playbar-height);
     background: var(--ctx-colors-panel, #0a0a0a);
     border-bottom: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
     box-sizing: border-box;
@@ -225,7 +235,7 @@ html[data-theme-transition="true"] * {
 /* The statusbar (02 §8): an empty 24px shell until d2 gives it truthful content. */
 .ctx-statusbar {
     flex: 0 0 auto;
-    height: 24px;
+    height: var(--ctx-chrome-statusbar-height);
     background: var(--ctx-colors-panel2, #141414);
     border-top: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
     box-sizing: border-box;
@@ -846,17 +856,17 @@ html .dockview-theme-dark {
 /* The editor-path banner host: a fixed overlay across the top of the DOCK (index.html explains why
  * it is not a flex sibling of the docking root).
  *
- * Pinned BELOW the titlebar (38px) + play-bar (40px) strips since a2: a banner that covered the
- * titlebar would hide the very window controls (and palette opener) it might be asking the user to
- * reach, and the strips are permanent chrome while a banner is a transient notice — notices overlay
- * CONTENT. The offset is the two strips' fixed heights, which live a few rules up in this file.
+ * Pinned BELOW the titlebar + play-bar strips since a2: a banner that covered the titlebar would
+ * hide the very window controls (and palette opener) it might be asking the user to reach, and the
+ * strips are permanent chrome while a banner is a transient notice — notices overlay CONTENT. The
+ * offset is COMPUTED from the two strip-height properties, so it can never drift from the heights.
  *
  * `pointer-events: none` on the HOST and `auto` on each banner is what keeps an EMPTY strip — the
  * state every CEF smoke and every healthy editor is in — completely inert: it covers the top of the
  * dock in the layer stack but swallows no click, so tab strips and panel headers keep working. */
 .ctx-banners-host {
     position: fixed;
-    top: 78px;
+    top: calc(var(--ctx-chrome-titlebar-height) + var(--ctx-chrome-playbar-height));
     left: 0;
     right: 0;
     z-index: 40;

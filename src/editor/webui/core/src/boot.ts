@@ -309,14 +309,15 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // Mounted BEFORE the welcome branch, deliberately: the mockup's frame is the app's frame,
         // so the strips render in BOTH welcome and project modes (the play-bar slot hides on the
         // welcome screen — no session to control). The titlebar's palette button dispatches through
-        // the LATE-BOUND registry (`liveRegistry` is filled once startCommandLayer runs, and stays
-        // undefined on the welcome path — the dispatch is then an honest no-op, never a throw).
-        // The regionProvider + publisher this wires are the a2 deliverable: the SAME provider is
-        // handed to LayoutPersistence below, so the layout-change and resize/DPI publish paths can
-        // never disagree about the region set. NEVER fatal, like every boot feed: a document
-        // without the strip elements (an older served page, a bare harness) renders exactly what it
-        // did before a2.
-        let liveRegistry: CommandRegistry | undefined;
+        // the LATE-BOUND registry holder (`liveRegistry.current` is filled once startCommandLayer
+        // runs, and stays undefined on the welcome path — the dispatch is then an honest no-op,
+        // never a throw). The regionProvider + publisher this wires are the a2 deliverable: the
+        // SAME provider is handed to LayoutPersistence below, so the layout-change and resize/DPI
+        // publish paths can never disagree about the region set. NEVER fatal, like every boot feed:
+        // a document without the strip elements (an older served page, a bare harness) renders
+        // exactly what it did before a2.
+        const isWelcome = welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME;
+        const liveRegistry = { current: undefined as CommandRegistry | undefined };
         let chromeStrips: ChromeStrips | undefined;
         try {
             const stripElements =
@@ -326,11 +327,10 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
                 chromeStrips = await startChromeStrips(stripElements, {
                     state: chromeState,
                     projectName: welcomeState?.projectName ?? "",
-                    welcome:
-                        welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME,
+                    welcome: isWelcome,
                     controls: chromeClient,
                     executeCommand: (commandId: string): void => {
-                        void liveRegistry?.execute(commandId);
+                        void liveRegistry.current?.execute(commandId);
                     },
                     publishRegions: (regions): Promise<boolean> =>
                         chromeStateClient.publishRegions(regions),
@@ -347,7 +347,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // an `unknown_method` refusal, which is exactly what the CEF boot smokes (which install no
         // welcome surface) get — so they mount panels unchanged. Only an explicit `mode: "welcome"`
         // diverts to the front door.
-        if (welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME) {
+        if (isWelcome) {
             const container =
                 typeof document === "undefined" ? null : document.getElementById(EDITOR_ROOT_ID);
             let recentCount = 0;
@@ -391,11 +391,14 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
         // with "the editor cannot talk to the Shell" would send the next diagnosis in exactly the
         // wrong direction.
-        const panels = await startPanels(bridge, theme, config, whenContext, chromeStrips, (
-            registry,
-        ): void => {
-            liveRegistry = registry;
-        });
+        const panels = await startPanels(
+            bridge,
+            theme,
+            config,
+            whenContext,
+            chromeStrips,
+            liveRegistry,
+        );
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
         // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
@@ -459,10 +462,11 @@ async function startPanels(
     // the SAME region set the resize/DPI publisher does), and the mount is threaded into the
     // window mechanism so the `editor.ui.chrome` maximized fact can flip the titlebar glyph.
     chrome: ChromeStrips | undefined,
-    // a2: called with the command registry once the command layer is up (undefined on a failure),
-    // so the titlebar's palette button — which mounted BEFORE the registry existed — resolves its
-    // late-bound dispatch. A callback for the same reason `attachUiFanout` is one.
-    onRegistry: (registry: CommandRegistry | undefined) => void,
+    // a2: THE one late-bound command-registry holder, created by bootEditorCore. Filled here once
+    // startCommandLayer runs; read at call time by BOTH the panel verb tables below and the
+    // titlebar's palette dispatch (which mounted BEFORE the registry existed) — one holder, so the
+    // two consumers can never see different registries.
+    liveRegistry: { current: CommandRegistry | undefined },
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -503,13 +507,13 @@ async function startPanels(
         // built here. `undefined` means this window has no bus — the welcome-screen boot, where
         // `panel.list` is unavailable — and a subscribe then refuses honestly rather than pretending.
         let packageUi: PackageUiFanout | undefined;
-        // The ONE command registry, LATE-BOUND into the panel verb tables (M9 e13b-2). It is built by
-        // `startCommandLayer` further down — after `host.start()` has already created every renderer
-        // and every port — so the tables close over this holder rather than over a value. A package
-        // panel's first verb can only arrive once its document has loaded and handshaken, which is
-        // strictly after that, so the `undefined` window is not reachable by a real panel; the tables
-        // refuse honestly if it ever were.
-        let commandRegistry: CommandRegistry | undefined;
+        // The ONE command registry, LATE-BOUND into the panel verb tables (M9 e13b-2) through the
+        // `liveRegistry` holder parameter above. It is built by `startCommandLayer` further down —
+        // after `host.start()` has already created every renderer and every port — so the tables
+        // close over the holder rather than over a value. A package panel's first verb can only
+        // arrive once its document has loaded and handshaken, which is strictly after that, so the
+        // `undefined` window is not reachable by a real panel; the tables refuse honestly if it
+        // ever were.
         const host = new PanelHost({
             container,
             client,
@@ -526,7 +530,7 @@ async function startPanels(
                     packageId: binding.packageId,
                     declaredCapabilities: binding.declaredCapabilities,
                     manifestCommandIds: binding.manifestCommandIds,
-                    registry: () => commandRegistry,
+                    registry: () => liveRegistry.current,
                     whenContext,
                     // THE GRANT SOURCE — the operator's persisted install consent since M9 e13c-4.
                     // This ONE ARGUMENT is the whole editor-core-side change the gate ever needed
@@ -634,10 +638,16 @@ async function startPanels(
                 // palette over it, and (only under `?ctx-smoke-palette`) drive the T2 command-driven
                 // scenario. Placed AFTER `persistence.attach()` so a palette-driven layout change
                 // publishes over the live editor.state channel — the observable the T2 smoke asserts.
-                commandRegistry = startCommandLayer(host, client, windowClient, theme, whenContext);
-                // a2: resolve the titlebar palette button's late-bound dispatch (see the strips
-                // block in bootEditorCore) — from here on the button opens the real palette.
-                onRegistry(commandRegistry);
+                // Filling the holder ALSO resolves the titlebar palette button's late-bound
+                // dispatch (a2 — see the strips block in bootEditorCore): from here on the button
+                // opens the real palette.
+                liveRegistry.current = startCommandLayer(
+                    host,
+                    client,
+                    windowClient,
+                    theme,
+                    whenContext,
+                );
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
                 runSettingsSmoke(settings.mount());

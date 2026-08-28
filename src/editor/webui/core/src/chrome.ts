@@ -51,7 +51,6 @@ import { UI_TOPIC_CHROME, type EditorUiBus, type EditorUiSubscription } from "./
 import {
     CHROME_MODE_CUSTOM,
     CHROME_MODE_HYBRID,
-    type ChromeMode,
     type ChromeState,
     type ToggleMaximizeResult,
 } from "./window.js";
@@ -73,6 +72,9 @@ export const TITLEBAR_DRAG_CLASS = "ctx-titlebar__drag";
 export const TITLEBAR_BRAND_CLASS = "ctx-titlebar__brand";
 export const TITLEBAR_TITLE_CLASS = "ctx-titlebar__title";
 export const TITLEBAR_CONTROLS_CLASS = "ctx-titlebar__controls";
+/** The sibling strips' classes — mirrored by `app/index.html` exactly like the titlebar's. */
+export const PLAYBAR_CLASS = "ctx-playbar";
+export const STATUSBAR_CLASS = "ctx-statusbar";
 
 /** The mode the strip rendered, on the titlebar element — the DOM tier's gating observable. */
 export const CHROME_MODE_ATTRIBUTE = "data-chrome-mode";
@@ -211,8 +213,6 @@ export interface MountChromeOptions {
 
 /** What `mountChrome` produced — the handle boot.ts keeps and the DOM tier asserts on. */
 export interface ChromeMount {
-    readonly titlebar: HTMLElement;
-    readonly mode: ChromeMode;
     /** True while the strip renders the RESTORE glyph. */
     isMaximized(): boolean;
     /**
@@ -403,8 +403,6 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
     elements.playbar.hidden = options.welcome;
 
     return {
-        titlebar,
-        mode,
         isMaximized: (): boolean => maximized,
         setMaximized: (next: boolean): void => {
             applyMaximized(next);
@@ -631,28 +629,28 @@ export async function startChromeStrips(
     options: StartChromeStripsOptions,
 ): Promise<ChromeStrips> {
     const mount = mountChrome(elements, options);
-    const provider: RegionProvider = (): readonly ShellRegion[] => mount.regions();
+    // `mount.regions` is a `this`-free closure already — it IS the provider, no wrapper needed.
+    const provider: RegionProvider = mount.regions;
     const doc = elements.titlebar.ownerDocument;
+    // Everything but the two counters is fixed at mount (the cluster never gains or loses buttons
+    // afterwards), so the prefix is computed ONCE instead of re-queried on every republish.
+    const prefix = `mode=${options.state.mode} controls=${String(
+        elements.titlebar.querySelectorAll(`[${CHROME_CONTROL_ATTRIBUTE}]`).length,
+    )} playbar=${elements.playbar.hidden ? "hidden" : "visible"}`;
     const report = (regionCount: number, publishes: number): void => {
         doc.documentElement.setAttribute(
             CHROME_STRIPS_ATTRIBUTE,
-            `mode=${mount.mode} controls=${String(
-                mount.titlebar.querySelectorAll(`[${CHROME_CONTROL_ATTRIBUTE}]`).length,
-            )} playbar=${elements.playbar.hidden ? "hidden" : "visible"} regions=${String(
-                regionCount,
-            )} publishes=${String(publishes)}`,
+            `${prefix} regions=${String(regionCount)} publishes=${String(publishes)}`,
         );
     };
+    // The publisher's optional knobs are declared with the SAME optionality on both option types,
+    // so the spread forwards exactly the keys the caller supplied (`exactOptionalPropertyTypes`
+    // stays satisfied); the mount-only keys ride along inert.
     const publisher = new ChromeRegionPublisher({
+        ...options,
         provider,
         publish: options.publishRegions,
         onPublish: report,
-        ...(options.debounceMs === undefined ? {} : { debounceMs: options.debounceMs }),
-        ...(options.devicePixelRatio === undefined
-            ? {}
-            : { devicePixelRatio: options.devicePixelRatio }),
-        ...(options.resizeTarget === undefined ? {} : { resizeTarget: options.resizeTarget }),
-        ...(options.matchMedia === undefined ? {} : { matchMedia: options.matchMedia }),
     });
     await publisher.start();
     return { mount, provider, publisher };
