@@ -179,8 +179,15 @@ void test_locate_context_binary_resolves_every_supported_layout()
           (root / "nowhere" / exe).lexically_normal());
 
     // Dev build tree: <build>/editor/shell/context_editor -> <build>/cli/context.
+    //
+    // The fake EDITOR binaries below are written, not merely named: the editor's own directory
+    // must EXIST for the dot-dot candidates to resolve on POSIX, where fs::exists stats every
+    // component of `editor/shell/../../cli` (Windows collapses the dot-dots lexically first, so
+    // a Windows-only run of this suite passes without them — measured on the ubuntu/macos CI
+    // legs). Production always satisfies this: the editor is running from that directory.
     shelltest::write_file(root / "cli" / exe, "cli");
     const fs::path dev_editor = root / "editor" / "shell" / "context_editor";
+    shelltest::write_file(dev_editor, "editor");
     CHECK(locate_context_binary(dev_editor) == (root / "cli" / exe).lexically_normal());
 
     // CEF dev build tree: the stage target parks the editor a per-config level DEEPER
@@ -189,6 +196,7 @@ void test_locate_context_binary_resolves_every_supported_layout()
     // the freshly-built CLI there — the editor opened read-only unless context(.exe) was
     // hand-copied beside it.
     const fs::path cef_editor = root / "editor" / "shell" / "Release" / "context_editor";
+    shelltest::write_file(cef_editor, "editor");
     CHECK(locate_context_binary(cef_editor) == (root / "cli" / exe).lexically_normal());
 
     // Install layout wins over the build-tree lookups: a CLI SHIPPED beside the editor is the one
