@@ -59,7 +59,7 @@ import {
 } from "./panelverbs.js";
 import { ShellPackageGrants } from "./packagegrants.js";
 import { PANEL_UI_DELIVER_VERB, PackageUiFanout } from "./packageui.js";
-import { WindowClient, type WindowSeed } from "./window.js";
+import { WindowClient, type ChromeState, type WindowSeed } from "./window.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
 import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
@@ -115,6 +115,49 @@ export const SESSION_ATTRIBUTE = "data-editor-session";
 
 /** The e14d notification strip's host. Mirrors `app/index.html`'s `<div id="editor-banners">`. */
 export const EDITOR_BANNERS_ID = "editor-banners";
+
+/**
+ * The attribute the boot-time `chrome.state` read is reported onto (editor-window-chrome a1).
+ *
+ * The same diagnosability discipline `data-editor-session` follows, and like it a TEST SURFACE: the
+ * DOM tier reads it to prove the live boot really fetched the chrome contract (a value only the
+ * served state could produce), because until a2 mounts the strips the fetched state has no other
+ * observable. A SNAPSHOT of the boot read, deliberately: runtime `maximized` flips arrive as
+ * `editor.ui.chrome` facts (uibus.ts `UI_TOPIC_CHROME`), and the a2 strips consume the VALUE this
+ * boot hands them, not this attribute.
+ */
+export const CHROME_ATTRIBUTE = "data-editor-chrome";
+
+/** Report the boot-time chrome read (a1) — `mode=<m> inset=<l>,<r> maximized=<b> focused=<b> window=<w>`. */
+function reportChrome(state: ChromeState): void {
+    if (typeof document === "undefined") {
+        return;
+    }
+    document.documentElement.setAttribute(
+        CHROME_ATTRIBUTE,
+        `mode=${state.mode} inset=${String(state.controlsInset.left)},${String(
+            state.controlsInset.right,
+        )} maximized=${String(state.maximized)} focused=${String(state.focused)} window=${state.window}`,
+    );
+}
+
+/**
+ * The a1 chrome-control smoke seam — a NO-OP unless the boot URL carries `?ctx-smoke-chrome`.
+ *
+ * Under the flag it drives each of the three window-control verbs ONCE, awaited in order so the
+ * live smoke's counters are deterministic. The Shell in that smoke binds no handlers, so each
+ * answers the honest `accepted:false` — the claim the smoke asserts is the ROUTING (the counters
+ * move and `bridge.refused() == 0` holds), not the OS effect, which only a windowed backend has.
+ * Inert in the shipping editor: nothing dispatches these verbs until a2's titlebar controls.
+ */
+async function runChromeSmoke(client: WindowClient): Promise<void> {
+    if (typeof location === "undefined" || !location.search.includes("ctx-smoke-chrome")) {
+        return;
+    }
+    await client.minimize();
+    await client.toggleMaximize();
+    await client.focus();
+}
 
 /** What `bootEditorCore` did — returned so a caller (and a test) can assert on it. */
 export interface BootReport {
@@ -231,13 +274,36 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             },
         };
 
+        // --- the chrome contract (editor-window-chrome a1, target design 02 §1) -------------------
+        // Fetched at boot BESIDE `welcome.state` — i.e. before the welcome branch below — because
+        // the strips (a2) render in BOTH welcome and project modes; the fetch must not depend on
+        // which path boot takes. Refusal-tolerant like every boot feed: an older Shell that does not
+        // route `chrome.state` yields the honest `system`/inset-0 default and the editor renders
+        // exactly what a stock OS frame implies. Reported on <html data-editor-chrome> (the
+        // renderer's out-of-band diagnostic channel + the DOM tier's test surface); runtime
+        // `maximized` flips arrive separately, as `editor.ui.chrome` facts over the mirror relay.
+        //
+        // The welcome read (consumed by the branch below) is ISSUED CONCURRENTLY: the two reads are
+        // independent by design — that independence is exactly why the chrome fetch sits before the
+        // welcome branch — so boot pays one bridge round-trip of latency here, not two.
+        const chromeClient = new WindowClient(bridge);
+        const [chromeState, welcomeState] = await Promise.all([
+            chromeClient.chromeState(),
+            new WelcomeClient(bridge).state(),
+        ]);
+        reportChrome(chromeState);
+        // The `?ctx-smoke-chrome` seam (a NO-OP without the flag): drive the three control verbs so
+        // the live boot smoke can assert their routing end to end. Awaited so the smoke's counters
+        // are settled before boot reports ready.
+        await runChromeSmoke(chromeClient);
+
         // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
         // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
         // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
-        // is no welcome surface: `state()` returns null on an `unknown_method` refusal, which is
-        // exactly what the CEF boot smokes (which install no welcome surface) get — so they mount
-        // panels unchanged. Only an explicit `mode: "welcome"` diverts to the front door.
-        const welcomeState = await new WelcomeClient(bridge).state();
+        // is no welcome surface: `welcomeState` (fetched above, beside the chrome read) is null on
+        // an `unknown_method` refusal, which is exactly what the CEF boot smokes (which install no
+        // welcome surface) get — so they mount panels unchanged. Only an explicit `mode: "welcome"`
+        // diverts to the front door.
         if (welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME) {
             const container =
                 typeof document === "undefined" ? null : document.getElementById(EDITOR_ROOT_ID);

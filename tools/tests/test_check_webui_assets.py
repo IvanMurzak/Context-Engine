@@ -544,6 +544,11 @@ PANEL_BUNDLE = (
     'var EDITOR_LAYOUT_RESTORED_METHOD = "editor.layout.restored";\n'
     'var REGION_KIND_VIEWPORT = "viewport";\n'
     'var REGION_KIND_NATIVE = "native";\n'
+    # editor-window-chrome a1: the titlebar's four caption chrome regions.
+    'var REGION_KIND_CAPTION = "caption";\n'
+    'var REGION_KIND_CAPTION_MIN = "caption-min";\n'
+    'var REGION_KIND_CAPTION_MAX = "caption-max";\n'
+    'var REGION_KIND_CAPTION_CLOSE = "caption-close";\n'
     # e07c keybindings vocabulary (keymap.ts).
     'var KEYBINDINGS_GET_METHOD = "keybindings.get";\n'
     # e06b themes vocabulary (theme.ts).
@@ -562,6 +567,18 @@ PANEL_BUNDLE = (
     'var WINDOW_SEED_METHOD = "window.seed";\n'
     'var WINDOW_REHOMED_METHOD = "window.rehomed";\n'
     'var WINDOW_CLOSE_METHOD = "window.close";\n'
+    # editor-window-chrome a1: the three window-control verbs + the chrome contract (window.ts).
+    'var WINDOW_MINIMIZE_METHOD = "window.minimize";\n'
+    'var WINDOW_TOGGLE_MAXIMIZE_METHOD = "window.toggle-maximize";\n'
+    'var WINDOW_FOCUS_METHOD = "window.focus";\n'
+    'var CHROME_STATE_METHOD = "chrome.state";\n'
+    'var CHROME_MODE_CUSTOM = "custom";\n'
+    'var CHROME_MODE_HYBRID = "hybrid";\n'
+    'var CHROME_MODE_SYSTEM = "system";\n'
+    'var CHROME_WINDOW_PRIMARY = "primary";\n'
+    'var CHROME_WINDOW_SECONDARY = "secondary";\n'
+    # editor-window-chrome a1: the `editor.ui.chrome` fact topic (uibus.ts).
+    'var UI_TOPIC_CHROME = "editor.ui.chrome";\n'
     # e10c cross-window drag vocabulary (drag.ts).
     'var DRAG_PROBE_METHOD = "drag.probe";\n'
     'var DRAG_REPORT_ZONE_METHOD = "drag.report-zone";\n'
@@ -634,6 +651,10 @@ PANEL_CPP_EDITOR_STATE = (
     'inline constexpr const char* kEditorLayoutRestoredMethod = "editor.layout.restored";\n'
     'inline constexpr const char* kRegionKindViewport = "viewport";\n'
     'inline constexpr const char* kRegionKindNative = "native";\n'
+    'inline constexpr const char* kRegionKindCaption = "caption";\n'
+    'inline constexpr const char* kRegionKindCaptionMin = "caption-min";\n'
+    'inline constexpr const char* kRegionKindCaptionMax = "caption-max";\n'
+    'inline constexpr const char* kRegionKindCaptionClose = "caption-close";\n'
 )
 
 # The e07c keybindings method lives in keybindings_bridge.h, read the same plain-constant way.
@@ -676,7 +697,21 @@ PANEL_CPP_WINDOW = (
     'inline constexpr const char* kUiMirrorMethod = "ui.mirror";\n'
     'inline constexpr const char* kUiMirrorPollMethod = "ui.mirror-poll";\n'
     'inline constexpr const char* kUiMirrorReportMethod = "ui.mirror-report";\n'
+    # editor-window-chrome a1: the three control verbs + the chrome contract ride window_bridge.h.
+    'inline constexpr const char* kWindowMinimizeMethod = "window.minimize";\n'
+    'inline constexpr const char* kWindowToggleMaximizeMethod = "window.toggle-maximize";\n'
+    'inline constexpr const char* kWindowFocusMethod = "window.focus";\n'
+    'inline constexpr const char* kChromeStateMethod = "chrome.state";\n'
+    'inline constexpr const char* kChromeModeCustom = "custom";\n'
+    'inline constexpr const char* kChromeModeHybrid = "hybrid";\n'
+    'inline constexpr const char* kChromeModeSystem = "system";\n'
+    'inline constexpr const char* kChromeWindowPrimary = "primary";\n'
+    'inline constexpr const char* kChromeWindowSecondary = "secondary";\n'
 )
+
+# The a1 `editor.ui.chrome` fact topic lives in its OWN header (chrome_facts.h) — the unicast
+# maximized-fact relay's home, not window_bridge.h — so the fixture mirrors that split.
+PANEL_CPP_CHROME_FACTS = 'inline constexpr const char* kUiTopicChrome = "editor.ui.chrome";\n'
 
 # The e09b-3 LOUD write-notice vocabulary lives in its OWN header (write_notice.h), unlike the drag /
 # mirror surfaces that ride window_bridge.h — it is a write-path concern, not a window-management one.
@@ -737,6 +772,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    config: str = PANEL_CPP_CONFIG,
                    session: str = PANEL_CPP_SESSION,
                    window: str = PANEL_CPP_WINDOW,
+                   chrome_facts: str = PANEL_CPP_CHROME_FACTS,
                    write_notice: str = PANEL_CPP_WRITE_NOTICE,
                    package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
                    package_events: str = PANEL_CPP_PACKAGE_EVENTS,
@@ -760,6 +796,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "user_config.h").write_text(config, encoding="utf-8")
     (include_dir / "session_bridge.h").write_text(session, encoding="utf-8")
     (include_dir / "window_bridge.h").write_text(window, encoding="utf-8")
+    (include_dir / "chrome_facts.h").write_text(chrome_facts, encoding="utf-8")
     (include_dir / "write_notice.h").write_text(write_notice, encoding="utf-8")
     (include_dir / "package_sessions.h").write_text(package_sessions, encoding="utf-8")
     (include_dir / "package_events.h").write_text(package_events, encoding="utf-8")
@@ -811,6 +848,8 @@ def test_bundle_missing_a_panel_method_fails(tmp_path: Path) -> None:
 @pytest.mark.parametrize("ts_name", [
     "EDITOR_STATE_GET_METHOD", "EDITOR_STATE_PUBLISH_METHOD", "EDITOR_REGIONS_PUBLISH_METHOD",
     "EDITOR_LAYOUT_RESTORED_METHOD", "REGION_KIND_VIEWPORT", "REGION_KIND_NATIVE",
+    "REGION_KIND_CAPTION", "REGION_KIND_CAPTION_MIN", "REGION_KIND_CAPTION_MAX",
+    "REGION_KIND_CAPTION_CLOSE",
 ])
 def test_editor_state_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     """The e05d2 methods + region kinds, each one: a drift here breaks layout persistence silently."""
@@ -905,7 +944,8 @@ def test_a_renamed_session_cpp_constant_is_a_config_error(tmp_path: Path) -> Non
 @pytest.mark.parametrize(
     "ts_name",
     ["WINDOW_LIST_METHOD", "WINDOW_TEAR_OUT_METHOD", "WINDOW_MOVE_TO_METHOD",
-     "WINDOW_SEED_METHOD", "WINDOW_REHOMED_METHOD", "WINDOW_CLOSE_METHOD"])
+     "WINDOW_SEED_METHOD", "WINDOW_REHOMED_METHOD", "WINDOW_CLOSE_METHOD",
+     "WINDOW_MINIMIZE_METHOD", "WINDOW_TOGGLE_MAXIMIZE_METHOD", "WINDOW_FOCUS_METHOD"])
 def test_window_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     """The e10b window surface: a drift here leaves a tear-out / move / rehome calling a method the
     Shell no longer routes, so the panel refuses with `unknown_method` and is silently lost — the exact
@@ -976,6 +1016,33 @@ def test_a_renamed_ui_mirror_cpp_constant_is_a_config_error(tmp_path: Path) -> N
     renamed = PANEL_CPP_WINDOW.replace("kUiMirrorReportMethod", "kUiMirrorAckMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, window=renamed)
+
+
+@pytest.mark.parametrize("ts_name", [
+    "CHROME_STATE_METHOD", "CHROME_MODE_CUSTOM", "CHROME_MODE_HYBRID", "CHROME_MODE_SYSTEM",
+    "CHROME_WINDOW_PRIMARY", "CHROME_WINDOW_SECONDARY", "UI_TOPIC_CHROME",
+])
+def test_chrome_contract_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """The a1 chrome contract, each member: the tokens fail WORSE than the method — nothing refuses,
+    a drifted mode parses as the `system` fallback so the strip silently renders the wrong chrome,
+    and a drifted topic silently freezes the a2 max/restore glyph."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1chrome.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["CHROME_STATE_METHOD", "UI_TOPIC_CHROME"])
+def test_bundle_missing_a_chrome_constant_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT chrome constant means editor-core cannot be reading the contract the Shell serves."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_chrome_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_CHROME_FACTS.replace("kUiTopicChrome", "kUiTopicChromeFacts")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, chrome_facts=renamed)
 
 
 # --- e13c-1: the package daemon fan-in method ----------------------------------------------------

@@ -105,12 +105,42 @@ void region_kind_tokens_round_trip_and_reject_the_unknown()
 {
     CHECK(std::string(region_kind_token(RegionKind::viewport)) == "viewport");
     CHECK(std::string(region_kind_token(RegionKind::native)) == "native");
+    // The four caption chrome tokens (editor-window-chrome a1, 02 §6). The LITERALS, not the
+    // kRegionKind* constants, deliberately: this case pins the wire strings, and comparing a
+    // constant to itself would hold for whatever value it drifted to.
+    CHECK(std::string(region_kind_token(RegionKind::caption)) == "caption");
+    CHECK(std::string(region_kind_token(RegionKind::caption_min)) == "caption-min");
+    CHECK(std::string(region_kind_token(RegionKind::caption_max)) == "caption-max");
+    CHECK(std::string(region_kind_token(RegionKind::caption_close)) == "caption-close");
     CHECK(parse_region_kind("viewport") == std::optional<RegionKind>(RegionKind::viewport));
     CHECK(parse_region_kind("native") == std::optional<RegionKind>(RegionKind::native));
+    CHECK(parse_region_kind("caption") == std::optional<RegionKind>(RegionKind::caption));
+    CHECK(parse_region_kind("caption-min") == std::optional<RegionKind>(RegionKind::caption_min));
+    CHECK(parse_region_kind("caption-max") == std::optional<RegionKind>(RegionKind::caption_max));
+    CHECK(parse_region_kind("caption-close") ==
+          std::optional<RegionKind>(RegionKind::caption_close));
     // A token no side of the closed set names is REFUSED, not defaulted into viewport — a renderer
-    // that means a kind the Shell does not know cannot have its input routed correctly.
+    // that means a kind the Shell does not know cannot have its input routed correctly. The set
+    // GREW in a1; it did not open: near-misses of the new tokens are refused like any stranger.
     CHECK(parse_region_kind("gizmo") == std::nullopt);
     CHECK(parse_region_kind("") == std::nullopt);
+    CHECK(parse_region_kind("caption-") == std::nullopt);
+    CHECK(parse_region_kind("caption_min") == std::nullopt); // the enum spelling is NOT the token
+    CHECK(parse_region_kind("Caption") == std::nullopt);
+}
+
+void a_caption_region_parses_like_any_other()
+{
+    // The four-site mirror's C++ parse half, on a whole element: a caption-control rect published
+    // by a2's regionProvider must survive parse_shell_region with its kind intact, because b1's NC
+    // hit-test discriminates HTCLOSE from HTCAPTION on exactly this field.
+    ShellRegion out;
+    CHECK(parse_shell_region(region("chrome.caption", "caption", 0, 0, 1280, 38), out));
+    CHECK(out.kind == RegionKind::caption);
+    CHECK(parse_shell_region(region("chrome.caption.close", "caption-close", 1234, 0, 46, 38), out));
+    CHECK(out.kind == RegionKind::caption_close);
+    CHECK(out.rect.origin.x == 1234u);
+    CHECK(out.rect.size.height == 38u);
 }
 
 void parse_shell_region_reads_a_well_formed_element_and_clamps_negatives()
@@ -535,6 +565,7 @@ void the_methods_bind_and_answer_over_a_real_router()
 int main()
 {
     region_kind_tokens_round_trip_and_reject_the_unknown();
+    a_caption_region_parses_like_any_other();
     parse_shell_region_reads_a_well_formed_element_and_clamps_negatives();
     parse_shell_region_rejects_malformed_elements();
     snapshot_is_an_empty_document_before_the_store_is_bound();

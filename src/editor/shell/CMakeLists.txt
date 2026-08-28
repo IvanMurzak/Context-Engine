@@ -72,6 +72,7 @@ add_library(context_editor_shell STATIC
     src/window_bridge.cpp    # e10b: the window.* tear-out/move/seed/rehome surface (+ e10c drag.* surface)
     src/cross_window_drag.cpp # e10c: the Shell-mediated cross-window drag session + the RAII cursor capture
     src/write_notice.cpp     # e09b-3: a refused write -> an editor.ui fact in every window (05 §8)
+    src/chrome_facts.cpp     # editor-window-chrome a1: a maximized flip -> an editor.ui fact (02 §1)
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 # The version the e14d update banner reports as "running". PROJECT_VERSION is the ONE source of
@@ -266,6 +267,8 @@ set(_context_shell_tests
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
     test_write_notice  # e09b-3: the LOUD write-notice relay - envelope shape, broadcast, the
                        #         never-a-window-id origin, and the honest unbound/throwing-provider paths
+    test_chrome_facts  # editor-window-chrome a1: the maximized-flip chrome fact - envelope shape,
+                       #         the UNICAST delivery, and the honest unbound-store path
     test_smoke_window  # e12a-x11-legs + e12c-3: the --real-window seam - flag parse, the
                        # anti-degrade negatives, DIP conversion off 1.0, the THREE key-table sweeps
                        # (X11 keysyms, macOS virtual keys, and the cross-arm agreement), and the

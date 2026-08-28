@@ -38,6 +38,14 @@ const char* region_kind_token(RegionKind kind)
         return kRegionKindViewport;
     case RegionKind::native:
         return kRegionKindNative;
+    case RegionKind::caption:
+        return kRegionKindCaption;
+    case RegionKind::caption_min:
+        return kRegionKindCaptionMin;
+    case RegionKind::caption_max:
+        return kRegionKindCaptionMax;
+    case RegionKind::caption_close:
+        return kRegionKindCaptionClose;
     }
     // Unreachable for the closed enum; a token no side accepts is safer than a plausible-but-wrong one
     // if the enum ever grows without this switch being updated (the -Werror -Wswitch build catches
@@ -54,6 +62,22 @@ std::optional<RegionKind> parse_region_kind(std::string_view token)
     if (token == kRegionKindNative)
     {
         return RegionKind::native;
+    }
+    if (token == kRegionKindCaption)
+    {
+        return RegionKind::caption;
+    }
+    if (token == kRegionKindCaptionMin)
+    {
+        return RegionKind::caption_min;
+    }
+    if (token == kRegionKindCaptionMax)
+    {
+        return RegionKind::caption_max;
+    }
+    if (token == kRegionKindCaptionClose)
+    {
+        return RegionKind::caption_close;
     }
     return std::nullopt;
 }

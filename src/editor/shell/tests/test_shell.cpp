@@ -4,6 +4,9 @@
 
 #include "context/editor/shell/shell.h"
 
+#include "context/editor/shell/chrome_facts.h" // a1: the maximized-flip fact the manager reports
+#include "context/editor/shell/ui_mirror.h"
+
 #include "shell_test.h"
 
 #include <cstdint>
@@ -34,7 +37,8 @@ struct Harness
     present::MemoryBlitter* blitter = nullptr;
     std::unique_ptr<EditorWindow> window;
 
-    explicit Harness(render::Extent2D logical = render::Extent2D{800, 600})
+    explicit Harness(render::Extent2D logical = render::Extent2D{800, 600},
+                     std::uint64_t placement_poll_us = 0)
     {
         WindowDesc desc;
         desc.logical_size = logical;
@@ -45,7 +49,9 @@ struct Harness
 
         EditorWindowConfig config;
         config.compositor.import_options.force_software = true;
-        config.placement_poll_us = 0; // poll every pump so the tests need no clock advance
+        // 0 (the default) polls every pump so most tests need no clock advance; a case about the
+        // poll INTERVAL itself (the a1 chrome-fact boot seed) passes the real one.
+        config.placement_poll_us = placement_poll_us;
         window = std::make_unique<EditorWindow>(std::move(backend_owned), std::move(browser_owned),
                                                 config);
 
@@ -206,6 +212,9 @@ void test_a_viewport_region_takes_input_away_from_the_browser()
 void test_focus_events_reach_the_browser_and_drop_a_live_drag()
 {
     Harness harness;
+    // a1: `focused()` starts false — the honest answer for a window the OS has said nothing about
+    // (chrome.state's `focused` reads this).
+    CHECK(!harness.window->focused());
     harness.window->input().regions().publish(
         {ShellRegion{"scene", shelltest::rect(0, 0, 400, 300), RegionKind::viewport}});
 
@@ -223,6 +232,7 @@ void test_focus_events_reach_the_browser_and_drop_a_live_drag()
     harness.backend->post(focus_lost);
     CHECK(harness.window->pump_once(2000));
     CHECK(!harness.browser->focused());
+    CHECK(!harness.window->focused()); // a1: the chrome.state source tracks the same event
     // The pointer-up that would have released the drag is going to a DIFFERENT window now, so the
     // capture is dropped — otherwise the next click here still routes to where the drag started.
     CHECK(!harness.window->input().has_pointer_capture());
@@ -232,6 +242,7 @@ void test_focus_events_reach_the_browser_and_drop_a_live_drag()
     harness.backend->post(focus_gained);
     CHECK(harness.window->pump_once(3000));
     CHECK(harness.browser->focused());
+    CHECK(harness.window->focused());
 }
 
 void test_a_browser_paint_presents_and_an_idle_pump_does_not()
@@ -346,6 +357,112 @@ void test_manager_drops_a_closed_window_and_ends_when_none_are_left()
     shelltest::cleanup(root);
 }
 
+void test_a_maximized_flip_reaches_the_mirror_relay_and_an_idle_pump_does_not()
+{
+    // The a1 DoD line, end to end (target design 02 §1): a placement FLIP the 250 ms poll observes
+    // becomes ONE `editor.ui.chrome` envelope in the affected window's mirror queue — through the
+    // REAL detector (poll_placement -> WindowManager::pump_once) and the REAL relay
+    // (ChromeFactRelay -> UiMirrorStore), exactly as editor_main wires them. The headless backend's
+    // `set_maximized` is the honest state lever (window.h), standing in for Win+Up / the WM.
+    const fs::path root = shelltest::make_temp_project("context-shell-loop", "chromefact");
+    WindowManager manager(root);
+    UiMirrorStore mirror;
+    ChromeFactRelay relay;
+    relay.bind_store(&mirror);
+    manager.on_chrome_maximized([&relay](WindowId id, bool maximized)
+                                { (void)relay.publish_maximized(id, maximized); });
+
+    Harness harness;
+    HeadlessWindowBackend* backend = harness.backend;
+    manager.add(std::move(harness.window));
+    const WindowId id = manager.last_minted_id();
+
+    // NEGATIVE HALF FIRST: pumps with no flip publish NOTHING — adoption seeded the baseline, so
+    // boot is quiet and an unchanged state stays quiet. (Without this half, a relay that spammed a
+    // fact per pump would pass every positive assertion below.)
+    CHECK(manager.pump_once(1'000));
+    CHECK(manager.pump_once(2'000));
+    CHECK(relay.published() == 0);
+    CHECK(mirror.pending(id) == 0);
+
+    // THE FLIP: the OS-truth bit changes; the NEXT poll observes it; exactly one fact arrives, in
+    // THIS window's queue, carrying the new state.
+    backend->set_maximized(true);
+    CHECK(manager.pump_once(3'000));
+    CHECK(relay.published() == 1);
+    CHECK(mirror.pending(id) == 1);
+    {
+        const std::vector<context::editor::contract::Json> facts = mirror.take(id);
+        CHECK(facts.size() == 1);
+        CHECK(facts[0].at("topic").as_string() == "editor.ui.chrome");
+        CHECK(facts[0].at("origin").as_string() == "shell");
+        CHECK(facts[0].at("payload").at("windowId").as_int() ==
+              static_cast<std::int64_t>(id));
+        CHECK(facts[0].at("payload").at("maximized").as_bool());
+    }
+
+    // Steady state is quiet again — the sink reports CHANGES, not the state per pump.
+    CHECK(manager.pump_once(4'000));
+    CHECK(relay.published() == 1);
+
+    // And the RESTORE is its own fact, `maximized:false`.
+    backend->set_maximized(false);
+    CHECK(manager.pump_once(5'000));
+    CHECK(relay.published() == 2);
+    {
+        const std::vector<context::editor::contract::Json> facts = mirror.take(id);
+        CHECK(facts.size() == 1);
+        CHECK(facts[0].at("payload").at("maximized").as_bool() == false);
+    }
+
+    manager.shutdown();
+    shelltest::cleanup(root);
+}
+
+void test_a_window_restored_maximized_fires_no_boot_fact()
+{
+    // The adoption baseline is seeded from the backend's REAL placement (shell.cpp add_session), so
+    // a window that comes back maximized from `.editor/editor-state.json` reports no flip at boot —
+    // `chrome.state` carries the initial state; the fact channel carries CHANGES only. Without the
+    // seed, every restored-maximized boot would open with a spurious `maximized:true` fact.
+    const fs::path root = shelltest::make_temp_project("context-shell-loop", "chromeseed");
+    WindowManager manager(root);
+    UiMirrorStore mirror;
+    ChromeFactRelay relay;
+    relay.bind_store(&mirror);
+    manager.on_chrome_maximized([&relay](WindowId id, bool maximized)
+                                { (void)relay.publish_maximized(id, maximized); });
+
+    // The REAL poll interval, deliberately (not the Harness's poll-every-pump 0): the hazard this
+    // test exists for is the window between adoption and the first poll, where the EditorWindow's
+    // cached placement predates the restore — with interval 0 the cache re-syncs on the very first
+    // pump and a baseline seeded from the wrong source could never be caught.
+    Harness harness(render::Extent2D{800, 600}, 250'000);
+    // Maximized BEFORE adoption — the restored-placement shape (add() applies a remembered
+    // placement before the first frame; here the backend simply already carries the state).
+    harness.backend->set_maximized(true);
+    manager.add(std::move(harness.window));
+
+    // Pumps INSIDE the first poll interval, then one past it: quiet throughout — no fact minted
+    // from the adoption itself, neither before nor at the first real poll.
+    CHECK(manager.pump_once(1'000));
+    CHECK(manager.pump_once(2'000));
+    CHECK(relay.published() == 0);
+    CHECK(manager.pump_once(251'000)); // the first real poll runs here
+    CHECK(relay.published() == 0);
+
+    // The un-maximize IS a change, and still fires exactly once — the baseline was the true state,
+    // not a default false that would have eaten this flip as "no change".
+    harness.backend->set_maximized(false);
+    CHECK(manager.pump_once(502'000)); // past the next poll deadline, so the flip is observed
+    CHECK(relay.published() == 1);
+    CHECK(mirror.take(manager.last_minted_id()).at(0).at("payload").at("maximized").as_bool() ==
+          false);
+
+    manager.shutdown();
+    shelltest::cleanup(root);
+}
+
 void test_shutdown_flushes_pending_state_and_is_idempotent()
 {
     const fs::path root = shelltest::make_temp_project("context-shell-loop", "shutdown");
@@ -430,6 +547,8 @@ int main()
     test_close_ends_the_loop();
     test_manager_persists_placement_and_restores_it();
     test_manager_drops_a_closed_window_and_ends_when_none_are_left();
+    test_a_maximized_flip_reaches_the_mirror_relay_and_an_idle_pump_does_not();
+    test_a_window_restored_maximized_fires_no_boot_fact();
     test_shutdown_flushes_pending_state_and_is_idempotent();
     SHELL_TEST_MAIN_END();
 }

@@ -135,6 +135,18 @@ public:
     // itself is proven headlessly in the T2 drill.
     virtual void request_activation() = 0;
 
+    // The two chrome verbs the window-control surface dispatches (editor-window-chrome a1, target
+    // design 02 §5). Pure like request_activation / request_redraw — every backend states its own
+    // answer — because a silent default here would make a web-drawn minimize button a no-op on
+    // exactly the platform nobody compiled. `set_maximized` PROMOTES the shape the X11 backend
+    // already carried privately (EWMH _NET_WM_STATE): a bool target rather than a toggle, so the
+    // caller can express "restore" without first asking the OS what state it is in — the toggle
+    // (`window.toggle-maximize`) is composed one level up, in the bridge handler, from
+    // `placement().maximized`. Both are best-effort asks, exactly like request_activation: a WM /
+    // OS is entitled to refuse, and the observable state remains `placement()`.
+    virtual void minimize() = 0;
+    virtual void set_maximized(bool maximized) = 0;
+
     [[nodiscard]] virtual WindowPlacement placement() const = 0;
     virtual void apply_placement(const WindowPlacement& placement) = 0;
 
@@ -164,6 +176,11 @@ public:
     void request_redraw() override;
     void set_title(std::string_view title) override { title_ = std::string(title); }
     void request_activation() override {} // no OS window to raise — the honest headless no-op
+    // Honest STATE-ONLY chrome (a1): there is no OS window to iconify or zoom, so the headless
+    // backend records what was asked — `minimized()` for tests, and the placement's maximized bit,
+    // which is exactly the lever the placement-poll -> `editor.ui` fact test flips.
+    void minimize() override { minimized_ = true; }
+    void set_maximized(bool maximized) override { placement_.maximized = maximized; }
     [[nodiscard]] WindowPlacement placement() const override { return placement_; }
     void apply_placement(const WindowPlacement& placement) override;
     void close() override { alive_ = false; }
@@ -178,6 +195,8 @@ public:
 
     [[nodiscard]] const std::string& title() const { return title_; }
     [[nodiscard]] int redraw_requests() const { return redraw_requests_; }
+    // What `minimize()` recorded — the headless observable for the a1 window-control surface.
+    [[nodiscard]] bool minimized() const { return minimized_; }
 
 private:
     std::vector<ShellEvent> queued_;
@@ -187,6 +206,7 @@ private:
     WindowPlacement placement_;
     std::string title_;
     int redraw_requests_ = 0;
+    bool minimized_ = false;
     bool alive_ = true;
 };
 

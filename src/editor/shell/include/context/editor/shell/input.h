@@ -37,7 +37,7 @@
 namespace context::editor::shell
 {
 
-// What a published region is FOR. Both take the native path; the distinction is which native
+// What a published region is FOR. All take the native path; the distinction is which native
 // consumer, and it is carried so a caller never re-derives it from an id naming convention.
 enum class RegionKind
 {
@@ -45,6 +45,17 @@ enum class RegionKind
     viewport,
     // A non-viewport native-interaction region (a native-drawn overlay claiming its own input).
     native,
+    // The web-drawn titlebar's chrome regions (editor-window-chrome a1, target design 02 §6): the
+    // caption DRAG surface and the three window-control rects, published by editor-core's titlebar
+    // (a2's regionProvider) in physical client pixels like every other region. Their native
+    // consumers are b1's Windows NC hit-test (caption -> HTCAPTION, the controls -> HT*BUTTON) and
+    // c1's macOS caption-press drag — until those land, dispatch stays honestly empty
+    // (shell.cpp's InputTarget::native arm). Controls publish AFTER the caption rect, so
+    // back-to-front last-match-wins needs no carve-out token.
+    caption,
+    caption_min,
+    caption_max,
+    caption_close,
 };
 
 struct ShellRegion

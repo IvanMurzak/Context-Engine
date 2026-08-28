@@ -343,6 +343,29 @@ public:
         }
     }
 
+    // a1 (editor-window-chrome): the two chrome verbs, in the platform's own vocabulary —
+    // `miniaturize:` (the Dock genie) and `zoom:` (the platform's maximize). `zoom:` is a TOGGLE,
+    // so the bool target is expressed by guarding on `isZoomed` — the same ordering-safe shape
+    // apply_placement already uses. Best-effort asks, like request_activation.
+    void minimize() override
+    {
+        if (window_ != nil && ![window_ isMiniaturized])
+        {
+            [window_ miniaturize:nil];
+        }
+    }
+    void set_maximized(bool maximized) override
+    {
+        if (window_ == nil)
+        {
+            return;
+        }
+        if (maximized != ([window_ isZoomed] != NO))
+        {
+            [window_ zoom:nil];
+        }
+    }
+
     [[nodiscard]] WindowPlacement placement() const override;
     void apply_placement(const WindowPlacement& placement) override;
 

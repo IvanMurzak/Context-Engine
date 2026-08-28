@@ -23,12 +23,14 @@
 import { assert, assertEqual, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
 import {
+    CHROME_ATTRIBUTE,
     PANEL_DAEMON_CALL_METHOD,
     SESSION_ATTRIBUTE,
     bootEditorCore,
     makePackageDaemonCall,
 } from "../boot.js";
 import { SESSION_STATE_METHOD } from "../session.js";
+import { CHROME_STATE_METHOD } from "../window.js";
 
 /** A mutable answer table so a case can change what the Shell serves mid-run. */
 type Answers = Record<string, unknown>;
@@ -83,6 +85,15 @@ function sessionAttribute(): string {
 
 function clearSessionAttribute(): void {
     document.documentElement.removeAttribute(SESSION_ATTRIBUTE);
+}
+
+/** The value `data-editor-chrome` was left at, or `""` when boot never reported one (a1). */
+function chromeAttribute(): string {
+    return document.documentElement.getAttribute(CHROME_ATTRIBUTE) ?? "";
+}
+
+function clearChromeAttribute(): void {
+    document.documentElement.removeAttribute(CHROME_ATTRIBUTE);
 }
 
 export const bootTests: readonly TestCase[] = [
@@ -244,6 +255,48 @@ export const bootTests: readonly TestCase[] = [
             const report = await bootEditorCore(undefined);
             assert(!report.attached, "a bundle loaded outside the Shell reports detached");
             assertEqual(report.error, "", "which is honest, not an error");
+        },
+    },
+    {
+        // editor-window-chrome a1: the REAL bootEditorCore fetches the chrome contract and reports
+        // it — served values a default could not have, so a boot that stopped fetching (or a parser
+        // that stopped reading a field) reds on that field's absence from the attribute.
+        name: "boot: chrome.state is fetched at boot and reported on data-editor-chrome",
+        run: async () => {
+            clearChromeAttribute();
+            const answers = baseAnswers();
+            answers[CHROME_STATE_METHOD] = {
+                mode: "hybrid",
+                controlsInset: { left: 72, right: 4 },
+                maximized: true,
+                focused: true,
+                window: "secondary",
+            };
+            const shell = mockShell(answers);
+            const report = await bootEditorCore(new ShellBridge(shell.query));
+            assert(report.ready, "the editor boots");
+            assert(shell.methods.includes(CHROME_STATE_METHOD), "chrome.state was called at boot");
+            assertEqual(
+                chromeAttribute(),
+                "mode=hybrid inset=72,4 maximized=true focused=true window=secondary",
+                "the fetched state is reported verbatim",
+            );
+        },
+    },
+    {
+        name: "boot: an older Shell with no chrome surface degrades to the honest system default",
+        run: async () => {
+            clearChromeAttribute();
+            // No `chrome.state` — the deny-by-default refusal a pre-a1 Shell gives. Boot must not
+            // break, and the report must be the stock-OS-frame default, not silence.
+            const shell = mockShell(baseAnswers());
+            const report = await bootEditorCore(new ShellBridge(shell.query));
+            assert(report.ready, "the editor still boots");
+            assertEqual(
+                chromeAttribute(),
+                "mode=system inset=0,0 maximized=false focused=false window=primary",
+                "the refusal degrades to the default and is still REPORTED",
+            );
         },
     },
 ];

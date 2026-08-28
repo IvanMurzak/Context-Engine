@@ -119,6 +119,33 @@ void test_native_regions_route_to_the_native_target()
     CHECK(dispatch.region_id == "overlay");
 }
 
+void test_caption_regions_arbitrate_onto_the_native_path_with_controls_stacked_above()
+{
+    // editor-window-chrome a1 (02 §6): the caption vocabulary rides the EXISTING arbitration —
+    // caption regions take the native path (their consumers are b1's NC hit-test / c1's caption
+    // press; today the dispatch arm is honestly empty, shell.cpp), and a control publishes AFTER
+    // the caption rect so back-to-front last-match-wins needs no carve-out token.
+    InputArbiter arbiter;
+    arbiter.regions().publish(
+        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 1280, 38), RegionKind::caption},
+         ShellRegion{"chrome.caption.close", shelltest::rect(1234, 0, 46, 38),
+                     RegionKind::caption_close}});
+
+    // Inside the close button: the LATER control wins over the caption underneath it.
+    const PointerDispatch close = arbiter.route_pointer(pointer_at(PointerAction::move, 1240, 10), 1);
+    CHECK(close.target == InputTarget::native);
+    CHECK(close.region_id == "chrome.caption.close");
+
+    // On the drag surface, outside every control: the caption claims it.
+    const PointerDispatch drag = arbiter.route_pointer(pointer_at(PointerAction::move, 400, 10), 2);
+    CHECK(drag.target == InputTarget::native);
+    CHECK(drag.region_id == "chrome.caption");
+
+    // Below the strip: the browser's, unchanged.
+    const PointerDispatch body = arbiter.route_pointer(pointer_at(PointerAction::move, 400, 60), 3);
+    CHECK(body.target == InputTarget::browser);
+}
+
 void test_browser_positions_are_dip_not_physical()
 {
     InputArbiter arbiter;
@@ -339,6 +366,7 @@ int main()
     test_publish_replaces_wholesale_and_bumps_generation();
     test_pointer_arbitration_between_viewport_and_browser();
     test_native_regions_route_to_the_native_target();
+    test_caption_regions_arbitrate_onto_the_native_path_with_controls_stacked_above();
     test_browser_positions_are_dip_not_physical();
     test_implicit_drag_capture_keeps_a_drag_where_it_started();
     test_a_press_on_browser_chrome_captures_to_the_browser();

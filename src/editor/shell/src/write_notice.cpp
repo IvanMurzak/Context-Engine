@@ -21,13 +21,9 @@ contract::Json write_notice_envelope(const WriteNotice& notice, std::uint64_t se
     payload.set("message", contract::Json(notice.message));
     payload.set("pointer", contract::Json(notice.pointer));
 
-    contract::Json envelope = contract::Json::object();
-    envelope.set("seq", contract::Json(seq));
-    envelope.set("topic", contract::Json(kUiTopicWriteNotice));
-    // NEVER a window id — see write_notice.h § THE ORIGIN IS `shell`.
-    envelope.set("origin", contract::Json(kWriteNoticeOrigin));
-    envelope.set("payload", std::move(payload));
-    return envelope;
+    // The shared Shell-published seal (ui_mirror.h `shell_ui_envelope`): `{seq, topic, origin,
+    // payload}`, origin NEVER a window id — see write_notice.h § THE ORIGIN IS `shell`.
+    return shell_ui_envelope(kUiTopicWriteNotice, std::move(payload), seq);
 }
 
 std::size_t WriteNoticeRelay::publish(const WriteNotice& notice)

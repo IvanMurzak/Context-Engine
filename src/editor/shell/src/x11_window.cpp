@@ -306,6 +306,13 @@ public:
     void request_activation() override;
     void set_title(std::string_view title) override;
 
+    // a1 (editor-window-chrome): the two chrome verbs. `set_maximized` is the PROMOTION of this
+    // backend's own private EWMH `_NET_WM_STATE` shape to the seam — the body is unchanged; the
+    // interface adopted its signature. `minimize` is the EWMH-era XIconifyWindow request; like
+    // request_activation, the WM is entitled to refuse either.
+    void minimize() override;
+    void set_maximized(bool maximized) override;
+
     [[nodiscard]] WindowPlacement placement() const override;
     void apply_placement(const WindowPlacement& placement) override;
 
@@ -323,7 +330,6 @@ private:
     // its arguments untouched and returns false when the server refuses the translation.
     [[nodiscard]] bool root_origin(std::int32_t& x, std::int32_t& y) const;
     void destroy();
-    void set_maximized(bool maximized);
     [[nodiscard]] bool read_maximized() const;
     // The UTF-32 character (0 for none) and the UNSHIFTED keysym for a key event — see the file
     // header's third note on why those come from two different lookups.
@@ -525,8 +531,25 @@ void X11WindowBackend::request_activation()
     ::XFlush(conn.display);
 }
 
+void X11WindowBackend::minimize()
+{
+    if (window_ == 0)
+    {
+        return;
+    }
+    X11Connection& conn = x11_connection();
+    // XIconifyWindow sends the ICCCM WM_CHANGE_STATE client message for us — the request every WM
+    // (and no-WM Xvfb, where it is a no-op) understands. Best-effort, like request_activation.
+    (void)::XIconifyWindow(conn.display, window_, conn.screen);
+    ::XFlush(conn.display);
+}
+
 void X11WindowBackend::set_maximized(bool maximized)
 {
+    if (window_ == 0)
+    {
+        return;
+    }
     X11Connection& conn = x11_connection();
     XEvent message{};
     message.type = ClientMessage;

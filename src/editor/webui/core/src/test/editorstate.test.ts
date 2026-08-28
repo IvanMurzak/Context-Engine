@@ -3,7 +3,15 @@
 // persisted blob degrades to "fresh project" rather than throwing on boot.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
-import { parsePersistedState } from "../editorstate.js";
+import {
+    REGION_KIND_CAPTION,
+    REGION_KIND_CAPTION_CLOSE,
+    REGION_KIND_CAPTION_MAX,
+    REGION_KIND_CAPTION_MIN,
+    REGION_KIND_NATIVE,
+    REGION_KIND_VIEWPORT,
+    parsePersistedState,
+} from "../editorstate.js";
 
 export const editorstateTests: readonly TestCase[] = [
     {
@@ -37,6 +45,22 @@ export const editorstateTests: readonly TestCase[] = [
         run: () => {
             const parsed = parsePersistedState({ panels: {} });
             assert(parsed.layout === null, "absent layout must be null");
+        },
+    },
+    {
+        name: "regions: the closed RegionKind vocabulary is exactly the six wire tokens",
+        run: () => {
+            // Pinned as LITERALS (the uibus closed-set rationale): these are the strings the Shell
+            // parses (editor_state_bridge.h) and the `webui-panel-contract` gate byte-compares, so
+            // this case reds if either the two originals or editor-window-chrome a1's four caption
+            // tokens (02 §6) drift on this side. Note the hyphenated spellings: the C++ ENUM says
+            // `caption_min`, the WIRE says `caption-min`, and the Shell refuses the underscore form.
+            assertEqual(REGION_KIND_VIEWPORT, "viewport", "viewport");
+            assertEqual(REGION_KIND_NATIVE, "native", "native");
+            assertEqual(REGION_KIND_CAPTION, "caption", "caption");
+            assertEqual(REGION_KIND_CAPTION_MIN, "caption-min", "caption-min");
+            assertEqual(REGION_KIND_CAPTION_MAX, "caption-max", "caption-max");
+            assertEqual(REGION_KIND_CAPTION_CLOSE, "caption-close", "caption-close");
         },
     },
 ];

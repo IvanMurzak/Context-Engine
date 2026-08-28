@@ -30,6 +30,13 @@
 // lives here where tests/test_window_bridge.cpp drives the SAME code the renderer reaches on all
 // three default `build` legs, and nothing here touches a kernel-internal module (the panel seed's
 // state blob is an OPAQUE `contract::Json`, never interpreted).
+//
+// SINCE editor-window-chrome a1 THIS IS ALSO THE CHROME-CONTRACT SURFACE (target design 02 §1 /
+// §5): the `chrome.state` read editor-core fetches at boot beside `welcome.state`, and the three
+// window-control verbs (`window.minimize` / `window.toggle-maximize` / `window.focus`) the a2
+// titlebar's controls dispatch. They ride THIS surface for the same reason `drag.*` / `ui.mirror*`
+// do — installed on every window that installs `window.*`, i.e. every live smoke, with no per-smoke
+// change — and degrade honestly when unbound (see the kWindow*Method block below).
 
 #pragma once
 
@@ -69,6 +76,35 @@ inline constexpr const char* kWindowSeedMethod = "window.seed";
 inline constexpr const char* kWindowRehomedMethod = "window.rehomed";
 inline constexpr const char* kWindowCloseMethod = "window.close";
 
+// The WINDOW-CONTROL surface + the `chrome.state` read (editor-window-chrome a1, target design 02
+// §1 / §5). Three verbs beside the existing `window.close` — minimize, a maximize TOGGLE (composed
+// by the handler from `placement().maximized`, so the renderer never has to know the state to flip
+// it), and focus (routing `request_activation`) — plus the ONE chrome read editor-core fetches at
+// boot beside `welcome.state`. All four ride this surface so they install on EVERY window that
+// installs `window.*` — which is every live smoke — with no per-smoke change; unbound handlers
+// answer `accepted:false` (an honest degrade, never `unknown_method`), the same discipline the null
+// drag/mirror stores follow.
+inline constexpr const char* kWindowMinimizeMethod = "window.minimize";
+inline constexpr const char* kWindowToggleMaximizeMethod = "window.toggle-maximize";
+inline constexpr const char* kWindowFocusMethod = "window.focus";
+inline constexpr const char* kChromeStateMethod = "chrome.state";
+
+// `chrome.state.mode` — what the titlebar strip renders (02 §1): `custom` = full strip including
+// window controls (Windows, once b1 makes the frame ours), `hybrid` = strip minus controls,
+// left-padded by `controlsInset` (macOS, once c1 does), `system` = a menu-bar-only strip with no
+// drag duty (Linux, permanently — D6: the WM owns the frame). INTERIM HONESTY IS BINDING
+// (tasks/README.md): the mode reports what the backend actually DOES, so every backend ships
+// `system` in a1 and b1/c1 flip win32/cocoa in the PRs that make it true — never ahead of them.
+inline constexpr const char* kChromeModeCustom = "custom";
+inline constexpr const char* kChromeModeHybrid = "hybrid";
+inline constexpr const char* kChromeModeSystem = "system";
+
+// `chrome.state.window` — which strip set this window renders (02 §9): the primary gets the full
+// frame, a torn-out secondary the compact one. Served from the bridge's own `self_id`, the same
+// identity `window.list` reports.
+inline constexpr const char* kChromeWindowPrimary = "primary";
+inline constexpr const char* kChromeWindowSecondary = "secondary";
+
 // The CROSS-WINDOW DRAG surface (M9 e10c, 04 §2). `drag.probe`: the TARGET window's editor-core asks
 // "is a cross-window drag over me, and where?" and gets the cursor in its OWN client pixels. `drag.
 // report-zone`: it answers back which drop zone the cursor is over. Both ride this window-management
@@ -106,6 +142,35 @@ inline constexpr const char* kUiMirrorReportMethod = "ui.mirror-report";
 // failure, so minting catalog codes for them would pollute the published surface.
 inline constexpr const char* kErrWindowBadParams = "window.bad_params";
 inline constexpr const char* kErrWindowUnknownTarget = "window.unknown_target";
+
+// ------------------------------------------------------------------------ the chrome state (a1)
+//
+// What `chrome.state` answers with (02 §1), minus the `window` field the bridge derives from its
+// own `self_id`. Produced by a provider the composition root binds per window; the DEFAULTED value
+// is the honest unbound answer — `system` chrome, zero inset, not maximized, not focused — which is
+// also exactly what every backend truthfully reports in a1 (interim honesty; see kChromeMode*).
+
+enum class ChromeMode
+{
+    system,
+    custom,
+    hybrid,
+};
+
+// The wire token for a mode. The switch is exhaustive over the closed enum, so a mode added without
+// its token is a compile error under -Werror -Wswitch rather than a runtime mystery.
+[[nodiscard]] const char* chrome_mode_token(ChromeMode mode);
+
+struct ChromeState
+{
+    ChromeMode mode = ChromeMode::system;
+    // Physical px the strip must reserve for OS-drawn window controls (macOS traffic lights, c1).
+    // Zero on every backend in a1.
+    std::uint32_t controls_inset_left = 0;
+    std::uint32_t controls_inset_right = 0;
+    bool maximized = false;
+    bool focused = false;
+};
 
 // --------------------------------------------------------------------------- the panel seed (D6)
 //
@@ -198,6 +263,14 @@ public:
     using MoveToHandler = std::function<WindowMoveResult(const MoveTo&)>;
     using CloseHandler = std::function<WindowMoveResult(WindowId self)>;
     using WindowsProvider = std::function<std::vector<WindowId>()>;
+    // a1: the window-control handlers + the chrome-state provider. Minimize/focus answer whether
+    // the ask reached a live window; toggle-maximize answers the NEW maximized state, or nullopt
+    // when there was no window to toggle. All optional: unbound is the honest `accepted:false` /
+    // defaulted-ChromeState degrade every smoke gets, never a refusal.
+    using MinimizeHandler = std::function<bool()>;
+    using ToggleMaximizeHandler = std::function<std::optional<bool>()>;
+    using FocusHandler = std::function<bool()>;
+    using ChromeStateProvider = std::function<ChromeState()>;
 
     // `self_id` is THIS window's id — the source of every request from this window's editor-core, and
     // the key its `window.seed` / `window.rehomed` read. `store` outlives every window (it is owned by
@@ -216,6 +289,11 @@ public:
     void bind_move_to(MoveToHandler handler);
     void bind_close(CloseHandler handler);
     void bind_windows(WindowsProvider provider);
+    // a1: bind the window-control handlers + the chrome-state provider (see the usings above).
+    void bind_minimize(MinimizeHandler handler);
+    void bind_toggle_maximize(ToggleMaximizeHandler handler);
+    void bind_focus(FocusHandler handler);
+    void bind_chrome_state(ChromeStateProvider provider);
 
     // Bind the shared cross-window drag relay (e10c). NULL — the default — leaves `drag.probe` /
     // `drag.report-zone` INERT: probe answers `{active:false}` and report-zone is an accepted no-op, so
@@ -244,6 +322,18 @@ public:
     // Every panel queued to rehome INTO this window, consumed. `{panels:[]}` when none pending.
     [[nodiscard]] contract::Json rehomed();
     [[nodiscard]] contract::Json close();
+
+    // a1 — the window-control verbs + the chrome read. `minimize` / `focus` answer `{accepted}`;
+    // `toggle_maximize` answers `{accepted, maximized}` where `maximized` is the NEW state and is
+    // meaningful only when accepted. `chrome_state` answers the full 02 §1 shape:
+    // `{mode, controlsInset:{left,right}, maximized, focused, window}` — `window` derived from
+    // `self_id_`, the rest from the bound provider (or the defaulted ChromeState when unbound).
+    // None can be refused: an unbound handler is a build with no window behind this bridge (every
+    // sibling smoke), which degrades honestly instead of tripping `bridge.refused() == 0`.
+    [[nodiscard]] contract::Json minimize();
+    [[nodiscard]] contract::Json toggle_maximize();
+    [[nodiscard]] contract::Json focus();
+    [[nodiscard]] contract::Json chrome_state();
 
     // e10c — the cross-window drag probe/answer. `drag_probe` reports the hover THIS window (`self_id_`)
     // should act on: `{active, panelId, x, y, generation}`, with x/y in this window's client pixels, or
@@ -281,6 +371,14 @@ public:
     [[nodiscard]] std::size_t tear_outs() const { return tear_outs_; }
     [[nodiscard]] std::size_t moves() const { return moves_; }
     [[nodiscard]] std::size_t seeds_served() const { return seeds_served_; }
+    // a1: how many times each chrome surface was CALLED (routed), bound or not — the ten-smoke
+    // rule's claim is the ROUTING, so the counters move even where no handler is bound. The live
+    // boot smoke asserts the read from editor-core's boot fetch and the three verbs from its
+    // `?ctx-smoke-chrome` seam.
+    [[nodiscard]] std::size_t minimizes() const { return minimizes_; }
+    [[nodiscard]] std::size_t maximize_toggles() const { return maximize_toggles_; }
+    [[nodiscard]] std::size_t focus_requests() const { return focus_requests_; }
+    [[nodiscard]] std::size_t chrome_reads() const { return chrome_reads_; }
     // How many `drag.probe` calls saw an ACTIVE hover for this window, and how many `drag.report-zone`
     // answers it forwarded to the store — the live smoke asserts an editor-core round trip from these.
     [[nodiscard]] std::size_t drag_probes_active() const { return drag_probes_active_; }
@@ -311,9 +409,17 @@ private:
     MoveToHandler move_to_;
     CloseHandler close_;
     WindowsProvider windows_;
+    MinimizeHandler minimize_;
+    ToggleMaximizeHandler toggle_maximize_;
+    FocusHandler focus_;
+    ChromeStateProvider chrome_state_;
     std::size_t tear_outs_ = 0;
     std::size_t moves_ = 0;
     std::size_t seeds_served_ = 0;
+    std::size_t minimizes_ = 0;
+    std::size_t maximize_toggles_ = 0;
+    std::size_t focus_requests_ = 0;
+    std::size_t chrome_reads_ = 0;
     std::size_t drag_probes_active_ = 0;
     std::size_t drag_zones_reported_ = 0;
     std::size_t ui_mirrors_published_ = 0;

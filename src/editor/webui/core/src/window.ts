@@ -38,6 +38,34 @@ export const WINDOW_SEED_METHOD = "window.seed";
 export const WINDOW_REHOMED_METHOD = "window.rehomed";
 export const WINDOW_CLOSE_METHOD = "window.close";
 
+// The window-control surface + the chrome read (editor-window-chrome a1, target design 02 §1 / §5).
+// MUST match window_bridge.h's kWindowMinimize/ToggleMaximize/Focus/ChromeState constants — same
+// gate, same silent-drift hazard as the six above: a rename leaves the a2 titlebar's buttons
+// dispatching methods the Shell no longer routes, and the caption controls silently die.
+export const WINDOW_MINIMIZE_METHOD = "window.minimize";
+export const WINDOW_TOGGLE_MAXIMIZE_METHOD = "window.toggle-maximize";
+export const WINDOW_FOCUS_METHOD = "window.focus";
+export const CHROME_STATE_METHOD = "chrome.state";
+
+// The `chrome.state.mode` tokens (02 §1): what the titlebar strip renders. `custom` = full strip
+// including window controls (Windows once b1 lands), `hybrid` = strip minus controls, left-padded
+// by `controlsInset` (macOS once c1 lands), `system` = menu-bar-only strip, no drag duty (Linux,
+// permanently — D6). Every live backend reports `system` in a1 (interim honesty, tasks/README.md);
+// a2 implements and DOM-tests all three by INJECTING states, independent of the live backend.
+export const CHROME_MODE_CUSTOM = "custom";
+export const CHROME_MODE_HYBRID = "hybrid";
+export const CHROME_MODE_SYSTEM = "system";
+export type ChromeMode =
+    | typeof CHROME_MODE_CUSTOM
+    | typeof CHROME_MODE_HYBRID
+    | typeof CHROME_MODE_SYSTEM;
+
+// The `chrome.state.window` tokens (02 §9): which strip set this window renders — the primary the
+// full frame, a torn-out secondary the compact one.
+export const CHROME_WINDOW_PRIMARY = "primary";
+export const CHROME_WINDOW_SECONDARY = "secondary";
+export type ChromeWindowRole = typeof CHROME_WINDOW_PRIMARY | typeof CHROME_WINDOW_SECONDARY;
+
 // -------------------------------------------------------------------------------- the wire shapes
 
 /** The live window set as `window.list` reports it (this window's id + every peer's). */
@@ -83,6 +111,85 @@ export interface CloseResult {
     readonly closed: boolean;
     readonly outcome: string;
     readonly error: string;
+}
+
+/** Physical px the titlebar strip must reserve for OS-drawn window controls (macOS traffic lights). */
+export interface ChromeControlsInset {
+    readonly left: number;
+    readonly right: number;
+}
+
+/**
+ * The chrome contract's one read (a1, target design 02 §1) — what the strips render from.
+ *
+ * `maximized` here is the BOOT snapshot; runtime flips arrive as `editor.ui.chrome` facts over the
+ * mirror relay (uibus.ts `UI_TOPIC_CHROME`), so the a2 glyph never polls for it.
+ */
+export interface ChromeState {
+    readonly mode: ChromeMode;
+    readonly controlsInset: ChromeControlsInset;
+    readonly maximized: boolean;
+    readonly focused: boolean;
+    readonly window: ChromeWindowRole;
+}
+
+/**
+ * The honest fallback: `system` chrome, zero inset, primary. What an older Shell that does not
+ * route `chrome.state` gets — the strip then renders exactly what a stock OS frame implies — and
+ * byte-identical to what every backend truthfully reports in a1 (interim honesty).
+ */
+export const DEFAULT_CHROME_STATE: ChromeState = {
+    mode: CHROME_MODE_SYSTEM,
+    controlsInset: { left: 0, right: 0 },
+    maximized: false,
+    focused: false,
+    window: CHROME_WINDOW_PRIMARY,
+};
+
+/**
+ * Parse a `chrome.state` result, TOTAL against a malformed or partial envelope: an unknown mode or
+ * window token degrades to the `system`/`primary` defaults rather than throwing — the strip must
+ * render SOMETHING honest whatever a drifted Shell serves.
+ */
+export function parseChromeState(value: unknown): ChromeState {
+    if (!isRecord(value)) {
+        return DEFAULT_CHROME_STATE;
+    }
+    const mode = value["mode"];
+    const parsedMode: ChromeMode =
+        mode === CHROME_MODE_CUSTOM || mode === CHROME_MODE_HYBRID || mode === CHROME_MODE_SYSTEM
+            ? mode
+            : CHROME_MODE_SYSTEM;
+    const role = value["window"];
+    const parsedRole: ChromeWindowRole =
+        role === CHROME_WINDOW_SECONDARY ? CHROME_WINDOW_SECONDARY : CHROME_WINDOW_PRIMARY;
+    const inset = isRecord(value["controlsInset"]) ? value["controlsInset"] : {};
+    return {
+        mode: parsedMode,
+        // Clamped non-negative on top of the shared total reader: an inset is a reserved width,
+        // never a debt.
+        controlsInset: {
+            left: Math.max(0, readNumber(inset, "left")),
+            right: Math.max(0, readNumber(inset, "right")),
+        },
+        maximized: readBoolean(value, "maximized"),
+        focused: readBoolean(value, "focused"),
+        window: parsedRole,
+    };
+}
+
+/** The outcome of a window-control verb (`window.minimize` / `window.focus`). */
+export interface WindowControlResult {
+    readonly accepted: boolean;
+}
+
+/**
+ * The outcome of a `window.toggle-maximize`. `maximized` is the NEW state and is meaningful only
+ * when `accepted` — the Shell writes it unconditionally, and this side documents the caveat.
+ */
+export interface ToggleMaximizeResult {
+    readonly accepted: boolean;
+    readonly maximized: boolean;
 }
 
 // ------------------------------------------------------------------------------- total parsers
@@ -239,6 +346,67 @@ export class WindowClient {
         } catch (error) {
             if (error instanceof BridgeError) {
                 return [];
+            }
+            throw error;
+        }
+    }
+
+    /**
+     * The chrome contract's boot read (a1, 02 §1). NEVER throws for a refusal: an older Shell that
+     * does not route `chrome.state` — or one that answered garbage — resolves to
+     * `DEFAULT_CHROME_STATE`, the honest "stock OS frame" answer the strips render unchanged.
+     */
+    async chromeState(): Promise<ChromeState> {
+        return this.#tolerant(CHROME_STATE_METHOD, parseChromeState, DEFAULT_CHROME_STATE);
+    }
+
+    /** Ask the Shell to minimize THIS window. A refusal resolves to `accepted:false`, never throws. */
+    async minimize(): Promise<WindowControlResult> {
+        return this.#control(WINDOW_MINIMIZE_METHOD);
+    }
+
+    /** Toggle THIS window's maximized state. `maximized` is the NEW state, meaningful when accepted. */
+    async toggleMaximize(): Promise<ToggleMaximizeResult> {
+        const fallback: ToggleMaximizeResult = { accepted: false, maximized: false };
+        return this.#tolerant(
+            WINDOW_TOGGLE_MAXIMIZE_METHOD,
+            (result) =>
+                isRecord(result)
+                    ? {
+                          accepted: readBoolean(result, "accepted"),
+                          maximized: readBoolean(result, "maximized"),
+                      }
+                    : fallback,
+            fallback,
+        );
+    }
+
+    /** Ask the Shell to raise/focus THIS window (routes `request_activation`). Refusal-tolerant. */
+    async focus(): Promise<WindowControlResult> {
+        return this.#control(WINDOW_FOCUS_METHOD);
+    }
+
+    /** One `{accepted}` control verb (`window.minimize` / `window.focus`), on the shared policy. */
+    async #control(method: string): Promise<WindowControlResult> {
+        return this.#tolerant(
+            method,
+            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
+            { accepted: false },
+        );
+    }
+
+    /**
+     * One refusal-tolerant chrome call — the single home of the refusal policy (editorstate.ts's
+     * `#callTolerant` rationale): a Shell with no chrome surface — a build predating a1 — answers
+     * `unknown_method` (a `BridgeError`), which degrades to `fallback`, the same honest answer a
+     * bound-but-window-less handler gives; any other error is a real bug and propagates.
+     */
+    async #tolerant<T>(method: string, parse: (result: unknown) => T, fallback: T): Promise<T> {
+        try {
+            return parse(await this.#bridge.call(method));
+        } catch (error) {
+            if (error instanceof BridgeError) {
+                return fallback;
             }
             throw error;
         }

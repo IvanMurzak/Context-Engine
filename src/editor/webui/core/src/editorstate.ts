@@ -38,13 +38,28 @@ export const EDITOR_REGIONS_PUBLISH_METHOD = "editor.regions.publish";
 export const EDITOR_LAYOUT_RESTORED_METHOD = "editor.layout.restored";
 
 /**
- * The closed RegionKind vocabulary (03 §6), mirroring `shell::RegionKind`'s wire tokens. Both native
- * consumers the Shell knows: a viewport content rect (camera / picking / gizmo gestures) and a
- * non-viewport native-interaction region. The Shell REFUSES a kind outside this set at parse.
+ * The closed RegionKind vocabulary (03 §6), mirroring `shell::RegionKind`'s wire tokens: a viewport
+ * content rect (camera / picking / gizmo gestures), a non-viewport native-interaction region, and —
+ * since editor-window-chrome a1 (target design 02 §6) — the titlebar's four caption chrome regions:
+ * the caption DRAG surface and the three window-control rects a2's regionProvider publishes.
+ * Controls publish AFTER the caption rect, so back-to-front last-match-wins needs no carve-out
+ * token. The vocabulary moves in all FOUR mirror sites in one commit (input.h,
+ * editor_state_bridge.h, here, and the `webui-panel-contract` gate) and stays CLOSED: the Shell
+ * REFUSES a kind outside this set at parse.
  */
 export const REGION_KIND_VIEWPORT = "viewport";
 export const REGION_KIND_NATIVE = "native";
-export type RegionKind = typeof REGION_KIND_VIEWPORT | typeof REGION_KIND_NATIVE;
+export const REGION_KIND_CAPTION = "caption";
+export const REGION_KIND_CAPTION_MIN = "caption-min";
+export const REGION_KIND_CAPTION_MAX = "caption-max";
+export const REGION_KIND_CAPTION_CLOSE = "caption-close";
+export type RegionKind =
+    | typeof REGION_KIND_VIEWPORT
+    | typeof REGION_KIND_NATIVE
+    | typeof REGION_KIND_CAPTION
+    | typeof REGION_KIND_CAPTION_MIN
+    | typeof REGION_KIND_CAPTION_MAX
+    | typeof REGION_KIND_CAPTION_CLOSE;
 
 // -------------------------------------------------------------------------------- the wire shapes
 

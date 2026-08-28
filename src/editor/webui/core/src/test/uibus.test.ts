@@ -3,7 +3,7 @@
 // Four DoD properties are proven here, plus the boundary that gives the whole tier its meaning:
 //
 //   1. ENVELOPE DISCIPLINE — monotonic `seq`, the daemon stream's `topic`, and snapshot-on-subscribe.
-//   2. TOPIC NAMESPACING   — the seven built-ins are closed; a package topic must be manifest-declared
+//   2. TOPIC NAMESPACING   — the eight built-ins are closed; a package topic must be manifest-declared
 //                            AND namespaced under its own package; an undeclared topic is REFUSED.
 //   3. THE D7 BOUNDARY     — ui-chrome facts NEVER reach the daemon.
 //   4. THE MIRROR SEAM     — an envelope crosses to another window's bus, is re-sealed there, and
@@ -28,6 +28,7 @@ import {
     BUILTIN_UI_TOPICS,
     DEFAULT_UI_ORIGIN,
     EditorUiBus,
+    UI_TOPIC_CHROME,
     UI_TOPIC_DRAG,
     UI_TOPIC_FOCUS,
     UI_REJECTION_LOG_LIMIT,
@@ -157,7 +158,7 @@ export const uibusTests: readonly TestCase[] = [
 
     // ------------------------------------------------------------------ 2. topic namespacing
     {
-        name: "uibus: the built-in topic set is exactly the seven the design requires, and is closed",
+        name: "uibus: the built-in topic set is exactly the eight the design requires, and is closed",
         run: () => {
             assertEqual(
                 [...BUILTIN_UI_TOPICS],
@@ -168,7 +169,7 @@ export const uibusTests: readonly TestCase[] = [
                     "editor.ui.viewport",
                     "editor.ui.theme-changed",
                     "editor.ui.palette",
-                    // M9 e09b-3. The SEVENTH, and the only one whose publisher is the Shell rather
+                    // M9 e09b-3. The SEVENTH, and the first whose publisher is the Shell rather
                     // than this window: 05 §8's canonical write flow ends "drop LOUDLY + notification
                     // + editor.ui fact", which needs a topic to carry the fact, and §5's six-item
                     // enumeration predates that requirement rather than excluding it. Spelled out as
@@ -176,8 +177,12 @@ export const uibusTests: readonly TestCase[] = [
                     // siblings are: this case pins the wire strings, and comparing a constant to
                     // itself would hold for whatever value it drifted to.
                     "editor.ui.write-notice",
+                    // editor-window-chrome a1. The EIGHTH, Shell-published like the write notice
+                    // (chrome_facts.h): a window's maximized flip, observed by the placement poll
+                    // and mirrored in so the a2 titlebar glyph flips without polling (02 §1).
+                    "editor.ui.chrome",
                 ],
-                "05 §5's topic list, plus §8's write-notice fact",
+                "05 §5's topic list, plus §8's write-notice fact and 02 §1's chrome fact",
             );
             const bus = new EditorUiBus();
             for (const topic of BUILTIN_UI_TOPICS) {
@@ -477,6 +482,43 @@ export const uibusTests: readonly TestCase[] = [
             });
             assert(!refused.published, "an undeclared mirrored topic is refused");
             assertEqual(b.seq, 0, "and consumes no seq");
+        },
+    },
+    {
+        name: "uibus: a Shell-published chrome fact is applied, and its shell origin survives the echo drop",
+        run: () => {
+            // editor-window-chrome a1: the exact envelope the Shell mints for a maximized flip
+            // (chrome_facts.h `chrome_maximized_envelope` — topic `editor.ui.chrome`, origin
+            // `shell`, payload `{windowId, maximized}`). It must be a KNOWN topic here or every
+            // flip would be refused as the unknown-topic case above — which is precisely the a2
+            // glyph silently freezing.
+            const bus = new EditorUiBus({ origin: "0" }); // window 0's bus, as boot.ts builds it
+            let seen: unknown = null;
+            bus.subscribe(UI_TOPIC_CHROME, (event) => {
+                seen = event.payload;
+            });
+            const applied = bus.receiveMirrored({
+                seq: 1,
+                topic: UI_TOPIC_CHROME,
+                origin: "shell",
+                payload: { windowId: 0, maximized: true },
+            });
+            assert(applied.published, "the chrome fact is applied, not refused");
+            assertEqual(
+                seen,
+                { windowId: 0, maximized: true },
+                "the subscriber saw the flip payload verbatim",
+            );
+            // The origin discipline the C++ side pins from its half (test_chrome_facts.cpp): were
+            // the envelope stamped with the TARGET's own id, the bus's own-origin echo drop would
+            // swallow it — the `shell` origin is what makes the unicast deliverable at all.
+            const swallowed = bus.receiveMirrored({
+                seq: 2,
+                topic: UI_TOPIC_CHROME,
+                origin: "0",
+                payload: { windowId: 0, maximized: false },
+            });
+            assert(!swallowed.published, "a window-id origin would be eaten by the echo drop");
         },
     },
 ];

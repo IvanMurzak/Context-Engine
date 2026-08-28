@@ -26,6 +26,7 @@
 #include "shell_test.h"
 
 #include <cstdint>
+#include <optional>
 #include <string>
 #include <vector>
 
@@ -264,6 +265,121 @@ void list_reports_this_window_and_its_peers()
     CHECK(out.at("windows").at(2).as_int() == 2);
 }
 
+// --- the chrome contract (editor-window-chrome a1, target design 02 §1 / §5) ----------------------
+
+void chrome_state_unbound_is_the_honest_system_default()
+{
+    WindowMoveStore store;
+    WindowBridge bridge(kPrimaryWindowId, store);
+
+    const Json out = bridge.chrome_state();
+    // The LITERALS, not the kChrome* constants: this pins the wire strings (the uibus.test.ts
+    // rationale) — a constant compared to itself would hold for whatever value it drifted to.
+    CHECK(out.at("mode").as_string() == "system");
+    CHECK(out.at("controlsInset").at("left").as_int() == 0);
+    CHECK(out.at("controlsInset").at("right").as_int() == 0);
+    CHECK(out.at("maximized").as_bool() == false);
+    CHECK(out.at("focused").as_bool() == false);
+    CHECK(out.at("window").as_string() == "primary");
+    CHECK(bridge.chrome_reads() == 1);
+
+    // A NON-primary bridge reports the secondary role — the strips gate their compact frame on it
+    // (02 §9). Derived from self_id, so no provider can misreport it.
+    WindowBridge secondary(7, store);
+    CHECK(secondary.chrome_state().at("window").as_string() == "secondary");
+}
+
+void chrome_state_serves_the_bound_provider()
+{
+    WindowMoveStore store;
+    WindowBridge bridge(kPrimaryWindowId, store);
+    bridge.bind_chrome_state(
+        []() -> ChromeState
+        {
+            ChromeState state;
+            // Values a DEFAULT could not have (the fresh-impossible-state discipline): a c1-shaped
+            // hybrid answer, so a provider that stopped being consulted is caught by every field.
+            state.mode = ChromeMode::hybrid;
+            state.controls_inset_left = 72;
+            state.controls_inset_right = 4;
+            state.maximized = true;
+            state.focused = true;
+            return state;
+        });
+
+    const Json out = bridge.chrome_state();
+    CHECK(out.at("mode").as_string() == "hybrid");
+    CHECK(out.at("controlsInset").at("left").as_int() == 72);
+    CHECK(out.at("controlsInset").at("right").as_int() == 4);
+    CHECK(out.at("maximized").as_bool());
+    CHECK(out.at("focused").as_bool());
+    CHECK(out.at("window").as_string() == "primary");
+}
+
+void chrome_mode_tokens_cover_the_closed_enum()
+{
+    CHECK(std::string(chrome_mode_token(ChromeMode::system)) == "system");
+    CHECK(std::string(chrome_mode_token(ChromeMode::custom)) == "custom");
+    CHECK(std::string(chrome_mode_token(ChromeMode::hybrid)) == "hybrid");
+}
+
+void window_controls_unbound_degrade_to_accepted_false_and_still_count()
+{
+    WindowMoveStore store;
+    WindowBridge bridge(kPrimaryWindowId, store);
+
+    // No handlers bound — every sibling smoke's state. Each verb still ANSWERS (never a refusal)
+    // and still COUNTS: the ten-smoke rule's claim is the routing, and the live smoke asserts it
+    // from exactly these counters.
+    CHECK(bridge.minimize().at("accepted").as_bool() == false);
+    const Json toggled = bridge.toggle_maximize();
+    CHECK(toggled.at("accepted").as_bool() == false);
+    CHECK(toggled.at("maximized").as_bool() == false);
+    CHECK(bridge.focus().at("accepted").as_bool() == false);
+    CHECK(bridge.minimizes() == 1);
+    CHECK(bridge.maximize_toggles() == 1);
+    CHECK(bridge.focus_requests() == 1);
+}
+
+void window_controls_reach_their_handlers()
+{
+    WindowMoveStore store;
+    WindowBridge bridge(kPrimaryWindowId, store);
+    int minimized = 0;
+    int focused = 0;
+    bridge.bind_minimize(
+        [&minimized]() -> bool
+        {
+            ++minimized;
+            return true;
+        });
+    // The toggle answers the NEW state the handler computed from OS truth — `true` here is a value
+    // the unbound default could not produce, so a bridge that stopped consulting the handler reds
+    // both members.
+    bridge.bind_toggle_maximize([]() -> std::optional<bool> { return true; });
+    bridge.bind_focus(
+        [&focused]() -> bool
+        {
+            ++focused;
+            return true;
+        });
+
+    CHECK(bridge.minimize().at("accepted").as_bool());
+    CHECK(minimized == 1);
+    const Json toggled = bridge.toggle_maximize();
+    CHECK(toggled.at("accepted").as_bool());
+    CHECK(toggled.at("maximized").as_bool());
+    CHECK(bridge.focus().at("accepted").as_bool());
+    CHECK(focused == 1);
+
+    // A handler that answers "no window" (a retired session's registry lookup) is the SAME honest
+    // degrade as unbound — accepted:false, not an error.
+    bridge.bind_toggle_maximize([]() -> std::optional<bool> { return std::nullopt; });
+    const Json refused_toggle = bridge.toggle_maximize();
+    CHECK(refused_toggle.at("accepted").as_bool() == false);
+    CHECK(refused_toggle.at("maximized").as_bool() == false);
+}
+
 // --- the full JSON-RPC binding over a real router (deny-by-default, nothing refused) --------------
 
 void every_method_binds_and_serves_over_a_real_router()
@@ -304,6 +420,23 @@ void every_method_binds_and_serves_over_a_real_router()
     out = dispatch(router, kWindowCloseMethod, Json::object(), refused);
     CHECK(!refused);
     CHECK(out.at("closed").as_bool());
+    // a1 — the chrome read + the three control verbs route (nothing is refused; unbound handlers
+    // answer the honest degrade). This is the T1 half of the ten-smoke rule: install() is the ONE
+    // registration site every live smoke rides, so these four binding here is what makes "installed
+    // in all ten smokes" a structural fact rather than ten hand-edits.
+    out = dispatch(router, kChromeStateMethod, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(out.at("mode").as_string() == "system");
+    CHECK(out.at("window").as_string() == "primary");
+    out = dispatch(router, kWindowMinimizeMethod, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(out.at("accepted").as_bool() == false);
+    out = dispatch(router, kWindowToggleMaximizeMethod, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(out.at("accepted").as_bool() == false);
+    out = dispatch(router, kWindowFocusMethod, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(out.at("accepted").as_bool() == false);
 
     // A malformed tear-out is a HANDLER-level bridge error (an error RESPONSE editor-core's
     // ShellBridge.call rejects on), NOT a ROUTER refusal: the envelope was well-formed, so
@@ -333,6 +466,11 @@ int main()
     a_move_to_with_a_non_numeric_target_fails_closed();
     a_seed_is_delivered_once_then_absent();
     list_reports_this_window_and_its_peers();
+    chrome_state_unbound_is_the_honest_system_default();
+    chrome_state_serves_the_bound_provider();
+    chrome_mode_tokens_cover_the_closed_enum();
+    window_controls_unbound_degrade_to_accepted_false_and_still_count();
+    window_controls_reach_their_handlers();
     every_method_binds_and_serves_over_a_real_router();
     SHELL_TEST_MAIN_END();
 }
