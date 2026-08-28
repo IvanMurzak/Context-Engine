@@ -33,7 +33,10 @@ owned bugs) and leave the applied cleanups committed locally. Nothing is pushed.
    (`$WORKTREE_BRANCH`).
 3. After the skill completes, confirm any edits landed inside the worktree only
    (`git status`, `git rev-parse --show-toplevel`).
-4. If cleanups were applied: re-run the local gate (preamble §4) to green. A
+4. If cleanups were applied: re-run the local gate (preamble §4) to green — and,
+   when the branch diff touches Python under `tools/` or `bench/`, also
+   `python -m pytest tools/tests bench/tests` from the worktree root, which
+   `ctest` does not cover and CI's required `python tests` check runs. A
    simplification that changes behavior or reddens the suite is wrong by
    definition — repair or revert it, and say so in your report.
 5. Commit the applied cleanups as one or more `refactor:` conventional commits.
@@ -45,5 +48,7 @@ owned bugs) and leave the applied cleanups committed locally. Nothing is pushed.
 - The `simplify` skill ran over the branch's changed code (report what it
   applied, including nothing).
 - The working tree is clean; every applied cleanup is committed; the local gate
-  is green over the step's final state.
+  is green over the step's final state — including
+  `python -m pytest tools/tests bench/tests` when Python under `tools/` or
+  `bench/` is in the diff.
 - Nothing was pushed and no PR exists.

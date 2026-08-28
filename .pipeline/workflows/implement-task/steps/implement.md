@@ -41,13 +41,20 @@ and leave the result committed locally on the run branch. Nothing is pushed.
    test in a gate family needs the matching `ci.yml` `--target`/`-R` edits in
    the same change; a new authored content kind ships its `samples/` corpus
    entry; a new editor panel registers its a11y coverage.
-5. Run the local gate (preamble §4) until green.
+5. Run the local gate (preamble §4) until green. `ctest` does NOT cover the
+   Python tier: if the change touches any Python under `tools/` or `bench/`,
+   also run `python -m pytest tools/tests bench/tests` from the worktree root
+   until green — CI's required `python tests` check runs exactly that, so a
+   failure there is otherwise discovered only at `land`, after a full rollup is
+   spent.
 6. Commit the work as one conventional commit, or a few logically separate
    ones. Do NOT push, and do NOT open a PR.
 
 ## Success Criteria
 
-- The full dev-preset build and `ctest --preset dev` are green in the worktree.
+- The full dev-preset build and `ctest --preset dev` are green in the worktree —
+  plus `python -m pytest tools/tests bench/tests` when the change touches Python
+  under `tools/` or `bench/`.
 - All changes are committed: `git status --porcelain` is empty and
   `git log --oneline origin/main..HEAD` is non-empty.
 - Nothing was pushed: the `worktree-*` branch exists only locally and no PR
