@@ -183,6 +183,17 @@ EDITOR_STATE_CONSTANTS = (
      "EDITOR_LAYOUT_RESTORED_METHOD"),
     ("region kind viewport", "editor_state_bridge.h", "kRegionKindViewport", "REGION_KIND_VIEWPORT"),
     ("region kind native", "editor_state_bridge.h", "kRegionKindNative", "REGION_KIND_NATIVE"),
+    # editor-window-chrome a1 (target design 02 §6): the titlebar's four caption chrome regions.
+    # The vocabulary's FOURTH mirror site — a drift on either side makes the Shell refuse (or the
+    # renderer stop publishing) exactly the rects b1's NC hit-test and c1's caption drag consume,
+    # so a caption click would silently fall through to the browser with no build error anywhere.
+    ("region kind caption", "editor_state_bridge.h", "kRegionKindCaption", "REGION_KIND_CAPTION"),
+    ("region kind caption-min", "editor_state_bridge.h", "kRegionKindCaptionMin",
+     "REGION_KIND_CAPTION_MIN"),
+    ("region kind caption-max", "editor_state_bridge.h", "kRegionKindCaptionMax",
+     "REGION_KIND_CAPTION_MAX"),
+    ("region kind caption-close", "editor_state_bridge.h", "kRegionKindCaptionClose",
+     "REGION_KIND_CAPTION_CLOSE"),
 )
 
 # The M9 e14c WELCOME surface (design 07 §4 / 10 / D13), whose vocabulary lives in welcome.h. SAME
@@ -273,6 +284,33 @@ WINDOW_CONSTANTS = (
     ("window.seed", "window_bridge.h", "kWindowSeedMethod", "WINDOW_SEED_METHOD"),
     ("window.rehomed", "window_bridge.h", "kWindowRehomedMethod", "WINDOW_REHOMED_METHOD"),
     ("window.close", "window_bridge.h", "kWindowCloseMethod", "WINDOW_CLOSE_METHOD"),
+    # editor-window-chrome a1 (target design 02 §5): the three window-control verbs beside
+    # `window.close`. Same silent-drift hazard: a rename leaves the a2 titlebar's caption buttons
+    # dispatching methods the Shell no longer routes — a minimize button that does nothing, with
+    # both builds green.
+    ("window.minimize", "window_bridge.h", "kWindowMinimizeMethod", "WINDOW_MINIMIZE_METHOD"),
+    ("window.toggle-maximize", "window_bridge.h", "kWindowToggleMaximizeMethod",
+     "WINDOW_TOGGLE_MAXIMIZE_METHOD"),
+    ("window.focus", "window_bridge.h", "kWindowFocusMethod", "WINDOW_FOCUS_METHOD"),
+)
+
+# The editor-window-chrome a1 CHROME CONTRACT (target design 02 §1): the `chrome.state` boot read
+# plus its mode / window-role tokens (window_bridge.h <-> window.ts), and the `editor.ui.chrome`
+# fact topic (chrome_facts.h <-> uibus.ts). The method has the family's usual failure mode — a
+# drift refuses a call editor-core makes AT BOOT, tripping every live smoke's `refused() == 0` —
+# but the TOKENS fail worse, because nothing refuses: a drifted mode token parses as the `system`
+# fallback, so once b1/c1 flip their backends the strip would silently render menu-bar-only chrome
+# on a frameless window (no titlebar, no controls, an un-drag-able window); a drifted topic makes
+# `receiveMirrored` refuse every maximized fact and the a2 glyph silently stops flipping.
+CHROME_CONSTANTS = (
+    ("chrome.state", "window_bridge.h", "kChromeStateMethod", "CHROME_STATE_METHOD"),
+    ("chrome mode custom", "window_bridge.h", "kChromeModeCustom", "CHROME_MODE_CUSTOM"),
+    ("chrome mode hybrid", "window_bridge.h", "kChromeModeHybrid", "CHROME_MODE_HYBRID"),
+    ("chrome mode system", "window_bridge.h", "kChromeModeSystem", "CHROME_MODE_SYSTEM"),
+    ("chrome window primary", "window_bridge.h", "kChromeWindowPrimary", "CHROME_WINDOW_PRIMARY"),
+    ("chrome window secondary", "window_bridge.h", "kChromeWindowSecondary",
+     "CHROME_WINDOW_SECONDARY"),
+    ("editor.ui chrome topic", "chrome_facts.h", "kUiTopicChrome", "UI_TOPIC_CHROME"),
 )
 
 # The M9 e10c CROSS-WINDOW DRAG surface (design 04 §2), whose C++ vocabulary lives on the same
@@ -1039,6 +1077,25 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
                 f"Shell would route one name and editor-core would call another, so a panel move would "
                 f"refuse with `unknown_method` and be silently lost with NO error anywhere.")
+
+    # 7a7c — the editor-window-chrome a1 chrome contract agrees across the two languages: the
+    # `chrome.state` boot read, its mode / window-role tokens, and the `editor.ui.chrome` fact
+    # topic. See CHROME_CONSTANTS for why the tokens fail WORSE than the method (nothing refuses —
+    # a drifted mode parses as the `system` fallback and the strip silently renders the wrong
+    # chrome; a drifted topic silently freezes the a2 max/restore glyph).
+    for human, cpp_file, cpp_name, ts_name in CHROME_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(shell_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — editor-core cannot be reading "
+                f"the chrome contract the Shell serves, so the strips would render the wrong chrome")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"Shell would serve/broadcast one value and editor-core would parse/expect another, "
+                f"so the titlebar would silently render the wrong chrome (or its maximized glyph "
+                f"would freeze) with NO error anywhere.")
 
     # 7a8 — the e10c cross-window drag vocabulary agrees across the two languages. Same mechanism as
     # 7a7; the failure mode is the cross-origin one: a rename leaves the target window's editor-core

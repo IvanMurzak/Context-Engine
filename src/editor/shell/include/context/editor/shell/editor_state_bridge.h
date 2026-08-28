@@ -75,11 +75,20 @@ inline constexpr const char* kEditorRegionsPublishMethod = "editor.regions.publi
 // from a fresh one that had nothing to restore (which no counter on the persistence path can show).
 inline constexpr const char* kEditorLayoutRestoredMethod = "editor.layout.restored";
 
-// The RegionKind wire tokens (03 §6). A CLOSED vocabulary — the two native consumers the Shell knows
-// — so a third token invented in the renderer is REFUSED at parse rather than routed to a consumer
-// that cannot mean anything by it. Mirrored in TS and cross-checked like the method names above.
+// The RegionKind wire tokens (03 §6). A CLOSED vocabulary — every native consumer the Shell knows
+// — so a token invented in the renderer is REFUSED at parse rather than routed to a consumer that
+// cannot mean anything by it. Mirrored in TS and cross-checked like the method names above.
+//
+// GREW BY FOUR in editor-window-chrome a1 (target design 02 §6): the caption drag surface and the
+// three window-control rects the web-drawn titlebar publishes. The vocabulary moves in ALL FOUR
+// mirror sites in one commit — input.h's enum, these wire tokens, editorstate.ts, and the
+// `webui-panel-contract` gate — and stays CLOSED: parse still refuses anything else.
 inline constexpr const char* kRegionKindViewport = "viewport";
 inline constexpr const char* kRegionKindNative = "native";
+inline constexpr const char* kRegionKindCaption = "caption";
+inline constexpr const char* kRegionKindCaptionMin = "caption-min";
+inline constexpr const char* kRegionKindCaptionMax = "caption-max";
+inline constexpr const char* kRegionKindCaptionClose = "caption-close";
 
 // Refusal codes these methods answer with. LOCAL codes (not R-CLI-008 catalog codes), the same
 // rationale panel_host.h states for its `panel.*` codes: they classify a HOST-side wiring or caller

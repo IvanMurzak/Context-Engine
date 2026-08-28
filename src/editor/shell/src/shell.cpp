@@ -189,9 +189,11 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
         compositor_.mark_external_damage();
         break;
     case ShellEventKind::focus_gained:
+        focused_ = true; // a1: `chrome.state.focused` reads this — the OS event is the truth source
         browser_->set_focus(true);
         break;
     case ShellEventKind::focus_lost:
+        focused_ = false;
         browser_->set_focus(false);
         // The pointer-up that would have released a live drag is going to a different window now.
         input_.cancel_pointer_capture();
@@ -206,9 +208,12 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
             break;
         case InputTarget::viewport:
         case InputTarget::native:
-            // The native path (03 §6.3): camera controls / picking / gizmo gestures. Their panel-model
-            // verbs are driven by editor-core over the bridge, which arrives with e11 — until then the
-            // arbitration is real and the sample is accounted for, but no native consumer exists yet.
+            // The native path (03 §6.3): camera controls / picking / gizmo gestures, and — since
+            // editor-window-chrome a1 grew the region vocabulary — the four caption chrome regions.
+            // Their consumers are still to land: e11 drives the viewport verbs over the bridge, b1's
+            // Windows NC hit-test consumes the caption regions BEFORE client routing, and c1's macOS
+            // pump consumes caption presses. Until then the arbitration is real and the sample is
+            // accounted for, but dispatch stays honestly empty.
             break;
         case InputTarget::keymap:
         case InputTarget::swallowed:
@@ -387,6 +392,10 @@ WindowId WindowManager::add_session(std::unique_ptr<EditorWindow> window,
     entry.bridge = std::move(session.bridge);
     entry.daemon_client = std::move(session.daemon_client);
     entry.window = std::move(window);
+    // Seed the chrome-fact baseline from the backend's REAL placement (after the remembered
+    // placement above was applied), so a window restored maximized does not fire a spurious flip on
+    // its first poll — the sink reports CHANGES; `chrome.state` reports the initial state.
+    entry.last_maximized = entry.window->backend().placement().maximized;
     windows_.push_back(std::move(entry));
     return windows_.back().id;
 }
@@ -399,6 +408,11 @@ void WindowManager::bind_window_factory(WindowFactory factory)
 void WindowManager::on_window_create_failed(WindowCreateFailureSink sink)
 {
     failure_sink_ = std::move(sink);
+}
+
+void WindowManager::on_chrome_maximized(ChromeMaximizedSink sink)
+{
+    chrome_maximized_sink_ = std::move(sink);
 }
 
 void WindowManager::report_failure(WindowCreateFailure failure)
@@ -712,6 +726,22 @@ bool WindowManager::pump_once(std::uint64_t now_us)
         {
             store_.set_placement(window.state_index(), window.last_placement(), now_us);
             window.clear_placement_dirty();
+        }
+        // a1: report a maximized FLIP the placement poll observed (02 §1 — no new poll, no OS event
+        // subscription; the 250 ms poll that already detects placement changes is the detector).
+        // Compared per pump against the state last seen, not gated on placement_dirty, so a flip is
+        // never lost to the dirty bit being consumed by the persistence write above. Gated on
+        // `alive` because a dying window's pump can return before its poll ran, and comparing its
+        // stale default placement against the adoption baseline would report a flip that never
+        // happened — to a window about to be retired anyway.
+        const bool maximized = window.last_placement().maximized;
+        if (alive && maximized != windows_[i].last_maximized)
+        {
+            windows_[i].last_maximized = maximized;
+            if (chrome_maximized_sink_)
+            {
+                chrome_maximized_sink_(windows_[i].id, maximized);
+            }
         }
         if (!alive)
         {

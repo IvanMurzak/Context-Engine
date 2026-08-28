@@ -7,6 +7,7 @@
 #include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
 
 #include <cstdint>
+#include <optional>
 #include <set>
 #include <utility>
 
@@ -127,6 +128,26 @@ void WindowBridge::bind_close(CloseHandler handler)
 void WindowBridge::bind_windows(WindowsProvider provider)
 {
     windows_ = std::move(provider);
+}
+
+void WindowBridge::bind_minimize(MinimizeHandler handler)
+{
+    minimize_ = std::move(handler);
+}
+
+void WindowBridge::bind_toggle_maximize(ToggleMaximizeHandler handler)
+{
+    toggle_maximize_ = std::move(handler);
+}
+
+void WindowBridge::bind_focus(FocusHandler handler)
+{
+    focus_ = std::move(handler);
+}
+
+void WindowBridge::bind_chrome_state(ChromeStateProvider provider)
+{
+    chrome_state_ = std::move(provider);
 }
 
 void WindowBridge::bind_drag_store(CrossWindowDragStore* store)
@@ -264,6 +285,77 @@ contract::Json WindowBridge::close()
     out.set("closed", contract::Json(result.ok));
     out.set("outcome", contract::Json(result.outcome));
     out.set("error", contract::Json(result.error));
+    return out;
+}
+
+const char* chrome_mode_token(ChromeMode mode)
+{
+    switch (mode)
+    {
+    case ChromeMode::system:
+        return kChromeModeSystem;
+    case ChromeMode::custom:
+        return kChromeModeCustom;
+    case ChromeMode::hybrid:
+        return kChromeModeHybrid;
+    }
+    // Unreachable for the closed enum; the -Werror -Wswitch build catches a grown enum first
+    // (region_kind_token's rationale).
+    return "";
+}
+
+contract::Json WindowBridge::minimize()
+{
+    // Counted on the CALL, bound or not: the ten-smoke rule's claim is the ROUTING, and a smoke
+    // with no window behind this bridge must still be able to assert the verb arrived.
+    ++minimizes_;
+    const bool accepted = minimize_ ? minimize_() : false;
+    contract::Json out = contract::Json::object();
+    out.set("accepted", contract::Json(accepted));
+    return out;
+}
+
+contract::Json WindowBridge::toggle_maximize()
+{
+    ++maximize_toggles_;
+    const std::optional<bool> next = toggle_maximize_ ? toggle_maximize_() : std::nullopt;
+    contract::Json out = contract::Json::object();
+    out.set("accepted", contract::Json(next.has_value()));
+    // Unconditional (write_notice_envelope's rationale: "missing" and "meaningless" never differ
+    // here); the value is meaningful only when accepted, which the TS parser documents.
+    out.set("maximized", contract::Json(next.value_or(false)));
+    return out;
+}
+
+contract::Json WindowBridge::focus()
+{
+    ++focus_requests_;
+    const bool accepted = focus_ ? focus_() : false;
+    contract::Json out = contract::Json::object();
+    out.set("accepted", contract::Json(accepted));
+    return out;
+}
+
+contract::Json WindowBridge::chrome_state()
+{
+    ++chrome_reads_;
+    // The defaulted ChromeState IS the honest unbound answer (window_bridge.h § the chrome state):
+    // `system` chrome, zero inset, not maximized, not focused — what every backend truthfully
+    // reports in a1 anyway (interim honesty).
+    const ChromeState state = chrome_state_ ? chrome_state_() : ChromeState{};
+    contract::Json inset = contract::Json::object();
+    inset.set("left", contract::Json(static_cast<std::uint64_t>(state.controls_inset_left)));
+    inset.set("right", contract::Json(static_cast<std::uint64_t>(state.controls_inset_right)));
+    contract::Json out = contract::Json::object();
+    out.set("mode", contract::Json(chrome_mode_token(state.mode)));
+    out.set("controlsInset", std::move(inset));
+    out.set("maximized", contract::Json(state.maximized));
+    out.set("focused", contract::Json(state.focused));
+    // Derived from this bridge's own identity, never from the provider: the provider describes the
+    // WINDOW's chrome, but which strip set to render (02 §9) is a fact about the window's ROLE, and
+    // `self_id_` is the same identity `window.list` already reports.
+    out.set("window", contract::Json(self_id_ == kPrimaryWindowId ? kChromeWindowPrimary
+                                                                  : kChromeWindowSecondary));
     return out;
 }
 
@@ -445,6 +537,25 @@ bool WindowBridge::install(BridgeRouter& router)
     ok = router.register_method(kWindowCloseMethod,
                                 [this](const BridgeRequest&) -> BridgeResult
                                 { return BridgeResult::ok(close()); }) &&
+         ok;
+    // a1 — the window-control verbs + the chrome read. None takes params and none can refuse
+    // (unbound handlers degrade to `accepted:false` / the defaulted chrome state), so all four are
+    // plain result bindings like `window.close` above.
+    ok = router.register_method(kWindowMinimizeMethod,
+                                [this](const BridgeRequest&) -> BridgeResult
+                                { return BridgeResult::ok(minimize()); }) &&
+         ok;
+    ok = router.register_method(kWindowToggleMaximizeMethod,
+                                [this](const BridgeRequest&) -> BridgeResult
+                                { return BridgeResult::ok(toggle_maximize()); }) &&
+         ok;
+    ok = router.register_method(kWindowFocusMethod,
+                                [this](const BridgeRequest&) -> BridgeResult
+                                { return BridgeResult::ok(focus()); }) &&
+         ok;
+    ok = router.register_method(kChromeStateMethod,
+                                [this](const BridgeRequest&) -> BridgeResult
+                                { return BridgeResult::ok(chrome_state()); }) &&
          ok;
     ok = router.register_method(kDragProbeMethod,
                                 [this](const BridgeRequest&) -> BridgeResult

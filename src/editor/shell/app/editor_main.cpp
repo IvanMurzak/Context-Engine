@@ -14,6 +14,7 @@
 #include "context/editor/shell/app_scheme.h"
 #include "context/editor/shell/banners.h"
 #include "context/editor/shell/browser.h"
+#include "context/editor/shell/chrome_facts.h" // a1: a maximized flip -> an editor.ui chrome fact
 #include "context/editor/shell/cross_window_drag.h"
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
@@ -52,6 +53,7 @@
 #include <cstdlib>
 #include <filesystem>
 #include <memory>
+#include <optional>
 #include <string>
 #include <thread>
 #include <vector>
@@ -220,6 +222,56 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
             if (d.ok())
                 store.forget(self); // drop any seeds queued for a window that is now gone
             return {d.ok(), self, shell::to_string(d.outcome), d.error};
+        });
+
+    // --- the chrome contract (editor-window-chrome a1, target design 02 §1 / §5) ------------------
+    // The control verbs reach THIS window's backend through the registry, so they stay valid for a
+    // retired session (the lookup answers nullptr and the verb degrades to `accepted:false`) — the
+    // same lifetime rationale the handlers above rely on. INTERIM HONESTY (tasks/README.md, binding):
+    // the provider reports `mode: "system"` + inset 0 on every backend; b1 flips win32 -> "custom"
+    // and c1 flips cocoa -> "hybrid" in the PRs that implement the behaviour, never here first.
+    const shell::WindowId self_id = wb.self_id();
+    wb.bind_chrome_state(
+        [&manager, self_id]() -> shell::ChromeState
+        {
+            shell::ChromeState state; // defaulted: mode system, inset 0 (the a1 truth)
+            if (shell::EditorWindow* window = manager.window(self_id))
+            {
+                state.maximized = window->backend().placement().maximized;
+                state.focused = window->focused();
+            }
+            return state;
+        });
+    wb.bind_minimize(
+        [&manager, self_id]() -> bool
+        {
+            shell::EditorWindow* window = manager.window(self_id);
+            if (window == nullptr)
+                return false;
+            window->backend().minimize();
+            return true;
+        });
+    wb.bind_toggle_maximize(
+        [&manager, self_id]() -> std::optional<bool>
+        {
+            shell::EditorWindow* window = manager.window(self_id);
+            if (window == nullptr)
+                return std::nullopt;
+            // The toggle is composed HERE from OS truth (window.h § the chrome verbs), so the
+            // renderer never has to know the state to flip it — and a maximize from any other
+            // source (Win+Up, the WM) is still toggled correctly.
+            const bool next = !window->backend().placement().maximized;
+            window->backend().set_maximized(next);
+            return next;
+        });
+    wb.bind_focus(
+        [&manager, self_id]() -> bool
+        {
+            shell::EditorWindow* window = manager.window(self_id);
+            if (window == nullptr)
+                return false;
+            window->backend().request_activation();
+            return true;
         });
 }
 
@@ -518,6 +570,16 @@ int main(int argc, char** argv)
     notice_relay.bind_store(&mirror_store);
     notice_relay.bind_windows([&manager]() -> std::vector<shell::WindowId>
                               { return manager.window_ids(); });
+    // a1: the chrome-fact relay — a maximized flip the placement poll observed becomes an
+    // `editor.ui` fact in the affected window's mirror queue (02 §1: no new push channel, no extra
+    // poll). The sink the manager stores captures this relay by reference; that is safe because the
+    // manager only fires it from pump_once, which never runs after the explicit `manager.shutdown()`
+    // below — the same ordering rationale the bridges rely on.
+    shell::ChromeFactRelay chrome_relay;
+    chrome_relay.bind_store(&mirror_store);
+    manager.on_chrome_maximized(
+        [&chrome_relay](shell::WindowId id, bool maximized)
+        { (void)chrome_relay.publish_maximized(id, maximized); });
     shell::panels::BuiltinPanels builtin = shell::panels::install_builtin_panels(panel_host);
     // A refused write (an L-30 drop, or a write path that said no) now reaches the human: the relay
     // turns it into an `editor.ui` fact in EVERY live window, where editor-core's notification host

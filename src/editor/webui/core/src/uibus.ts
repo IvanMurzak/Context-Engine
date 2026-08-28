@@ -75,7 +75,27 @@ export const UI_TOPIC_PALETTE = "editor.ui.palette";
 export const UI_TOPIC_WRITE_NOTICE = "editor.ui.write-notice";
 
 /**
- * The CLOSED built-in topic set (05 §5, extended by 05 §8's write-notice requirement).
+ * A WINDOW'S CHROME STATE CHANGED (editor-window-chrome a1, target design 02 §1) — today exactly
+ * one payload: `{windowId, maximized}`, the maximized flip the Shell's placement poll observed.
+ * The a2 titlebar subscribes to flip its max/restore glyph without polling.
+ *
+ * ⚠ THE EIGHTH MEMBER OF THE CLOSED SET, ADDED DELIBERATELY — the same posture as the write-notice
+ * topic above, with the same kind of authority: 02 §1 binds "changes are broadcast as a fact on the
+ * EXISTING editor.ui mirror relay". The set stays CLOSED; `publish` still refuses any `editor.ui.*`
+ * name nobody declared.
+ *
+ * ⚠ ITS PUBLISHER IS THE SHELL, NOT THIS WINDOW — the write-notice precedent exactly: the flip is a
+ * fact only the C++ side can observe (Win+Up, a WM, a caption double-click), so it arrives over the
+ * `ui.mirror` relay and enters this bus through `receiveMirrored`, which is why it must be a KNOWN
+ * topic here or every chrome fact would be refused as an unknown mirrored envelope. The C++
+ * spelling is `shell::kUiTopicChrome` (chrome_facts.h), byte-compared against this constant out of
+ * the built bundle by `tools/check_webui_assets.py --panel-contract`.
+ */
+export const UI_TOPIC_CHROME = "editor.ui.chrome";
+
+/**
+ * The CLOSED built-in topic set (05 §5, extended by 05 §8's write-notice requirement and 02 §1's
+ * chrome fact).
  *
  * Closed on purpose, exactly like `GESTURE_VERBS` and the panel content-type vocabulary: a topic
  * nobody declared is a typo, and silently accepting it would produce a subscription that can never
@@ -89,6 +109,7 @@ export const BUILTIN_UI_TOPICS = [
     UI_TOPIC_THEME_CHANGED,
     UI_TOPIC_PALETTE,
     UI_TOPIC_WRITE_NOTICE,
+    UI_TOPIC_CHROME,
 ] as const;
 
 /** The origin stamped on an envelope published by a bus that was given no window id. */

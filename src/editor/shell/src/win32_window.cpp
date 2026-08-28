@@ -269,6 +269,35 @@ public:
         }
     }
 
+    // a1 (editor-window-chrome): the two chrome verbs. Best-effort asks, like request_activation.
+    void minimize() override
+    {
+        if (hwnd_ != nullptr)
+        {
+            ::ShowWindow(hwnd_, SW_MINIMIZE);
+        }
+    }
+    void set_maximized(bool maximized) override
+    {
+        if (hwnd_ == nullptr)
+        {
+            return;
+        }
+        // Through the SAME placement machinery apply_placement uses (GetWindowPlacement +
+        // SetWindowPlacement, flipping only showCmd): SetWindowPlacement restores AND positions in
+        // one call, so a maximize keeps a correct restore rect and an un-maximize returns to it —
+        // where a bare ShowWindow(SW_RESTORE) would also un-MINIMIZE, which is not what this verb
+        // means.
+        WINDOWPLACEMENT wp{};
+        wp.length = sizeof(wp);
+        if (::GetWindowPlacement(hwnd_, &wp) == FALSE)
+        {
+            return;
+        }
+        wp.showCmd = maximized ? SW_SHOWMAXIMIZED : SW_SHOWNORMAL;
+        ::SetWindowPlacement(hwnd_, &wp);
+    }
+
     [[nodiscard]] WindowPlacement placement() const override;
     void apply_placement(const WindowPlacement& placement) override;
     void close() override

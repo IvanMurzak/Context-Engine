@@ -306,6 +306,31 @@ void test_headless_backend_records_placement_and_redraws()
     CHECK(backend.title() == "Context Editor — demo");
 }
 
+void test_headless_backend_chrome_verbs_are_honest_state_only()
+{
+    // a1 (editor-window-chrome): the two chrome verbs on the honest offscreen shell. There is no OS
+    // window, so `minimize` RECORDS the ask and `set_maximized` flips the placement bit — which is
+    // exactly the lever the WindowManager placement-poll -> chrome-fact test in test_shell.cpp
+    // flips, so the two suites exercise the same seam from both sides.
+    WindowDesc desc;
+    HeadlessWindowBackend backend(desc);
+    CHECK(!backend.minimized());
+    CHECK(!backend.placement().maximized);
+
+    backend.minimize();
+    CHECK(backend.minimized());
+
+    backend.set_maximized(true);
+    CHECK(backend.placement().maximized);
+    // The rest of the placement is UNTOUCHED — set_maximized is the state bit, not a resize (the
+    // restored rect survives, per WindowPlacement's own contract).
+    backend.apply_placement(WindowPlacement{"", 40, 50, 640, 480, true});
+    backend.set_maximized(false);
+    CHECK(!backend.placement().maximized);
+    CHECK(backend.placement().x == 40);
+    CHECK(backend.placement().width == 640u);
+}
+
 void test_platform_backend_selection_is_never_silent()
 {
     WindowDesc desc;
@@ -1339,6 +1364,7 @@ int main()
     test_headless_backend_applies_state_before_delivering_events();
     test_headless_backend_close_ends_the_pump();
     test_headless_backend_records_placement_and_redraws();
+    test_headless_backend_chrome_verbs_are_honest_state_only();
     test_platform_backend_selection_is_never_silent();
     test_platform_window_factories_refuse_off_their_platform();
     test_configure_notify_reports_only_what_actually_changed();

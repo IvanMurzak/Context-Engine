@@ -13,7 +13,13 @@
 
 import { assert, assertEqual, assertNull, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
-import { WindowClient, parseWindowSeed, parseRehomed } from "../window.js";
+import {
+    DEFAULT_CHROME_STATE,
+    WindowClient,
+    parseChromeState,
+    parseRehomed,
+    parseWindowSeed,
+} from "../window.js";
 
 /** A responder returns a method's result, or THROWS to make the Shell answer a refusal envelope. */
 type Responder = (method: string, params: Record<string, unknown>) => unknown;
@@ -224,6 +230,112 @@ export const windowTests: readonly TestCase[] = [
             );
             const bad = await refused.close();
             assert(!bad.closed, "a refused close (the primary) is closed:false, not a throw");
+        },
+    },
+
+    // --- the chrome contract (editor-window-chrome a1, target design 02 §1 / §5) ------------------
+    {
+        name: "parseChromeState: total — a served hybrid state parses, garbage degrades to the default",
+        run: () => {
+            // A c1-shaped answer, every field a value the DEFAULT could not have — so a parser that
+            // stopped reading any one of them is caught by that field.
+            const hybrid = parseChromeState({
+                mode: "hybrid",
+                controlsInset: { left: 72, right: 4 },
+                maximized: true,
+                focused: true,
+                window: "secondary",
+            });
+            assertEqual(hybrid.mode, "hybrid", "the mode token");
+            assertEqual(hybrid.controlsInset, { left: 72, right: 4 }, "the inset pair");
+            assert(hybrid.maximized, "maximized");
+            assert(hybrid.focused, "focused");
+            assertEqual(hybrid.window, "secondary", "the window role");
+
+            // TOTAL over garbage: unknown tokens degrade to system/primary, negatives clamp to 0,
+            // a missing inset is zero — the strip must render SOMETHING honest whatever a drifted
+            // Shell serves.
+            assertEqual(parseChromeState(null), DEFAULT_CHROME_STATE, "non-record -> the default");
+            const drifted = parseChromeState({
+                mode: "frameless", // no such token
+                controlsInset: { left: -5, right: "wide" },
+                maximized: "yes", // not a boolean
+                window: "tertiary",
+            });
+            assertEqual(drifted.mode, "system", "an unknown mode degrades to system");
+            assertEqual(drifted.controlsInset, { left: 0, right: 0 }, "bad insets clamp to 0");
+            assert(!drifted.maximized, "a non-boolean maximized reads false");
+            assertEqual(drifted.window, "primary", "an unknown role degrades to primary");
+        },
+    },
+    {
+        name: "WindowClient.chromeState: reads the Shell's state; a refusal is the honest default",
+        run: async () => {
+            let asked = "";
+            const client = new WindowClient(
+                bridgeFor((method) => {
+                    asked = method;
+                    return {
+                        mode: "custom",
+                        controlsInset: { left: 0, right: 0 },
+                        maximized: true,
+                        focused: false,
+                        window: "primary",
+                    };
+                }),
+            );
+            const state = await client.chromeState();
+            assertEqual(asked, "chrome.state", "the read method name (the gate-pinned spelling)");
+            assertEqual(state.mode, "custom", "the served mode");
+            assert(state.maximized, "the served maximized bit");
+
+            // An older Shell (no chrome surface) refuses -> the default, NEVER a throw: the strips
+            // then render exactly what a stock OS frame implies.
+            const refused = new WindowClient(
+                bridgeFor(() => {
+                    throw new Error("unknown_method");
+                }),
+            );
+            assertEqual(await refused.chromeState(), DEFAULT_CHROME_STATE, "refusal -> default");
+        },
+    },
+    {
+        name: "WindowClient window controls: dispatch the gate-pinned verbs; refusals degrade loud-and-typed",
+        run: async () => {
+            const methods: string[] = [];
+            const client = new WindowClient(
+                bridgeFor((method) => {
+                    methods.push(method);
+                    if (method === "window.toggle-maximize") {
+                        return { accepted: true, maximized: true };
+                    }
+                    return { accepted: true };
+                }),
+            );
+            assert((await client.minimize()).accepted, "minimize accepted");
+            const toggled = await client.toggleMaximize();
+            assert(toggled.accepted, "toggle accepted");
+            assert(toggled.maximized, "the NEW maximized state came back");
+            assert((await client.focus()).accepted, "focus accepted");
+            // The wire spellings the a2 buttons will dispatch — pinned as literals here AND
+            // byte-compared against window_bridge.h by the webui-panel-contract gate.
+            assertEqual(
+                methods,
+                ["window.minimize", "window.toggle-maximize", "window.focus"],
+                "the three verbs, each dispatched once, in order",
+            );
+
+            // A refusal (a pre-a1 Shell) resolves to accepted:false on every verb — never a throw,
+            // so the a2 buttons need no try/catch.
+            const refused = new WindowClient(
+                bridgeFor(() => {
+                    throw new Error("unknown_method");
+                }),
+            );
+            assert(!(await refused.minimize()).accepted, "refused minimize degrades");
+            const refusedToggle = await refused.toggleMaximize();
+            assert(!refusedToggle.accepted && !refusedToggle.maximized, "refused toggle degrades");
+            assert(!(await refused.focus()).accepted, "refused focus degrades");
         },
     },
 ];

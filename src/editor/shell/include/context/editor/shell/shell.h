@@ -113,6 +113,10 @@ public:
     [[nodiscard]] InputArbiter& input() { return input_; }
     [[nodiscard]] std::size_t state_index() const { return config_.state_index; }
     [[nodiscard]] bool alive() const { return alive_; }
+    // Whether the OS last reported this window focused (a1: `chrome.state.focused`). False until the
+    // first focus_gained arrives — the honest answer for a window the OS has said nothing about,
+    // which is also every headless window.
+    [[nodiscard]] bool focused() const { return focused_; }
     [[nodiscard]] const std::string& diagnostic() const { return diagnostic_; }
     // True once the placement changed since the last time the manager persisted it.
     [[nodiscard]] bool placement_dirty() const { return placement_dirty_; }
@@ -161,6 +165,7 @@ private:
     std::uint64_t last_placement_poll_us_ = 0;
     std::string diagnostic_;
     bool placement_dirty_ = false;
+    bool focused_ = false;
     bool alive_ = true;
     bool browser_size_synced_ = false;
 };
@@ -223,6 +228,16 @@ public:
     // what to do about it.
     void on_window_create_failed(WindowCreateFailureSink sink);
 
+    // a1 (editor-window-chrome, target design 02 §1): called once per OBSERVED maximized flip, with
+    // the window's id and its new state. The observation rides the placement poll the loop already
+    // runs — pump_once compares each window's polled `last_placement().maximized` against the state
+    // it last saw — so there is no new poll and no OS event subscription. The composition root binds
+    // this to the chrome-fact relay (chrome_facts.h), which turns the flip into an `editor.ui` fact
+    // in the window's mirror queue; unbound (every test/smoke that doesn't care), flips are still
+    // tracked and simply reported to nobody.
+    using ChromeMaximizedSink = std::function<void(WindowId, bool)>;
+    void on_chrome_maximized(ChromeMaximizedSink sink);
+
     // Create a window on demand. `source` is the window the request came from (e10b's floating-group
     // home on failure). Never throws and never partially adopts: on any failure nothing is added,
     // the failure sink fires exactly once, and the registry stays usable.
@@ -283,6 +298,11 @@ private:
         std::unique_ptr<EditorWindow> window;
         WindowId id = kInvalidWindowId;
         std::uint64_t origin = 0;
+        // The maximized state the chrome-fact sink last saw for this window (a1). Seeded from the
+        // backend's real placement at adoption, so a window RESTORED maximized does not fire a
+        // spurious boot-time flip — `chrome.state` carries the initial state; the sink carries
+        // CHANGES only.
+        bool last_maximized = false;
     };
 
     // A destroyed window's session, held until ~WindowManager. Same member order, same reason — and
@@ -325,6 +345,7 @@ private:
     std::vector<RetiredSession> retired_;
     WindowFactory factory_;
     WindowCreateFailureSink failure_sink_;
+    ChromeMaximizedSink chrome_maximized_sink_;
     std::optional<WindowCreateFailure> last_failure_;
     std::size_t create_failures_ = 0;
     WindowId next_id_ = 0;

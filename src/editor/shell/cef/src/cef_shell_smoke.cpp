@@ -314,9 +314,11 @@ int main(int argc, char** argv)
     cef_options.dpi = geometry.dpi;
     // THE app scheme, not a data: URL and emphatically not a file:// path (04 §1), carrying the
     // theme pin so the per-pixel background assertion below is about a theme this test CHOSE rather
-    // than one the host's `prefers-color-scheme` chose for it (see kSmokeThemeId).
+    // than one the host's `prefers-color-scheme` chose for it (see kSmokeThemeId) — plus the a1
+    // `ctx-smoke-chrome` seam flag, under which boot.ts drives each of the three window-control
+    // verbs once so the chrome-contract assertions below can pin their live routing.
     cef_options.url = std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" +
-                      kSmokeThemeId;
+                      kSmokeThemeId + "&ctx-smoke-chrome=1";
     cef_options.app_asset_root = CONTEXT_WEBUI_ASSET_DIR;
     cef_options.bridge = &bridge;
     // Keep the paint rate low: this smoke wants a FRAME, not a frame rate.
@@ -676,6 +678,27 @@ int main(int argc, char** argv)
                     "every hostable panel was rendered, not merely the first");
         SMOKE_CHECK(bridge.secrets_blocked() == 0,
                     "no panel handler attempted to return a protected credential");
+    }
+
+    // --- the a1 chrome-contract assertions (editor-window-chrome, target design 02 §1 / §5) ------
+    //
+    // The LIVE routing proof for the four new boot-time surfaces, which rides two facts already
+    // established above: boot.ts AWAITS the `chrome.state` fetch and the `?ctx-smoke-chrome` seam
+    // BEFORE it brings the panels up, and the wait loop above only breaks once every hostable panel
+    // hydrated — so by here the live renderer has fetched the chrome contract and driven each
+    // control verb exactly once, and the counters are settled (no extra wait needed). The handlers
+    // are deliberately UNBOUND in this smoke (there is no OS window to minimize), so what these pin
+    // is the ten-smoke rule's actual claim: the methods are ROUTED (the counters moved) and nothing
+    // was refused (`bridge.refused() == 0` below still covers every one of these calls).
+    {
+        SMOKE_CHECK(window_move_bridge.chrome_reads() >= 1,
+                    "the live renderer fetched chrome.state at boot, beside welcome.state");
+        SMOKE_CHECK(window_move_bridge.minimizes() == 1,
+                    "the ctx-smoke-chrome seam drove window.minimize exactly once");
+        SMOKE_CHECK(window_move_bridge.maximize_toggles() == 1,
+                    "the ctx-smoke-chrome seam drove window.toggle-maximize exactly once");
+        SMOKE_CHECK(window_move_bridge.focus_requests() == 1,
+                    "the ctx-smoke-chrome seam drove window.focus exactly once");
     }
 
     // Input round-trip into the LIVE browser. NOTE what this does and does NOT prove: the counters
