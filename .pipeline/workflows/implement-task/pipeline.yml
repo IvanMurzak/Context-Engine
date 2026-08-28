@@ -27,4 +27,5 @@ steps:
     body:
       - _shared/worktree-preamble.md
       - steps/land.md
+    model: sonnet
     self_improve: false
