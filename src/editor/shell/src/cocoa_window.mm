@@ -728,9 +728,12 @@ bool CocoaWindowBackend::handle(NSEvent* event)
     // [NSApp sendEvent:] forward for it (the hand-off IS the event's AppKit consumption; see the
     // pump). This must run at NSEvent time, not at dispatch time, because only here does the real
     // NSEvent still exist. The decision itself is the pure caption_press_action, leg-tested
-    // against the SAME last-match-wins hit-test the arbiter routes by, so the two can never
-    // disagree about who owns a press. Every other event — moves, releases, keys, the right
-    // button — flows on untouched.
+    // against the SAME last-match-wins hit-test the arbiter routes by, so the two agree about who
+    // owns a CAPTURE-FREE press. KNOWN GAP: the consult cannot see the arbiter's capture state
+    // (it holds only the RegionMap), so a left press while another button's implicit capture — or
+    // a future modal push_capture — is live is consumed here even though route_pointer would have
+    // routed it to the capture target (or swallowed it for a modal backdrop). Every other event —
+    // moves, releases, keys, the right button — flows on untouched.
     if (type == NSEventTypeLeftMouseDown && caption_regions_ != nullptr && window_ != nil)
     {
         for (std::size_t i = 0; i < batch.count; ++i)
@@ -741,12 +744,20 @@ bool CocoaWindowBackend::handle(NSEvent* event)
             }
             switch (caption_press_action(batch.events[i].pointer, *caption_regions_))
             {
+            // Both consumed arms ACTIVATE first: a titlebar click on a background window makes it
+            // key and orders it front on native macOS, and that behaviour used to arrive through
+            // the [NSApp sendEvent:] forward this consult now skips — neither
+            // performWindowDragWithEvent: nor zoom: is documented to activate, so without the
+            // explicit call a second editor window (e10 tear-outs) could be dragged or zoomed
+            // while the keyboard stayed with its sibling. Idempotent for an already-key window.
             case CaptionPressAction::drag:
                 ++caption_drags_;
+                [window_ makeKeyAndOrderFront:nil];
                 [window_ performWindowDragWithEvent:event];
                 return true;
             case CaptionPressAction::zoom:
                 ++caption_zooms_;
+                [window_ makeKeyAndOrderFront:nil];
                 [window_ zoom:nil];
                 return true;
             case CaptionPressAction::none:
