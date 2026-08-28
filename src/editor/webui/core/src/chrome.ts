@@ -257,21 +257,19 @@ function physicalRegion(
     dpr: number,
 ): ShellRegion | null {
     const rect = element.getBoundingClientRect();
-    const width = Math.round(rect.width * dpr);
-    const height = Math.round(rect.height * dpr);
+    // Round the EDGES and derive the extents, never left+width independently: with fractional CSS
+    // coordinates (text-sized buttons, fractional ratios) `round(left·dpr) + round(width·dpr)` can
+    // land a physical pixel away from `round(right·dpr)` — a region overhanging the window edge or
+    // biting a pixel out of its neighbour in the Shell's hit-test, for an element whose true edge
+    // never moved.
+    const x0 = Math.round(rect.left * dpr);
+    const y0 = Math.round(rect.top * dpr);
+    const width = Math.round(rect.right * dpr) - x0;
+    const height = Math.round(rect.bottom * dpr) - y0;
     if (width <= 0 || height <= 0) {
         return null;
     }
-    return {
-        id,
-        kind,
-        rect: {
-            x: Math.round(rect.left * dpr),
-            y: Math.round(rect.top * dpr),
-            width,
-            height,
-        },
-    };
+    return { id, kind, rect: { x: x0, y: y0, width, height } };
 }
 
 /**

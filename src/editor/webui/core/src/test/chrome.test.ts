@@ -477,15 +477,18 @@ export const chromeTests: readonly TestCase[] = [
                 assert(caption !== undefined, "the caption region exists");
                 assertEqual(caption?.rect.x, Math.round(cssRect.left * dpr), "x is physical");
                 assertEqual(caption?.rect.y, Math.round(cssRect.top * dpr), "y is physical");
+                // Extents derive from the ROUNDED EDGES (chrome.ts § physicalRegion), so the
+                // expectation here is the same arithmetic — `round(width · dpr)` would disagree by
+                // one physical px whenever the CSS edges are fractional.
                 assertEqual(
                     caption?.rect.width,
-                    Math.round(cssRect.width * dpr),
-                    "width is physical",
+                    Math.round(cssRect.right * dpr) - Math.round(cssRect.left * dpr),
+                    "width is physical (edge-rounded)",
                 );
                 assertEqual(
                     caption?.rect.height,
-                    Math.round(cssRect.height * dpr),
-                    "height is physical",
+                    Math.round(cssRect.bottom * dpr) - Math.round(cssRect.top * dpr),
+                    "height is physical (edge-rounded)",
                 );
                 // The controls sit OUTSIDE the caption rect — that is what makes carve-out tokens
                 // unnecessary even before last-match-wins is consulted.

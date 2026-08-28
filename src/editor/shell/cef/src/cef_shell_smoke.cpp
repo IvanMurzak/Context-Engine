@@ -746,6 +746,7 @@ int main(int argc, char** argv)
     // matchMedia resolution flip cannot be driven through an OSR browser from here); the resize
     // trigger is proven live, below, on the same generation observable.
     std::uint64_t regions_generation_before_resize = 0;
+    std::uint32_t caption_width_before_resize = 0;
     {
         const shell::RegionMap& map = editor->input().regions();
         SMOKE_CHECK(map.generation() >= 1,
@@ -792,6 +793,10 @@ int main(int argc, char** argv)
                         "the caption drag surface ends before the first control begins");
         }
         regions_generation_before_resize = map.generation();
+        if (caption != nullptr)
+        {
+            caption_width_before_resize = caption->rect.size.width;
+        }
     }
 
     // Input round-trip into the LIVE browser. NOTE what this does and does NOT prove: the counters
@@ -899,6 +904,13 @@ int main(int argc, char** argv)
     // TRACKING the new physical width. This is the trigger no layout-change publish covers: nothing
     // touched Dockview's layout, only the window's size. The republish rides the same async IPC as
     // everything above, so wait for it rather than reading the map after one pump.
+    //
+    // The wait keys on the CAPTION WIDTH GROWING past its pre-resize value, not on the generation
+    // alone: a straggler publish from another trigger (a Dockview layout event the input round-trip
+    // above provoked) would bump the generation while still carrying the OLD rects, and the old
+    // 640px-window caption already clears a share-of-the-new-width floor — so "generation bumped"
+    // plus a loose floor could score the resize trigger GREEN without it ever firing. Only a
+    // publish that MEASURED after the resize can report a wider caption (the window grew 640→800).
     {
         const auto republish_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
         while (std::chrono::steady_clock::now() < republish_deadline)
@@ -907,8 +919,10 @@ int main(int argc, char** argv)
             {
                 break;
             }
+            const shell::ShellRegion* caption_now = editor->input().regions().find("chrome.caption");
             if (editor->input().regions().generation() > regions_generation_before_resize &&
-                editor->input().regions().find("chrome.caption") != nullptr)
+                caption_now != nullptr &&
+                caption_now->rect.size.width > caption_width_before_resize)
             {
                 break;
             }
@@ -923,8 +937,9 @@ int main(int argc, char** argv)
         const render::Extent2D composed = editor->compositor().size();
         SMOKE_CHECK(caption != nullptr &&
                         caption->rect.origin.x + caption->rect.size.width <= composed.width &&
-                        caption->rect.size.width > composed.width / 2u,
-                    "the republished caption rect TRACKS the resized physical client width");
+                        caption->rect.size.width > caption_width_before_resize,
+                    "the republished caption rect TRACKS the resized physical client width (wider "
+                    "than every pre-resize measurement)");
     }
 
     // Read the presented-frame count BEFORE shutdown: shutdown() -> EditorWindow::close() ->
