@@ -1,0 +1,29 @@
+src/editor/shell/smoke/include/context/editor/shell/smoke/smoke_window.h
+  s_7b2854368302f3::t_2a61b6c06f4132 79,82,84,183-189
+src/editor/shell/smoke/shell_cocoa_smoke_main.cpp
+  s_7b2854368302f3::t_0f8e9ba6004cd9 537-559,931-932,935-936,957-958
+src/editor/shell/smoke/shell_x11_smoke_main.cpp
+  s_7b2854368302f3::t_2e1599c17c4d43 581-584,623-625,638-639,667,679-680,695-697,707,710-711,716
+src/editor/shell/smoke/src/smoke_window.cpp
+  s_7b2854368302f3::t_dc83fe5a104fc5 331-344
+src/editor/shell/tests/test_smoke_window.cpp
+  s_7b2854368302f3::t_91885233c6ac7b 708-739,759
+src/editor/shell/tests/test_window.cpp
+  s_7b2854368302f3::t_14eb021ce74d7f 19,311-315,317-318,320-333,478-482,486,496,502,506,508,537,547-548,586-588,591-593,597,610-611,616-617,621,624-630,637-641,643-645,647-656,666,683,685,688,690-694,696,698-699,709,716-719,729-731,744-745,754,762-763,765-766,768-769,774-775,778,789-790
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "efdc68666676f782b95633a7f3c81ceaf0c13ac5",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
