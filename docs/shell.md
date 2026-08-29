@@ -529,7 +529,12 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_dpi` | Scale derivation, the OS-nonsense clamp, round-to-nearest, the never-collapse rule (and that empty stays empty), signed point conversion across zero |
 | `editor-shell-test_input` | Back-to-front hit-testing, edges and NEGATIVE coordinates, wholesale publish, viewport-vs-browser arbitration, DIP dispatch positions, the implicit drag capture (incl. a second button mid-drag), modal swallow vs overlay fall-through, focus-class key routing, the R-HUX-011 stamp |
 | `editor-shell-test_editor_state` | Round-trip (incl. a negative x and a maximized window's restore rect), the debounce, no-op on identical, `flush_now`, the atomic replace leaving no temp, the degrade on a malformed/negative-extent document, a failed write staying dirty to retry |
-| `editor-shell-test_window` | The pure Win32 decoder — signed LPARAM halves, the minimize carve-out, button mapping, MK_*/modifier split, the signed wheel delta and its deliberate absence of a position, key/char/sys-key, `WM_DPICHANGED`'s low word — plus the headless backend and the never-silent platform selection |
+| `editor-shell-test_window` | The pure Win32 decoder — signed LPARAM halves, the minimize carve-out, button mapping, MK_*/modifier split, the signed wheel delta and its deliberate absence of a position, key/char/sys-key, `WM_DPICHANGED`'s low word — plus the headless backend and the never-silent platform selection; since editor-window-chrome b1 the frameless-frame decisions (insets, the no-8px-overhang max geometry at 96 and 150 %, `hit_test_frame`'s bands / corners / precedence / DPI scaling / maximized branch, the NC-mouse forwarding + consume + synthetic leave, the headless chrome recorder), and since g1 the `hit_test_frame` SWEEP CORPUS — every point of the window rect at four DPIs, both frame states, three region maps, judged against a spec oracle and six oracle-free invariants (§ 15) |
+| `editor-shell-test_cocoa_chrome` | editor-window-chrome c1: the caption-press consult (drag / zoom / none over the real `RegionMap`, last-match-wins layering, click-count rules), the measured traffic-light inset arithmetic (Retina, RTL, degenerate frames), and the off-platform / wrong-backend refusals of the `cocoa_chrome.h` surface |
+| `editor-shell-test_chrome_facts` / `editor-shell-test_menu_facts` | a1 / d3: the `editor.ui.chrome` maximized fact and the `editor.ui.menu` activation fact — envelope shape, UNICAST delivery to the affected window, the honest unbound-store path (and, for the menu, the empty-id refusal + the off-platform `cocoa_menu` refusals) |
+| `editor-shell-test_menu_model` | d3: the published menu model's total, fail-closed parse (drop-per-item tolerance, depth/size caps, the outer shape) and the accelerator tokenizer, on every leg |
+| `editor-shell-x11-window` | e12a: a REAL X11 window through the real `make_window_backend`, the real X11-SHM blitter, live panels, a server-driven repaint (`XClearArea` → `Expose`) and resize (`ConfigureNotify`), the placement readback and the session flush; e12a-x11-legs (#408): a pointer pair + a key INJECTED THROUGH THE X SERVER and decoded by the real `translate_x11_event`, down to one press / one release and the round-tripped `VK_TAB`; **editor-window-chrome g1**: a caption gesture in the a2 shape — hover, press, the drag that leaves the strip, release — suppressed end to end through the X server with the implicit capture released on the release, the dock forwarded again afterwards, and a control press forwarded INSIDE its physical rect (§ 15, Linux). SKIPs (77) with no display; the Linux `editor-cef-smoke` job runs it DIRECTLY with `--require-x11 --require-display` (§ 10) |
+| `editor-shell-cocoa-window` | e12c-3 (#442): a REAL `NSWindow`, the real `CALayer.contents` blitter, live panels, a granted resize, a marked pointer pair + key round-tripped IN-PROCESS through `-[NSApplication postEvent:atStart:]` (the three Cocoa fidelity limits § 11); **editor-window-chrome c1 / d3 / f1**: the hybrid style mask re-read LIVE, the measured positive inset, a caption press consumed whole by `performWindowDragWithEvent:` and a double-click by `zoom:` (which really zooms), the release still arbitrated, no leaked capture, a non-caption press forwarded; the `NSMenu` bar built from `menu.publish` and activated programmatically (`cocoa_menu_perform`, disabled items refused); a factory-created second window carrying the same mask + inset. SKIPs with no GUI session; the macOS `editor-cef-smoke` job runs it DIRECTLY with `--require-cocoa --require-display` |
 | `editor-shell-test_compositor` | The extrapolated layer UV (incl. the full-window identity vs e03), the premultiplied blend + clipping, damage-driven skip, LAYER ORDER and the popup's scissor rect, a hidden popup dropping its layer, the resize protocol, Outdated/Lost keeping the damage, Suboptimal presenting first, a refused surface, both present paths, a malformed producer frame |
 | `editor-shell-test_shell` | The attach guard, the owner loop end to end (DIP browser sizing, input round-trip, viewport vs browser, focus dropping a live drag, idle skip, popup), placement persistence + restore, window drop, shutdown flush |
 | `editor-shell-smoke-session0` | **The blocking CI requirement**: the whole shell loop over software-OSR frames with the composited present asserted PER-PIXEL — see § 9 |
@@ -787,6 +792,206 @@ away the only distinction the split created.
 member, not `pointer`. `ProblemsFeed`'s parser reads both, but only `file` is rendered and navigable,
 so a path in `pointer` is invisible in the panel.
 
+## 15. The window chrome — `chrome.state`, the strips, and the OS frame (editor-window-chrome a1–g1)
+
+The Shell's window was stock OS chrome until 2026-08-28; the **editor-window-chrome** set (Taskflow
+`.taskflow/2026-08-28-editor-window-chrome/`, target design 02, owner decisions D1–D7) made it the
+mockup's frame — titlebar / play bar / dock / statusbar — without a windowing framework (D5: no
+Electron; L-15/L-41 stand). This section records how the repository implements it; the closing task
+g1 verified it, and the table at the end names where every claim lives.
+
+**The contract (a1, 02 §1).** ONE new bridge read, `chrome.state`, on the `window.*` surface
+(`window_bridge.h` `kChromeStateMethod`, bound in `editor_main.cpp`'s `bind_chrome_state`), fetched by
+editor-core at boot beside `welcome.state` (`window.ts`, a total parser that defaults to
+`system`/`primary`):
+
+```
+{ mode: "custom" | "hybrid" | "system",   // what the LIVE backend does — win32 custom, cocoa hybrid, x11 system
+  controlsInset: { left, right },         // physical px the strip must reserve (macOS traffic lights; else 0)
+  maximized, focused,                     // boot snapshots; runtime flips are FACTS (below)
+  window: "primary" | "secondary" }       // derived from the window id the boot seed already distinguishes
+```
+
+Beside it, three window-control verbs (`window.minimize`, `window.toggle-maximize` — the toggle is
+composed in the handler from `placement().maximized`, so the renderer never has to know the state to
+flip it — and `window.focus`, with an optional `windowId` since d3) join the existing `window.close`;
+`IWindowBackend` gained the two chrome VERBS `minimize()` / `set_maximized(bool)` (pure, every backend
+answers: X11's private EWMH `_NET_WM_STATE` shape promoted to the seam plus `XIconifyWindow`, Cocoa
+`miniaturize:`/`zoom:`, Win32 through the placement machinery, headless honest state-only) and the two
+chrome FACTS `set_chrome_regions` / `set_appearance` (NOT pure — "ignore it" is a truthful answer for
+a platform that renders stock chrome; `window.h` states the split). A maximize can come from anywhere
+— the button, a caption double-click, Win+Up, the WM — so the glyph never polls: the 250 ms placement
+poll that already detects the flip publishes it as the **`editor.ui.chrome` fact** (`chrome_facts.h`,
+UNICAST to the affected window, `shell` origin, the eighth built-in `editor.ui` topic), which
+editor-core drains on its existing `ui.mirror-poll`. Being a boot-time surface, every one of these
+is installed in ALL TEN live CEF smokes in the PR that introduced it (the ten-smoke rule,
+`window_bridge.h`) — a1 for `chrome.state` + the three verbs, d1 for `session.control`, d3 for
+`menu.publish`.
+
+**The strips (a2, 02 §2).** `app/index.html` is a flex column: `#editor-titlebar` (38 px) /
+`#editor-playbar` (40 px) / `#editor-root` (flex: 1, the dock) / `#editor-statusbar` (24 px), with
+`#editor-banners` staying the fixed overlay. Strips are app chrome in the banners pattern — styled in
+`app.css` from existing tokens, every CONTROL inside is a kit component, no new kit family, no new
+tokens, no inline styles (CSP). They render in BOTH welcome and project modes; the play bar hides on
+the welcome screen (no session to control). The titlebar's content is mode-gated off `chrome.state`
+(`chrome.ts` `mountChrome`): `custom` = brand + menubar + title + the window-controls cluster;
+`hybrid` = the same minus the cluster, left-padded by `controlsInset` through two CSSOM custom
+properties; `system` = a menu-bar-only strip with no drag duty. The DOM tier proves all three by
+INJECTING states, independent of the live backend. Observables a test or a smoke reads:
+`data-chrome-mode` / `data-chrome-window` / `data-maximized` / `data-chrome-control` on the strip's
+elements, and the `<html>` boot reports `data-editor-strips`, `data-editor-playbar`,
+`data-editor-statusbar`. This deliberately spent what `index.html` used to protect: the dock shrank
+by 102 px and the CEF smokes' per-pixel coverage floor was RECALIBRATED, value unchanged (ROADMAP
+risk 1) — a coverage delta outside the strips' own pixels is a regression, not an expectation to
+widen.
+
+**The region flow (a1/a2, 02 §6) — the vocabulary grew, the seam did not.** `RegionKind` gained
+`caption`, `caption_min`, `caption_max`, `caption_close` (wire tokens `caption`, `caption-min`, …) in
+its CLOSED vocabulary, landed atomically across all four mirror sites (`input.h`,
+`editor_state_bridge.h`, `editorstate.ts`, the `webui-panel-contract` gate — the standing rule is that
+they move together in one commit). editor-core's titlebar is the FIRST real `regionProvider` the
+e05d2 channel ever had: it measures its caption drag surface and the three control rects
+(`getBoundingClientRect` → PHYSICAL px, edge-rounded so a published edge can never overhang or bite a
+neighbour on a fractional DPR) and publishes them WHOLESALE — caption FIRST, controls after, so the
+arbiter's back-to-front last-match-wins needs no carve-out token — on layout change, window resize,
+DPI change, and once more when the d3 menubar fills its column. In `system` mode it publishes an
+EMPTY set: "no drag duty" is a fact the Shell must also see. From the arbiter's `RegionMap` the map
+reaches its consumers three ways: `EditorWindow::pump_once` pushes it DOWN to the backend
+(`set_chrome_regions`, generation-gated, wholesale) for Windows' NC hit-test; the Cocoa pump consults
+the arbiter's map at NSEvent time (§ 3); and the shared arbitration arm (`input.cpp` `target_for`)
+routes the caption DRAG surface `native` — where `shell.cpp`'s native arm drops it, which IS the
+suppression on every backend without an OS-frame consumer — while the CONTROL rects route to the
+BROWSER, because the buttons they outline are web-drawn and the click must reach the web button that
+draws the glyph. The region ids are grep-stable (`chrome.caption`, `chrome.caption-min`,
+`chrome.caption-max`, `chrome.caption-close`) and mirrored by the C++ smokes.
+
+**Windows — `custom`, frameless by the standard NC takeover (b1, 02 §3).** The style stays
+`WS_OVERLAPPEDWINDOW` (Snap, the maximize animation, minimize-to-taskbar all preserved); the frame is
+taken over in the NC messages, every DECISION a pure function over plain integers in `window.h`, run by
+`editor-shell-test_window` on all three legs, and `win32_window.cpp` only converts coordinates and
+applies answers:
+
+- `WM_NCCALCSIZE` → `win32_frameless_client_insets`: restored, l/r/b keep the DPI-scaled resize
+  border (8 px at 96 dpi, 12 at 150 %) and the TOP inset is ZERO — the client reaches the window's top
+  edge and the web titlebar draws there; maximized, ALL sides inset by the border.
+- `WM_GETMINMAXINFO` → `win32_frameless_max_geometry`: the work area inflated by the border on all
+  sides, so with the maximized insets the CLIENT equals the work area EXACTLY — the classic 8 px
+  overhang cancels by construction (ROADMAP risk 2), on a secondary monitor too.
+- `WM_NCHITTEST` → `hit_test_frame(point, client, dpi, maximized, regions)`: resize bands FIRST
+  (the l/r/b NC strips plus the first `border` rows INSIDE the client; the corner extent, 16 px at
+  96 dpi, resolves the diagonals; NO bands when maximized), then the published regions by the map's
+  own last-match-wins — `caption` → `HTCAPTION` (the OS then owns drag / snap / double-click / system
+  menu, which is the whole point of the pattern over a hand-rolled drag loop), the controls →
+  `HTMINBUTTON` / `HTMAXBUTTON` (what lights Snap Layouts on Windows 11) / `HTCLOSE`, every other kind
+  → `HTCLIENT`.
+- The NC MOUSE family → `translate_win32_nc_mouse`: returning the `HT*BUTTON` codes makes the control
+  rects non-client, so the OS stops sending client mouse messages there — but the buttons are
+  web-drawn, so NC moves over a control are FORWARDED (CSS hover), NC presses/releases are forwarded
+  AND CONSUMED (or `DefWindowProc` would run the classic caption-button tracking and fire `SC_CLOSE`
+  itself — a double action), and sliding off a control synthesizes the LEAVE a client-area exit would
+  have produced. The caption itself is suppressed wholesale: no caption point is ever forwarded.
+- `window.set-appearance` (fail-closed tokens, byte-pinned by the `webui-panel-contract` gate) →
+  `DWMWA_USE_IMMERSIVE_DARK_MODE`, the ONE Dwm call the design adds, so the frame's edge tint and drop
+  shadow follow the active theme (D7 skipped the interim DWM-dark phase).
+
+No CEF `OnDraggableRegionsChanged`, no `-webkit-app-region`: the regions already had a proven
+in-house channel, and a second CEF-specific one would duplicate it (02 §11).
+
+**macOS — `hybrid`, native buttons stay native (c1, 02 §4; d3 for the menu).** § 3 has the
+mechanism: `NSWindowStyleMaskFullSizeContentView` + a transparent, title-hidden titlebar; the traffic
+lights float where macOS puts them and `controlsInset` is MEASURED from the real
+`standardWindowButton:` frames (RTL mirror included, `cocoa_chrome.h`); a single left press on a
+published `caption` rect is handed to `performWindowDragWithEvent:` and a double-click is `zoom:`,
+the press consumed whole so the browser can never hold a stuck hover from a half-press; both arms
+`makeKeyAndOrderFront:` first, so a background window's titlebar press cannot drag it while the
+keyboard stays elsewhere. The menu does NOT render in the strip there: `menu.publish` feeds the
+native global `NSMenu` bar, and an activation returns as the `editor.ui.menu` fact.
+
+**Linux — `system`, server-side decorations (D6).** The WM owns the frame: no CSD, no window
+buttons, no caption duty. The strip is the web menubar (two stacked bars is the conventional Linux
+shape), the titlebar publishes an empty region set, and the X11 backend keeps `window.h`'s no-op
+`set_chrome_regions` / `set_appearance` forever. What the Linux leg CAN prove — and does, in
+`editor-shell-x11-window`'s g1 step — is the shared-arbitration half of the contract against samples
+that made the real client → X server → client round trip: a caption gesture published in the a2
+shape is arbitrated and dropped (hover, press, the drag that leaves the strip, the release — the
+implicit capture holding throughout and released on the release), a sample over the dock reaches the
+browser again afterwards, and a control press is forwarded INSIDE the physical rect it was aimed
+at.
+
+**The play bar (d1, 02 §7), the statusbar (d2, §8), the menu (d3, 03).** The play bar is the
+mockup strip — status dot + label, the `t+` timer, a disabled "Scene" Target chip (declared future
+surface), transport buttons — rendered by editor-core (`playbar.ts`) into the a2 slot and driven by
+the existing 500 ms `session.state` poll, whose reply gained an ADDITIVE `simTick` (the daemon already
+minted it) so the timer is truthful. Control rides ONE new bridge method, `session.control {verb:
+play|pause|stop|step}` on the existing `SessionBridge`, relaying to the surviving `SessionFeed` writer
+with its `origin` echo suppression; editor-core registers real `play.play/pause/stop/step` commands
+(the retired panel's ids) so the strip's buttons, the palette and the menu share one write path. It is
+the first writer of `data-play-state`, with the honest 3→5 mapping (`edit→idle`, `playing→running`,
+`paused→paused`; `compiling`/`error` stay unreachable until the build pipeline publishes those facts,
+pinned as such). FPS is NOT rendered — nothing measures it until e11. The docked `builtin.playbar`
+panel was RETIRED (e1, D2): roster entry, a11y factory + manifest row, help topic, `hostable_panel_ids`
+6 → 5, and the enumerated m5/m85 frozen gates AMENDED owner-visibly (the e06d five-gate-partition
+precedent); the `PlaybarModel`/`SessionFeed` transport survives untouched and still carries the id.
+The statusbar renders exactly what already has a truthful source: daemon link state (the banners'
+`daemon.linkState` feed), the problems count, the active theme, the project name. The menu is ONE
+declarative model in editor-core (`menu.ts`, 03's tree: App on macOS / File / Edit / View / Selection /
+Panel / Window / Help, every item a command id in the e07b registry, enablement sourced from
+`CommandAvailability`), rendered as a web menubar inside the titlebar on Windows/Linux (ARIA
+`menubar`/`menu`/`menuitem`, arrow/Enter/Escape/Home/End navigation) and as the native `NSMenu` bar
+on macOS through `menu.publish` (§ 3) — no second dispatch system, pinned by a test that feeds one
+spy from both the palette and a menubar click.
+
+**Secondary windows (f1, 02 §9, D4).** A torn-out window gets the same chrome mode with a COMPACT
+strip: panel title + the controls cluster (`custom`) or the inset padding (`hybrid`), no brand, no
+palette button — and the play-bar + statusbar elements are REMOVED from the document outright, so
+"no menu / play bar / statusbar there" is structural, never a hidden node. `chrome.state.window ==
+"secondary"` is the gate, observable as `data-chrome-window`; the compact strip publishes its own
+caption + control regions over ITS window's channel; framelessness holds for every window the factory
+creates because they take the same `WindowDesc` → backend path as window 0 (pinned live in
+`editor-cef-smoke-shell-tearout` and, for the Cocoa style mask, in `editor-shell-cocoa-window`).
+
+**The interim-honesty staging — now history.** The set was cut so that `chrome.state.mode` always
+reported what the backend actually DID, never the target table: a1 shipped every backend as `system`
+with ZERO visual change, b1 flipped win32 → `custom` and c1 flipped cocoa → `hybrid` in the same PRs
+that made those true, x11 stays `system` by design. That is what avoided double chrome (web controls
+over a stock OS titlebar) between waves, and why a2 implemented and DOM-tested all three modes by
+injecting states before any live backend reported them. It is closed: every backend now reports what
+it does, and `editor-shell-cocoa-window` re-reads the Cocoa style mask off the live `NSWindow` at
+call time, so the report can never again outrun the behaviour.
+
+**Where each chrome claim lives (the g1 verification map).**
+
+| Claim | Pinned by |
+|---|---|
+| `chrome.state` shape, the three verbs, honest unbound degrade, `window.focus` `windowId` refusal | `editor-shell-test_window_bridge`; the read + verbs asserted with `bridge.refused() == 0` in all ten CEF smokes |
+| The two backend chrome verbs on every backend; the headless recorder for the push-down | `editor-shell-test_window` (the `headless_backend_chrome_*` cases), `editor-shell-test_shell` (the generation-gated push) |
+| The `maximized` fact: envelope, unicast, no phantom boot fact at the real poll interval | `editor-shell-test_chrome_facts`, `editor-shell-test_shell` |
+| Four caption tokens in all four mirror sites, unknown kind refused | `editor-shell-test_editor_state_bridge`, `webui-panel-contract`, `webui-ts-unit` (`editorstate.test.ts`) |
+| The strips, mode gating, glyph flip, physical-px measurement at dpr 2, publisher triggers, secondary compact strip, ARIA | `webui-ts-unit` (`chrome.test.ts`, `boot.test.ts`, `window_a11y.test.ts`) |
+| Four chrome rects arrive in the live `RegionMap` in physical px, caption first, resize re-publishes; coverage floor recalibrated | `editor-cef-smoke-shell` (a2 step) |
+| Arbitration: caption → native, controls → browser, implicit capture across a drag | `editor-shell-test_input`, `editor-shell-test_shell` |
+| Insets, max geometry (no 8 px overhang at 96 and 150 %), band + corner metrics, `hit_test_frame` precedence, NC mouse forwarding/consume/leave | `editor-shell-test_window` (b1 cases) |
+| `hit_test_frame` over EVERY point of the window rect — four DPIs, both frame states, three maps (empty / a2 / overlapping) — against a spec oracle plus oracle-free invariants (closed answer set, no bands maximized, band-map independence, mirror symmetry, measured metrics, DPI monotonicity) | `editor-shell-test_window` (the g1 sweep corpus) |
+| The live rects answer the NC codes; a live caption press routes native and a control press to the browser; restored-vs-maximized top row | `editor-cef-smoke-shell` (b1 step), `editor-cef-smoke-shell-tearout` (f1, the secondary's own map) |
+| Cocoa: style mask live, inset measured and positive, caption press → drag consumed whole, double-click → `zoom:` really zooms, release still arbitrated, non-caption press forwarded, factory window carries the mask, menu build + activation round trip | `editor-shell-cocoa-window` (c1 / d3 / f1 steps, macOS `editor-cef-smoke` job); pure decisions in `editor-shell-test_cocoa_chrome`, `editor-shell-test_menu_model`, `editor-shell-test_menu_facts` |
+| X11: a caption gesture through the real X server suppressed end to end, capture released, dock forwarded afterwards, control press forwarded inside its physical rect | `editor-shell-x11-window` (the g1 step, Linux `editor-cef-smoke` job) |
+| `session.control` → `SessionFeed`, `simTick` relay, `data-play-state` mapping, the retired dock panel absent everywhere it was anchored | `editor-shell-test_session_bridge`, `editor-shell-test_session_feed`, `webui-ts-unit` (`playbar.test.ts`), `editor-shell-test_builtin_panels`, `gui-contract`/`gui-a11y`/`gui-help` roster gates, the amended `m5-exit-1/2/3` + `m85-exit-4c` gates |
+| Statusbar content and its ARIA groups | `webui-ts-unit` (`statusbar.test.ts`) |
+| The menu model's total parse, caps, accelerator tokenizer; the web menubar's keyboard map; one dispatch path | `editor-shell-test_menu_model`, `webui-ts-unit` (`menu.test.ts`) |
+
+**The ROADMAP's six named risks, closed out.** (1) the CEF-smoke pixel-coverage floor: recalibrated
+for the 102 px-shorter dock with its VALUE unchanged (`cef_shell_smoke.cpp` § the coverage floor);
+(2) the frameless-maximized overhang: `test_maximized_client_lands_exactly_on_the_work_area_at_96_and_150_percent`
+plus the sweep's "no band anywhere maximized" invariant; (3) caption drag vs CEF input: the suppression
+is asserted live on all three legs — `editor-cef-smoke-shell` (headless arbitration + the NC decision
+table), `editor-shell-cocoa-window` (the consumed press, the arbitrated release, no leaked capture),
+`editor-shell-x11-window` (the whole gesture through the X server) — and pure in `test_input` /
+`test_shell` / `test_window`'s synthetic-leave case; (4) the m5-exit amendments: enumerated in PR #486's
+body per the standing gate, none deleted; (5) `chrome.state` on the welcome screen: the strips render
+there, the play bar hides, the welcome smokes joined a2's update set; (6) play-state staleness after a
+daemon restart (CE #356): INHERITED by the strip, documented in `playbar.ts`, fixed upstream, not
+here.
+
 ## 9. Why the blocking smoke opens no window
 
 The Windows CI legs run on a self-hosted runner installed as a LocalSystem service — Session 0. There
@@ -853,6 +1058,28 @@ cmake --build --preset dev --target context_editor    # from src/
 
 Automating this needs an interactive runner, which the design's gate table still tracks as
 unprovisioned — **every row of the table above is still manual, on all three OSes.**
+
+### Still manual — the window chrome (editor-window-chrome a1–f1, closed out by g1)
+
+Every landing PR of the chrome set named its CI-unreachable remainder under this precedent; g1
+collects them here so the list has ONE home. What CI DOES carry for each is named beside it, so
+"manual" never reads as "unverified" — the pure halves are ctest-pinned on all three legs and the
+live halves ride the windowed smokes (§ 15's verification map).
+
+| Step | Expected observation | What CI already pins |
+|---|---|---|
+| Windows: drag the titlebar strip | The window MOVES with the pointer, the OS drag (not a hand-rolled loop); a double-click on the strip maximizes / restores; right-click on the strip opens the system menu | `hit_test_frame` → `HTCAPTION` over the live rects (`editor-cef-smoke-shell`, Windows self-hosted leg); the sweep corpus |
+| Windows: Snap | Win+Arrow, drag-to-edge and Snap Layouts on hover over the web-drawn maximize button all behave as on a stock window | `HTMAXBUTTON` over the live maximize rect; NC moves over a control forwarded, never consumed (`translate_win32_nc_mouse`) |
+| Windows: the web-drawn controls | Hover lights them (CSS), a click minimizes / toggles maximize / closes exactly once (no double action from `DefWindowProc`'s classic tracking), sliding off a control clears its hover | NC press/release forwarded AND consumed, the synthetic leave — `editor-shell-test_window`; the verbs — `editor-shell-test_window_bridge` |
+| Windows: maximize on a multi-monitor mix (a secondary monitor, a docked taskbar, 150 %) | The client fills the work area exactly — no 8 px spill off any edge, no letterbox gap | `win32_frameless_max_geometry` ∘ `win32_frameless_client_insets` == work area at 96 and 144 dpi, taskbar offset included |
+| Windows: the DWM dark-mode tint | Switching the theme flips the frame's edge tint / drop shadow to match | `window.set-appearance` tokens (`editor-shell-test_window_bridge`, `webui-panel-contract`); the Dwm call itself is CI-unreachable |
+| Windows: the real NC message stream | `WM_NCCALCSIZE` / `WM_NCHITTEST` / the NC mouse family arriving from a REAL `HWND` on an interactive desktop | The pure decisions on all three legs; the Session-0 runner cannot deliver NC messages |
+| macOS: drag the strip by hand, double-click it | The window moves under the real cursor; a double-click zooms | `editor-shell-cocoa-window` drives the same consult PROGRAMMATICALLY (`postEvent:` → `performWindowDragWithEvent:` / `zoom:` — the zoom is observed, the drag's window move is not asserted because AppKit's synthesized-event drag needs a real cursor) |
+| macOS: click the real on-screen menu bar | The item's command runs; the key equivalent (⌘-mapped from the published accelerator) runs it too | The `NSMenu` build + `cocoa_menu_perform` activation round trip, disabled items refused |
+| macOS: the traffic lights over the strip | The strip's content starts to the right of the buttons at every window width; no control sits under them | The inset is MEASURED from the real button frames and asserted positive and sane; the padding is the DOM tier's |
+| Linux: the strip under a real window manager | Two stacked bars — the WM's titlebar with its own buttons above the web menubar; dragging the WM's bar moves the window, dragging the strip does NOT (no drag duty in `system` mode) | An empty region set in `system` mode (`chrome.test.ts`); the arbitration half through the X server (`editor-shell-x11-window`); bare Xvfb in CI has no WM, so WM behaviour is not reproducible there |
+| Web menubar: Alt-mnemonics | Alt+F opens File, … | NOT implemented (d3 deferred and recorded); arrows / Enter / Escape / Home / End are pinned |
+| All OSes: the chrome against the d1 mockups, pixel for pixel | Strip heights, spacing, typography and the play-bar flourish match `mockups/editor.html` in both themes | Nothing pixel-level — this is what **e16**'s visual-regression harness is handed (the m9-editor backlog records the hand-off) |
 
 What **e12a** moved onto CI is the layer *underneath* that table, on Linux: the CEF-FREE
 window/present/event spine. The `context_editor_shell_x11_smoke` executable — run directly under
@@ -1143,3 +1370,17 @@ Named so the gaps are visible rather than assumed:
   is e03's full-window composite gate and never scissors. The PET_POPUP confinement is asserted as
   "the compositor passed this rect", not per-pixel against a GPU.
 - **The interactive windowed pass is manual** — § 10.
+- **The window chrome (editor-window-chrome, § 15) — what it deliberately does NOT do.** No CSD on
+  Linux (D6, by design, not a gap). No live FPS in the play bar and a static, disabled Target chip —
+  the sources arrive with e11 / the build pipeline. `compiling` / `error` play states are unreachable
+  until those facts are published. The strip inherits CE #356 (play-state staleness after a daemon
+  restart) — fixed upstream, not here. `window.quit` from a SECONDARY window closes only that window
+  (a Shell-side "close primary" surface would be needed); the web menubar's dropdown does not close
+  on focus-out and has no Alt-mnemonics; the About dialog is `aria-modal` without a focus trap (all
+  three recorded by d3). No keymap wiring beyond what the menu needs (the e07c resolver seam is
+  untouched); the accelerator column DISPLAYS `DEFAULT_KEYBINDINGS` strings, and only the macOS
+  `NSMenu` key equivalents are live wiring. The ten live CEF smokes still run HEADLESS on macOS (CE
+  #443), so `mode:"hybrid"` is provable only in the CEF-free `editor-shell-cocoa-window`. The real
+  Windows NC message stream is CI-unreachable (Session 0) — the pure halves are pinned everywhere, the
+  interactive rows live in § 10. And no visual-regression pins the finished chrome yet: that is
+  **e16**'s, and this set hands it a STABLE surface (§ 15's DOM ids, attributes and region ids).
