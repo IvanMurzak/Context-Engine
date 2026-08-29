@@ -23,11 +23,15 @@
 //      but the provider was an empty default (editorstate.ts). This module measures the titlebar's
 //      caption DRAG surface and the three window-control rects (`getBoundingClientRect` → PHYSICAL
 //      px, the coordinate space the Shell's InputArbiter hit-tests in) and publishes them WHOLESALE
-//      on layout change (via LayoutPersistence's regionProvider seam), on window resize, and on DPI
-//      change. Controls publish AFTER the caption rect, so the Shell's back-to-front last-match-wins
-//      arbitration (input.cpp) needs no carve-out token. In `system` mode the provider publishes an
-//      EMPTY set — "no drag duty" is a fact the Shell must also see, and a wholesale empty publish
-//      is what clears a stale rect after a mode ever changed.
+//      on layout change (via LayoutPersistence's regionProvider seam), on window resize, on DPI
+//      change — and once more when the d3 menubar fills its slot (boot.ts § startMenu awaits
+//      `publisher.publishNow()`): the menubar takes a column of the strip AFTER the awaited initial
+//      publish, and no other trigger sees that, so without it the Shell would hold a stale caption
+//      rect that swallows menubar clicks as drags. Controls publish AFTER the caption rect, so the
+//      Shell's back-to-front last-match-wins arbitration (input.cpp) needs no carve-out token. In
+//      `system` mode the provider publishes an EMPTY set — "no drag duty" is a fact the Shell must
+//      also see, and a wholesale empty publish is what clears a stale rect after a mode ever
+//      changed.
 //
 // The native CONSUMERS of these regions are b1's Windows NC hit-test (caption → HTCAPTION, the
 // controls → HT*BUTTON) and c1's macOS caption-press drag; until those land the Shell's dispatch

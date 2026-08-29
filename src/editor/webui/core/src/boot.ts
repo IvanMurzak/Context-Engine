@@ -1005,9 +1005,9 @@ async function startMenu(bridge: ShellBridge, options: StartMenuOptions): Promis
 
     // The web menubar — only where the titlebar mounted a slot (custom/system chrome on the
     // primary window; chrome.ts owns the gating and the hybrid/secondary "no slot" cases).
-    try {
-        const slot = chromeStrips?.mount.menubarSlot ?? null;
-        if (slot !== null) {
+    const slot = chromeStrips?.mount.menubarSlot ?? null;
+    if (chromeStrips !== undefined && slot !== null) {
+        try {
             mountMenubar(slot, {
                 model,
                 contextProvider: whenContext,
@@ -1015,9 +1015,21 @@ async function startMenu(bridge: ShellBridge, options: StartMenuOptions): Promis
                 commandAvailable,
                 isMaximized,
             });
+        } catch {
+            // Reported by the absence of `data-editor-menubar`; the editor is up and usable.
         }
-    } catch {
-        // Reported by the absence of `data-editor-menubar`; the editor is up and usable.
+        // The menubar just took its column of the strip, so the caption drag element — the rect
+        // a2's regionProvider measures as `chrome.caption` — is NARROWER than the map the awaited
+        // initial publish (startChromeStrips, which ran with this slot still empty) handed the
+        // Shell, and none of the publisher's triggers fires for that: no window resize, no DPI
+        // change, and no Dockview layout change (LayoutPersistence's seam attaches later, inside
+        // startPanels). Republish NOW, awaited, so the map the Shell holds when boot reports ready
+        // is the strip as it is actually laid out: a stale caption would swallow menubar clicks as
+        // caption drags (02 §6 arbitrates caption hits BEFORE client routing), and the next live
+        // resize would republish a caption narrower than the stale one — the live smoke's "the
+        // caption TRACKS the resized width" failure. Refusal-tolerant on the client side, like the
+        // initial publish.
+        await chromeStrips.publisher.publishNow();
     }
 
     return {
