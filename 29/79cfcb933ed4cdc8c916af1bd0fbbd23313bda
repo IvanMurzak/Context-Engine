@@ -1,0 +1,23 @@
+src/editor/shell/src/cocoa_window.mm
+  s_7b2854368302f3::t_0c40a426e30981 958-963,967,969-983,988,990,996-997,1001
+src/editor/shell/smoke/shell_cocoa_smoke_main.cpp
+  s_7b2854368302f3::t_8a7fd9a85b72cf 919-920,924
+  s_7b2854368302f3::t_e6a0b68c9dd34b 941-944,947,955-963
+  s_7b2854368302f3::t_8afc47d201d80e 980
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2979cfcb933ed4cdc8c916af1bd0fbbd23313bda",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
