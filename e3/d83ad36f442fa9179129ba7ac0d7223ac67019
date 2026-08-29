@@ -1,0 +1,28 @@
+src/editor/shell/tests/test_window_bridge.cpp
+  s_7b2854368302f3::t_2473dd2db0eb20 395-401
+src/editor/webui/core/src/menu.ts
+  s_7b2854368302f3::t_f354b73e6e878d 1145-1154
+  s_7b2854368302f3::t_d66d12dfba1399 1296-1301
+src/editor/shell/src/window_bridge.cpp
+  s_7b2854368302f3::t_b50aed48dac9ae 352-356
+src/editor/shell/include/context/editor/shell/cocoa_menu.h
+  s_7b2854368302f3::t_624e8921d48ddb 8
+src/editor/shell/src/cocoa_window.cpp
+  s_7b2854368302f3::t_3311d53eb509d9 54
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e3d83ad36f442fa9179129ba7ac0d7223ac67019",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
