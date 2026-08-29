@@ -16,8 +16,6 @@
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 #include "context/editor/gui/panels/tilemap/tilemap_paint_panel.h"
-#include "context/editor/gui/playbar/playbar_model.h"
-#include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/session/undo/undo_journal.h"
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/gui/uitree/panel.h"
@@ -65,9 +63,7 @@ std::vector<std::pair<std::string, PanelFactory>> panel_factories()
     factories.emplace_back(viewport::ViewportPanel::kContributionId,
                            []() { return viewport::ViewportPanel{}.build_panel(); });
 
-    // M5-F5 — the play-in-editor playbar panel (gui/playbar/).
-    factories.emplace_back(playbar::PlaybarModel::kContributionId,
-                           []() { return playbar::build_playbar_panel(playbar::PlaybarModel{}); });
+    // (M5-F5's docked playbar factory retired with its roster entry — editor-window-chrome e1.)
 
     // M5-F4 — the Problems observer panel (gui/panels/problems/).
     factories.emplace_back(panels::problems::ProblemsPanel::kContributionId,

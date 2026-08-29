@@ -346,11 +346,18 @@ int main()
     }
 
     // === Seam 7 — F5 play-in-editor: the L-51 edit/play seam + the L-22 hot-reload classification ====
-    // e08b split the seam in two. The PLAYBAR half now drives DAEMON play state over the session seam
-    // (the in-process path is gone, not shadowed); the SessionControl half still owns the runtime
-    // session and the L-22 classification. Both are asserted, because both are still real seams.
+    // e08b split the seam in two. The play-TRANSPORT half now drives DAEMON play state over the
+    // session seam (the in-process path is gone, not shadowed); the SessionControl half still owns
+    // the runtime session and the L-22 classification. Both are asserted, because both are still
+    // real seams.
+    //
+    // AMENDED by editor-window-chrome e1 (D2): the docked `builtin.playbar` PANEL retired — the d1
+    // titlebar strip is the Play Bar's only home. This seam was ALWAYS the transport, never the dock
+    // surface, so 7a below is exactly the SURVIVING model+RPC path the strip drives
+    // (`SessionFeed::control` -> `PlaybarModel` -> `editor.play|pause|stop|step`) — re-pointed in
+    // prose, unchanged in substance.
     {
-        // 7a — the playbar over the daemon's L-51 machine.
+        // 7a — the play transport (`PlaybarModel`) over the daemon's L-51 machine.
         SeamPlayDaemon daemon;
         playbar::PlaybarModel model(&daemon);
         CHECK(model.state() == playbar::PlayState::edit);

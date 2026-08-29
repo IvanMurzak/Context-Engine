@@ -547,10 +547,10 @@ const std::vector<std::string>& hostable_panel_ids()
         gui::panels::problems::ProblemsPanel::kContributionId,
         gui::panels::scenetree::SceneTreePanel::kContributionId,
         gui::panels::inspector::InspectorPanel::kContributionId,
-        // e08b: hostable because the playbar stopped being a runtime-session driver. Its library now
-        // links nothing but the headless uitree (gui/playbar/CMakeLists.txt explains the split), so
-        // binding it here adds no weight to `context_editor`'s D10-audited closure.
-        gui::playbar::PlaybarModel::kContributionId,
+        // `builtin.playbar` (hostable e08b..e09) is RETIRED — editor-window-chrome e1 (D2): the d1
+        // titlebar strip is the Play Bar's only home, driving the SAME SessionFeed/PlaybarModel
+        // transport over `session.control`, so the dock surface came off the roster and out of this
+        // list together with its a11y and help anchors.
         // e09c: the session history surface. Rostered since e05b but UNHOSTED until now: with no
         // provider there was no way to reach `session.undo` / `session.redo` from the renderer at
         // all, so the journal could be neither driven nor observed (and, having no host, nothing
@@ -597,23 +597,16 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         // pump daemon events into a model no renderer can ever see.
     }
 
-    // --- the daemon session feed + the playbar (M9 e08b) -----------------------------------------
+    // --- the daemon session feed (M9 e08b; the docked playbar RETIRED by editor-window-chrome e1) -
     // Constructed BEFORE the Scene tree, because it IS the SelectionGateway that panel writes
     // through: the panel takes the gateway at construction, and a gateway must outlive its panel.
-    // Binding the playbar provider here is what makes the L-51 indicator a live, daemon-fed surface
-    // rather than a rostered-but-unhosted one.
-    {
-        auto session =
-            std::make_unique<SessionFeed>(host, gui::playbar::PlaybarModel::kContributionId);
-        if (host.provide(gui::playbar::PlaybarModel::kContributionId, session->make_provider()))
-        {
-            ++out.bound;
-            out.session = std::move(session);
-        }
-        // A refused binding DROPS the feed (the ProblemsFeed rule) — and with it the Scene tree's
-        // gateway, so the tree below is constructed with none and honestly renders a selection it
-        // cannot change, rather than writing through a feed nothing routes to.
-    }
+    // Since e1 the feed hosts NO panel — the d1 titlebar strip (session_bridge's `session.*` verbs)
+    // is the Play Bar's only home — so the feed is pure transport now: the `session` topic
+    // subscriber and the play/selection write seams. Created UNCONDITIONALLY (there is no binding
+    // left to refuse), and counted in `bound` by nothing: `bound` counts hosted PROVIDERS, and the
+    // feed no longer is one. The retired panel id it still carries only addresses `host.touch`,
+    // which panel_host.h documents as a no-op for an id the roster no longer knows.
+    out.session = std::make_unique<SessionFeed>(host, gui::playbar::PlaybarModel::kContributionId);
 
     // --- Scene tree + Inspector (M9 e05d3, the D10-split pair) ----------------------------------
     // Hostable because their kernel-typed builders moved daemon-side (gui/panels/builders/): the

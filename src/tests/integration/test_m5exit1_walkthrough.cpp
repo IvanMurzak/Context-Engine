@@ -30,7 +30,6 @@
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 #include "context/editor/gui/playbar/playbar_model.h"
-#include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/playbar/session_control.h"
 #include "context/editor/gui/session/undo/undo_journal.h"
 #include "context/editor/gui/uitree/panel.h"
@@ -388,10 +387,18 @@ int main()
     problems_panel.on_derivation_settled(7, context::editor::bridge::Stability::stable);
     CHECK(problems_panel.model().provisional == 0);
 
-    // === PLAY IT — F5 playbar starts a session over the edit-state VIEW (L-51) ========================
-    // e08b split this into its two real halves: the PLAYBAR drives the daemon's L-51 state over the
-    // session seam, and the RUNTIME session adapter produces the frame the F1 viewport observes. Both
-    // are exercised, because both are part of "play it" — they are simply no longer the same object.
+    // === PLAY IT — F5 play transport starts a session over the edit-state VIEW (L-51) =================
+    // e08b split this into its two real halves: the play TRANSPORT (`PlaybarModel`) drives the
+    // daemon's L-51 state over the session seam, and the RUNTIME session adapter produces the frame
+    // the F1 viewport observes. Both are exercised, because both are part of "play it" — they are
+    // simply no longer the same object.
+    //
+    // AMENDED by editor-window-chrome e1 (D2): the docked `builtin.playbar` PANEL retired — the d1
+    // titlebar strip is the Play Bar's only home, and it drives play through exactly this surviving
+    // model+RPC path (`SessionFeed::control` -> `PlaybarModel` -> `editor.play|pause|stop|step`).
+    // This leg therefore RE-POINTS at that surviving truth: the model-over-gateway transitions below
+    // ARE the walkthrough's "play it", and the retired dock surface leaves the rendered-panel sweep
+    // at the end (the strip's own DOM a11y is the `webui-ts-*` browser tier's gate).
     WalkthroughSession session;
     session.drawables = 4;
     session.directional_lights = 1;
@@ -496,14 +503,15 @@ int main()
     // === Every panel in the journey renders an a11y-clean, keyboard-navigable surface =================
     // (The dedicated all-panels + coverage-manifest gate is m5-exit-2; this asserts the panels the
     // walkthrough actually drove are conformant in the states it drove them to.)
+    // (e1: no playbar surface in this sweep — the docked panel retired with its roster/a11y/help
+    // anchors, and the strip that replaced it is DOM, gated in the `webui-ts-*` browser tier.)
     const uitree::Panel tree_ui = tree.build_panel();
     const uitree::Panel inspector_ui = ipanel.build_panel();
     const uitree::Panel problems_ui = problems_panel.build_panel();
     const uitree::Panel viewport_ui = vp.build_panel();
-    const uitree::Panel playbar_ui = playbar::build_playbar_panel(playbar_model);
     const uitree::Panel undo_ui = journal.build_panel();
     for (const uitree::Panel* ui :
-         {&tree_ui, &inspector_ui, &problems_ui, &viewport_ui, &playbar_ui, &undo_ui})
+         {&tree_ui, &inspector_ui, &problems_ui, &viewport_ui, &undo_ui})
     {
         CHECK(uitree::audit_a11y(*ui).empty());     // R-A11Y-001 semantic/ARIA + reachable commands
         CHECK(!uitree::render_html(*ui).empty());   // the DOM the CEF host paints

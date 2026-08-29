@@ -17,7 +17,9 @@ target_include_directories(context_gui_a11y PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/i
 # their public API (the registry maps ids to headless panel factories). context_gui_panel_scenetree is
 # PRIVATE — registry.cpp instantiates the M5-F2 panel to scan it, but the panel type never appears in
 # a11y's public headers (registry.h maps ids to uitree::Panel factories). Each fan-out panel the
-# registry scans adds its lib here likewise. context_gui_contract is PRIVATE too: since M9 e05b
+# registry scans adds its lib here likewise (and a panel RETIRED from the roster drops its lib —
+# editor-window-chrome e1 removed context_gui_playbar with the playbar factory). context_gui_contract
+# is PRIVATE too: since M9 e05b
 # registry.cpp DERIVES the scan list from contract::builtin_contributions() (the single built-in
 # roster), but no contract type appears in a11y's public headers. context_warnings is PRIVATE so no
 # warning flags leak to the CEF host consumer (conventions.md). NO new third-party dependency.
@@ -26,7 +28,7 @@ target_link_libraries(context_gui_a11y
     PRIVATE context_gui_contract
             context_gui_panel_scenetree context_gui_panel_inspector context_gui_panel_problems
             context_gui_panel_tilemap context_gui_viewport context_gui_viewport_edit
-            context_gui_playbar context_gui_help context_gui_undo context_warnings)
+            context_gui_help context_gui_undo context_warnings)
 
 # harness.cpp uses std::ostringstream and the scan exe uses std::ofstream, so static-link the GCC
 # runtime (gated to GNU) to keep the local ctest gate deterministic against a PATH-shadowed

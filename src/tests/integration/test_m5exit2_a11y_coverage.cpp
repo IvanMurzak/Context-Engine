@@ -129,8 +129,14 @@ int main()
 
     // Every M5 shipped OBSERVER panel must be registered (F4 Problems was the historically-missing one —
     // this exit registers it, completing the coverage manifest).
+    //
+    // AMENDED by editor-window-chrome e1 (D2): the docked `builtin.playbar` RETIRED from the shipped
+    // set — the d1 titlebar strip is the Play Bar's only home (its DOM a11y lives in the `webui-ts-*`
+    // browser tier), so the panel left the roster, this scan list, and the coverage manifest
+    // together. The gate keeps asserting the SURVIVING M5 panels, and pins the retirement below so a
+    // half-re-add cannot drift back in unreviewed.
     for (const char* id : {"placeholder", "builtin.scene-tree", "builtin.inspector", "builtin.viewport",
-                           "builtin.playbar", "builtin.problems"})
+                           "builtin.problems"})
     {
         if (registered_ids.count(id) == 0)
         {
@@ -138,6 +144,7 @@ int main()
         }
         CHECK(registered_ids.count(id) == 1);
     }
+    CHECK(registered_ids.count("builtin.playbar") == 0); // e1: retired, no longer scanned
 
     // The registry (what the harness SCANS) must exactly match coverage.manifest.jsonl (what the CI DOM
     // gate DECLARES) — a panel in one but not the other is a coverage failure (mirrors tools/a11y_scan.py).

@@ -152,8 +152,9 @@ endif()
 
 # ===================================================================================================
 # The M9 e08b PANEL-STATE-REWIRING T2 DRILL (design 05 §4, D7 tier 1) — the e08b DoD proven end to
-# end: the REAL Shell panel composition (`install_builtin_panels` -> SceneTreeFeed + SessionFeed +
-# the hosted playbar) driving the REAL client SDK against a REAL `context daemon`, with the REAL
+# end: the REAL Shell panel composition (`install_builtin_panels` -> SceneTreeFeed + SessionFeed —
+# pure transport since editor-window-chrome e1 retired the docked playbar) driving the REAL client
+# SDK against a REAL `context daemon`, with the REAL
 # `context` binary spawned as the SECOND client. It is the only place the `origin` echo-suppression
 # contract can actually be checked — a scripted wire has no notion of "another connection" — so it
 # links the Shell panel library rather than re-deriving its wiring. A plain `editor-session-` ctest,
@@ -498,8 +499,9 @@ foreach(_i RANGE ${_m5_exit_last})
     add_executable(context_${_t} ${_t}.cpp)
     # The union of the M5 headless editor-GUI libraries the exit gates drive (all CEF-free, default-built
     # on the 3-OS matrix): the a11y harness + registry, the R-EDIT-001 extension contract, the L-41
-    # compositor seam, every observer panel (scene-tree / inspector / problems / viewport / playbar) + the
-    # F7 session undo, over uitree. context_compose / context_serializer / context_render back the
+    # compositor seam, every observer panel (scene-tree / inspector / problems / viewport) + the
+    # F7 session undo, over uitree — plus the playbar play TRANSPORT (its docked PANEL retired by
+    # editor-window-chrome e1). context_compose / context_serializer / context_render back the
     # composed-world + `context set` write-path + render-snapshot seams the walkthrough exercises.
     target_link_libraries(context_${_t}
         PRIVATE context_gui_a11y context_gui_contract context_gui_compositor

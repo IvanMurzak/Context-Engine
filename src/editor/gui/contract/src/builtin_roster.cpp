@@ -95,9 +95,11 @@ std::vector<Contribution> build_roster()
     roster.push_back(builtin_panel("builtin.viewport", "Viewport", "viewport", DockZone::center,
                                    false, 320, 240, Caps{kCapabilityReadQuery}));
 
-    // M5-F5 — the play-in-editor playbar panel (gui/playbar/). Drives the live session.
-    roster.push_back(builtin_panel("builtin.playbar", "Play Bar", "play", DockZone::top, true, 240,
-                                   48, Caps{kCapabilityReadQuery, kCapabilitySessionControl}));
+    // M5-F5's docked `builtin.playbar` was RETIRED here by editor-window-chrome e1 (D2): the d1
+    // titlebar strip is the Play Bar's ONLY home now, driving the same `PlaybarModel`/`SessionFeed`
+    // transport over `session.control` (shell/session_bridge.h). All four anchors went together —
+    // this roster entry, the a11y factory + manifest row, and the help topic — so the standing
+    // anchor gates stay in lockstep at the smaller set.
 
     // M5-F4 — the Problems observer panel (gui/panels/problems/).
     roster.push_back(builtin_panel("builtin.problems", "Problems", "warning", DockZone::bottom,

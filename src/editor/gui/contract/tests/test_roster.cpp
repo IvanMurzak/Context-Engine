@@ -98,12 +98,17 @@ int main()
 
         // A-F2: the session-undo surface is ON the roster (it was absent from BOTH anchors pre-e05b).
         CHECK(ids.count("builtin.session.undo") == 1);
-        // The panels the M5 exit gate names are still there after the promotion.
+        // The panels the M5 exit gate names are still there after the promotion — MINUS the docked
+        // playbar, AMENDED OUT by editor-window-chrome e1 (D2): the d1 titlebar strip is the Play
+        // Bar's only home, so `builtin.playbar` left the roster (with its a11y + help anchors).
         for (const char* id : {"placeholder", "builtin.scene-tree", "builtin.inspector",
-                               "builtin.viewport", "builtin.playbar", "builtin.problems"})
+                               "builtin.viewport", "builtin.problems"})
         {
             CHECK(ids.count(id) == 1);
         }
+        // The retirement itself, pinned: re-adding the dock panel is a reviewed roster change, not a
+        // drift this gate would wave through.
+        CHECK(ids.count("builtin.playbar") == 0);
     }
 
     // --- the roster is a stable, shared instance (built once, same order every call) --------------

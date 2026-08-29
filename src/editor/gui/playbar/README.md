@@ -19,7 +19,7 @@ web").
 >
 > | target | sources | links | who links it |
 > |---|---|---|---|
-> | `context_gui_playbar` | `playbar_model` + `playbar_panel` | `context_gui_uitree` ONLY | the a11y harness **and the Shell**, which hosts the playbar since e08b |
+> | `context_gui_playbar` | `playbar_model` + `playbar_panel` | `context_gui_uitree` ONLY | the Shell's `SessionFeed` transport + the suites that render-assert over it (the DOCK PANEL itself was retired by editor-window-chrome e1 — see below) |
 > | `context_gui_playbar_session` | `session_control` | `context_render` + `context_session` | the runtime side + the M5 exit gates |
 >
 > The split is load-bearing, not tidy-minded: keeping one target would have forced the D10-audited
@@ -98,10 +98,14 @@ registered in the catalog:
 
 ## a11y
 
-Registered with the M5-F6 harness (`a11y/registry.cpp` + `a11y/coverage.manifest.jsonl`, id
-`builtin.playbar`) so it is scanned on the default 3-OS matrix and the `editor-cef-smoke` Linux
-enforcement gate. `tests/test_a11y.cpp` additionally asserts zero violations + a complete keyboard path
-across every play state.
+> **RETIRED FROM THE SHIPPED SET — editor-window-chrome e1 (D2).** The docked `builtin.playbar`
+> panel came OFF the built-in roster, the M5-F6 harness (`a11y/registry.cpp` +
+> `a11y/coverage.manifest.jsonl`) and `help::panel_topics()` all together: the d1 titlebar strip is
+> the Play Bar's only home, and its DOM a11y is asserted in the `webui-ts-*` browser tier
+> (`core/src/test/playbar.test.ts`). The `PlaybarModel`/`SessionFeed` transport survives untouched;
+> `playbar_panel.*` stays built as the uitree projection the transport suites render-assert over
+> (`test_session_feed.cpp`, `editor-session-panels-t2`), and `tests/test_a11y.cpp` keeps that
+> projection a11y-clean across every play state.
 
 ## Tests (R-QA-013, same PR)
 

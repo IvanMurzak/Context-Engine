@@ -5,8 +5,9 @@
 // an in-memory OverrideWriteGateway over a single mutable target file.
 //
 // Unlike M1 (a live daemon over the IPC wire) and M2 (file-level data-model determinism), the M5 exit
-// gate drives the HEADLESS editor-GUI panels (uitree/scenetree/inspector/problems/viewport/playbar/
-// undo — all CEF-free, testable-by-construction per R-EDIT-001) directly in-process: no CEF, no GPU, no
+// gate drives the HEADLESS editor-GUI panels (uitree/scenetree/inspector/problems/viewport/undo —
+// all CEF-free, testable-by-construction per R-EDIT-001; the docked playbar PANEL retired by
+// editor-window-chrome e1, its surviving play TRANSPORT still driven) directly in-process: no CEF, no GPU, no
 // daemon, so it runs on the default 3-OS `build` matrix. The per-OS CEF boot smoke + the golden-scene
 // SSIM equivalence + the a11y DOM re-scan are the SIBLING CI-job gates (editor-cef-smoke / render /
 // render-web) the M5 exit references; this in-process gate proves the observer user-journey seam.

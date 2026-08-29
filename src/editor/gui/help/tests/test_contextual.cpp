@@ -48,6 +48,13 @@ int main()
     }
     CHECK(!topic_ids.empty());
 
+    // AMENDED by editor-window-chrome e1 (D2): the docked `builtin.playbar` retired from the roster
+    // AND from help::panel_topics() together — the d1 titlebar strip is the Play Bar's only home,
+    // and a chrome strip is not a shipped panel, so it gets no topic. The set-equality below now
+    // holds at the 5-panel roster; this pin keeps a topic-side re-add from drifting back alone
+    // (the roster side is pinned in gui/contract/tests/test_roster.cpp).
+    CHECK(topic_ids.count("builtin.playbar") == 0);
+
     // The contract: every shipped panel has a help topic AND every topic names a real panel.
     if (topic_ids != registered_ids)
     {

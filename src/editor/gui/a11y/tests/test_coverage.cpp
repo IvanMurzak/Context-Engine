@@ -195,6 +195,13 @@ int main()
         CHECK(factory_ids.insert(id).second); // a duplicate factory binding is itself a defect
     }
 
+    // AMENDED by editor-window-chrome e1 (D2): the docked `builtin.playbar` retired — roster entry,
+    // a11y factory and coverage.manifest.jsonl row all dropped TOGETHER, so the three-way equality
+    // this gate derives holds at the smaller set. Pinned so a factory-side re-add cannot drift back
+    // in alone (the roster side is pinned in gui/contract/tests/test_roster.cpp; the strip that
+    // replaced the panel is DOM, gated in the `webui-ts-*` browser tier).
+    CHECK(factory_ids.count("builtin.playbar") == 0);
+
     // --- the derivation: registered_panels() IS the roster, in roster order ----------------------
     // (not merely the same set — the scan order is the roster order, so a report diff stays stable)
     {
