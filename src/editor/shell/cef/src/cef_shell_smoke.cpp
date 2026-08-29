@@ -836,31 +836,25 @@ int main(int argc, char** argv)
         const shell::ShellRegion* close_region = map.find("chrome.caption-close");
         const render::Extent2D client = backend_raw->client_size();
         const shell::DpiScale dpi = backend_raw->dpi();
-        const auto mid = [](const shell::ShellRegion& region) -> shell::PointI
-        {
-            return shell::PointI{
-                static_cast<std::int32_t>(region.rect.origin.x + region.rect.size.width / 2u),
-                static_cast<std::int32_t>(region.rect.origin.y + region.rect.size.height / 2u)};
-        };
         if (caption != nullptr && min_region != nullptr && max_region != nullptr &&
             close_region != nullptr)
         {
-            SMOKE_CHECK(shell::hit_test_frame(mid(*caption), client, dpi, false, map) ==
-                            shell::kHtCaption,
+            SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*caption), client, dpi, false,
+                                              map) == shell::kHtCaption,
                         "the live caption rect answers HTCAPTION — the OS owns the drag");
-            SMOKE_CHECK(shell::hit_test_frame(mid(*min_region), client, dpi, false, map) ==
-                            shell::kHtMinButton,
+            SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*min_region), client, dpi, false,
+                                              map) == shell::kHtMinButton,
                         "the live minimize rect answers HTMINBUTTON");
-            SMOKE_CHECK(shell::hit_test_frame(mid(*max_region), client, dpi, false, map) ==
-                            shell::kHtMaxButton,
+            SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*max_region), client, dpi, false,
+                                              map) == shell::kHtMaxButton,
                         "the live maximize rect answers HTMAXBUTTON (Snap Layouts' trigger)");
-            SMOKE_CHECK(shell::hit_test_frame(mid(*close_region), client, dpi, false, map) ==
-                            shell::kHtClose,
+            SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*close_region), client, dpi, false,
+                                              map) == shell::kHtClose,
                         "the live close rect answers HTCLOSE");
             // Maximized: the resize bands vanish, so the caption's very top row is a drag surface
             // (restored it is HTTOP — the same point discriminates the two states). The caption's
             // own mid-x, so the point is inside the LIVE caption rect by construction.
-            const shell::PointI top_row{mid(*caption).x, 2};
+            const shell::PointI top_row{smoke::region_mid(*caption).x, 2};
             SMOKE_CHECK(shell::hit_test_frame(top_row, client, dpi, false, map) == shell::kHtTop,
                         "restored, the top rows are the resize band");
             SMOKE_CHECK(shell::hit_test_frame(top_row, client, dpi, true, map) ==
@@ -887,7 +881,7 @@ int main(int argc, char** argv)
             shell::PointerEvent press;
             press.action = shell::PointerAction::down;
             press.button = shell::MouseButton::left;
-            press.position = mid(*caption);
+            press.position = smoke::region_mid(*caption);
             shell::PointerEvent release = press;
             release.action = shell::PointerAction::up;
 
@@ -900,7 +894,7 @@ int main(int argc, char** argv)
             SMOKE_CHECK(caption_up.target == shell::InputTarget::native,
                         "the caption release stays native too");
 
-            press.position = mid(*close_region);
+            press.position = smoke::region_mid(*close_region);
             release.position = press.position;
             const shell::PointerDispatch close_down = input.route_pointer(press, 0);
             SMOKE_CHECK(close_down.target == shell::InputTarget::browser,

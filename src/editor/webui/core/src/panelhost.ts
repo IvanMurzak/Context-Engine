@@ -990,6 +990,15 @@ export class PanelHost {
         return this.#roster;
     }
 
+    /**
+     * The roster manifest for `panelId`, or undefined when this build's roster does not name it —
+     * the ONE id-to-manifest lookup `openById`, Dockview's `#create` and boot.ts's seeded-title
+     * path all share, so an id-matching change lands in every caller at once.
+     */
+    manifest(panelId: string): PanelManifest | undefined {
+        return this.#roster?.panels.find((entry) => entry.id === panelId);
+    }
+
     /** The ids currently mounted, in mount order. */
     get mounted(): readonly string[] {
         return Array.from(this.#panels.keys());
@@ -1111,7 +1120,7 @@ export class PanelHost {
      * build's roster or already open — the same honest outcomes `open` reports.
      */
     openById(panelId: string): boolean {
-        const manifest = this.#roster?.panels.find((entry) => entry.id === panelId);
+        const manifest = this.manifest(panelId);
         return manifest !== undefined && this.open(manifest);
     }
 
@@ -1305,7 +1314,7 @@ export class PanelHost {
      * hands us only an id.
      */
     #create(panelId: string): DockviewContentRenderer {
-        const manifest = this.#roster?.panels.find((entry) => entry.id === panelId);
+        const manifest = this.manifest(panelId);
         const renderer = this.#renderer(panelId, manifest);
         if (manifest !== undefined) {
             // DISPOSE THE ONE BEING REPLACED, IF THERE IS ONE. Dockview calls `init` and NOTHING

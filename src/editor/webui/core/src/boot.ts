@@ -635,8 +635,7 @@ async function startPanels(
             // seeded panel IS the strip's title. Set before the state restore (a refused
             // `panel.state.set` must not leave the strip on the product-name fallback), and only
             // when the roster actually names the panel — an unknown id keeps the honest fallback.
-            const seededTitle =
-                host.roster?.panels.find((panel) => panel.id === seed.panelId)?.title ?? "";
+            const seededTitle = host.manifest(seed.panelId)?.title ?? "";
             if (seededTitle !== "") {
                 chrome?.mount.setTitle(seededTitle);
             }

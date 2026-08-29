@@ -480,6 +480,22 @@ int main(int argc, char** argv)
         return false;
     };
 
+    // The ONE bounded wait every DoD predicate below rides (the seed consumed, the primary's
+    // initial region publish, the rehome drained — they differ ONLY in the predicate): pump the
+    // manager against a 15 s wall clock until `done()` answers true or the pump refuses. Each
+    // caller's SMOKE_CHECK re-asserts its predicate right after, so a timeout fails on the claim
+    // itself rather than in here.
+    const auto pump_until = [&](const auto& done)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (std::chrono::steady_clock::now() < deadline && !done())
+        {
+            if (!manager.pump_once(now_us()))
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    };
+
     SMOKE_CHECK(boot_window(shell::kPrimaryWindowId, primary_surfaces, 30),
                 "window 0 composited a live CEF frame and completed its bridge handshake");
     if (manager.window(shell::kPrimaryWindowId) != primary)
@@ -524,13 +540,7 @@ int main(int argc, char** argv)
         // relay's boot seed is consumed ONLY by a live `window.seed`, so `has_boot_seed` going false —
         // and the new window's `seeds_served()` climbing — is the end-to-end evidence that the moved
         // state reached the new window's editor-core, which then restores it over `panel.state.set`.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (std::chrono::steady_clock::now() < deadline && move_store.has_boot_seed(new_id))
-        {
-            if (!manager.pump_once(now_us()))
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
+        pump_until([&] { return !move_store.has_boot_seed(new_id); });
         SMOKE_CHECK(!move_store.has_boot_seed(new_id),
                     "the torn-out window's LIVE editor-core read its seed (window.seed consumed it)");
         SMOKE_CHECK(created_surfaces->window_bridge != nullptr &&
@@ -598,28 +608,21 @@ int main(int argc, char** argv)
             // window 0 (the real-HWND leg stays the deferred interactive verification b1 named).
             const render::Extent2D client = second->backend().client_size();
             const shell::DpiScale dpi = second->backend().dpi();
-            const auto mid = [](const shell::ShellRegion& region) -> shell::PointI
-            {
-                return shell::PointI{
-                    static_cast<std::int32_t>(region.rect.origin.x + region.rect.size.width / 2u),
-                    static_cast<std::int32_t>(region.rect.origin.y +
-                                              region.rect.size.height / 2u)};
-            };
             if (caption != nullptr && min_region != nullptr && max_region != nullptr &&
                 close_region != nullptr)
             {
-                SMOKE_CHECK(shell::hit_test_frame(mid(*caption), client, dpi, false, map) ==
-                                shell::kHtCaption,
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*caption), client, dpi, false,
+                                                  map) == shell::kHtCaption,
                             "the factory window's caption answers HTCAPTION — frameless holds for "
                             "every window the factory creates, not just window 0");
-                SMOKE_CHECK(shell::hit_test_frame(mid(*min_region), client, dpi, false, map) ==
-                                shell::kHtMinButton,
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*min_region), client, dpi,
+                                                  false, map) == shell::kHtMinButton,
                             "…its minimize control answers HTMINBUTTON");
-                SMOKE_CHECK(shell::hit_test_frame(mid(*max_region), client, dpi, false, map) ==
-                                shell::kHtMaxButton,
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*max_region), client, dpi,
+                                                  false, map) == shell::kHtMaxButton,
                             "…its maximize control answers HTMAXBUTTON (Snap Layouts)");
-                SMOKE_CHECK(shell::hit_test_frame(mid(*close_region), client, dpi, false, map) ==
-                                shell::kHtClose,
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*close_region), client, dpi,
+                                                  false, map) == shell::kHtClose,
                             "…and its close control answers HTCLOSE");
             }
         }
@@ -629,16 +632,7 @@ int main(int argc, char** argv)
         // secondary's assertions, window 0's publish has no seed wait to ride: `boot_window` proved
         // only the handshake, which PRECEDES the strips in boot.ts — so give the primary's initial
         // publish the same bounded pump the seed got before reading its map.
-        {
-            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-            while (std::chrono::steady_clock::now() < deadline &&
-                   primary->input().regions().generation() == 0)
-            {
-                if (!manager.pump_once(now_us()))
-                    break;
-                std::this_thread::sleep_for(std::chrono::milliseconds(5));
-            }
-        }
+        pump_until([&] { return primary->input().regions().generation() != 0; });
         SMOKE_CHECK(primary->input().regions().find("chrome.caption") != nullptr &&
                         primary->input().regions().size() == 4,
                     "window 0 keeps its own four chrome regions — per-window channels never crossed");
@@ -681,19 +675,10 @@ int main(int argc, char** argv)
     SMOKE_CHECK(move_store.pending_rehomes(shell::kPrimaryWindowId) >= 1,
                 "the panel is queued for window 0 until its live poll drains it");
 
-    {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (std::chrono::steady_clock::now() < deadline &&
-               move_store.pending_rehomes(shell::kPrimaryWindowId) > 0)
-        {
-            if (!manager.pump_once(now_us()))
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        SMOKE_CHECK(move_store.pending_rehomes(shell::kPrimaryWindowId) == 0,
-                    "window 0's LIVE editor-core drained the rehome on its window.rehomed poll "
-                    "(the panel reached window 0, never silently lost)");
-    }
+    pump_until([&] { return move_store.pending_rehomes(shell::kPrimaryWindowId) == 0; });
+    SMOKE_CHECK(move_store.pending_rehomes(shell::kPrimaryWindowId) == 0,
+                "window 0's LIVE editor-core drained the rehome on its window.rehomed poll "
+                "(the panel reached window 0, never silently lost)");
 
     // --- f1: the compact strip's ✕, end to end — window.close dispatched FROM the secondary ------
     //

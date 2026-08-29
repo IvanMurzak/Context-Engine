@@ -310,6 +310,12 @@ BrowserGeometry browser_geometry(const IWindowBackend& backend)
     return geometry;
 }
 
+PointI region_mid(const ShellRegion& region)
+{
+    return PointI{static_cast<std::int32_t>(region.rect.origin.x + region.rect.size.width / 2u),
+                  static_cast<std::int32_t>(region.rect.origin.y + region.rect.size.height / 2u)};
+}
+
 PresentSetup attach_smoke_present(EditorWindow& window, WindowMode mode)
 {
     PresentSetup setup;

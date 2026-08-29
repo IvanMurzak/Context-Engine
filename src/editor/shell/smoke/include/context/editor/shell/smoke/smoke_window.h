@@ -155,6 +155,13 @@ struct BrowserGeometry
 
 [[nodiscard]] BrowserGeometry browser_geometry(const IWindowBackend& backend);
 
+// The centre of a published region's rect, in the PHYSICAL client pixels `hit_test_frame` consumes —
+// the point a smoke probes to ask what the frame answers over a LIVE rect. Named and shared for the
+// same reason as every conversion in this header: two CEF smokes (window 0's boot proof and the
+// tear-out's factory-window proof) probe identically, and inlined copies of the arithmetic can only
+// drift.
+[[nodiscard]] PointI region_mid(const ShellRegion& region);
+
 // What `attach_smoke_present` resolved to. `ok` is the whole verdict.
 //
 // Deliberately NO blitter HANDLE: the compositor owns the blitter and destroys it at `detach()`, so
