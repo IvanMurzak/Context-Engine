@@ -1260,10 +1260,14 @@ async function startWindowMechanism(
                 // a panel whose model actually moved — see `PanelHost.pollRevisions` on why the
                 // unconditional `refreshAll` must NOT be what a tick calls.
                 //
-                // d2: the statusbar's problems count re-derives AFTER the refresh settles (so a
-                // diagnostic that just re-rendered the Problems panel is counted on the SAME tick),
-                // and unconditionally rather than only when something refreshed — a CLOSED panel
+                // d2: the statusbar's problems count re-derives after each poll pass, and
+                // unconditionally rather than only when something refreshed — a CLOSED panel
                 // moves no revision, and the count must hide with its source rather than go stale.
+                // The bound this buys is loose, deliberately: `pollRevisions` kicks each panel's
+                // re-render FIRE-AND-FORGET (`void renderer.refresh()` — an async `panel.render`
+                // plus a DOM replace), so a diagnostic that moved the model on this tick is usually
+                // counted on the NEXT one; the unconditional re-derivation is what makes the count
+                // converge rather than needing the settle.
                 // Cheap: one scoped querySelectorAll plus the mount's unchanged short-circuit.
                 void host.pollRevisions().then((): void => {
                     statusbar?.refreshProblems();

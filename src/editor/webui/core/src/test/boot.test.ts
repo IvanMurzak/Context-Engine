@@ -435,9 +435,21 @@ export const bootTests: readonly TestCase[] = [
                 );
             } finally {
                 // Withdraw the surface so the link poll self-stops on its next refused tick (the
-                // session-relay cleanup rule, re-exercised on the REAL boot path), then drop the
-                // fixture.
+                // session-relay cleanup rule, re-exercised on the REAL boot path) — and WAIT for
+                // that tick before dropping the fixture: its `applyLink(null)` re-writes the
+                // report attribute, so removing the attribute first would let a stray
+                // `link none` report reappear on the shared document mid-way through a later
+                // suite. Best-effort (`catch`), so a timeout here can never mask the real
+                // assertion failure above.
                 delete answers[DAEMON_LINK_STATE_METHOD];
+                await waitFor(
+                    "the link poll to observe the withdrawn surface and self-stop",
+                    () =>
+                        (
+                            document.documentElement.getAttribute(STATUSBAR_ATTRIBUTE) ?? ""
+                        ).includes("link none"),
+                    5_000,
+                ).catch(() => undefined);
                 statusbar.remove();
                 root.remove();
                 document.documentElement.removeAttribute(STATUSBAR_ATTRIBUTE);

@@ -153,12 +153,20 @@ export const statusbarTests: TestCase[] = [
                     "the count is the kit's own live-badge worked example",
                 );
 
-                assert(
-                    field(h.slot, STATUSBAR_THEME_CLASS).hidden === true,
-                    "theme waits for its source",
+                const theme = field(h.slot, STATUSBAR_THEME_CLASS);
+                assert(theme.hidden === true, "theme waits for its source");
+                assertEqual(
+                    theme.getAttribute("role"),
+                    "group",
+                    "a labelled group — an aria-label on a role-less span is ignored by AT",
                 );
                 const project = field(h.slot, STATUSBAR_PROJECT_CLASS);
                 assert(!project.hidden, "the project identity always renders");
+                assertEqual(
+                    project.getAttribute("role"),
+                    "group",
+                    "…the same labelled-group treatment as every named field",
+                );
                 assertEqual(
                     document.documentElement.getAttribute(STATUSBAR_ATTRIBUTE),
                     `link none; problems none; theme none; project ${DEFAULT_TITLE}`,

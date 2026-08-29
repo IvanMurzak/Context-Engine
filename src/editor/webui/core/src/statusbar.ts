@@ -21,7 +21,9 @@
 //      (`problems.list` / `problems.row.N` — mirrored by the constants below, exactly as chrome.ts
 //      mirrors its region ids); hydration mounts that markup, and the model-change refresh driver
 //      (panelhost.ts `pollRevisions`) re-renders it whenever a diagnostic lands. Counting those
-//      rows is therefore counting the model's diagnostics, one poll tick behind at worst — and when
+//      rows is therefore counting the model's diagnostics, a refresh tick or two behind at worst
+//      (the driver kicks each re-render fire-and-forget, so the count usually lands one tick after
+//      the row does — boot.ts's tick comment owns the bound) — and when
 //      the panel is NOT mounted (closed, or the welcome screen) there is honestly NO count in this
 //      window, so the field hides instead of showing a number nothing backs.
 //
@@ -64,8 +66,13 @@ export const LABEL_PROJECT = "Project";
 
 // ------------------------------------------------------------------------- the problems node ids
 // MIRROR `problems_panel.cpp`'s uitree node ids (`build_panel`): the list container and the
-// per-diagnostic row prefix. Grep-stable on BOTH sides — a rename there reds the statusbar tests
-// here rather than silently unbinding the count from the feed.
+// per-diagnostic row prefix. ⚠ MIRRORED, NOT GATED: unlike the banners vocabulary (which
+// `check_webui_assets.py --welcome-contract` byte-compares against banners.h in the built bundle),
+// NOTHING cross-checks these two constants against the C++ side — the tests below build their
+// fixtures from these same constants, so they stay green across a C++ rename. The C++ half is
+// pinned on its own side (`problems_feed.h kProblemsRowPrefix` + the gui/shell suites), so a rename
+// there reds C++ first; until a contract-gate entry exists, a rename that slips through hides the
+// count field (honestly, via the `null` path below) with every JS test green.
 
 export const PROBLEMS_LIST_NODE_ID = "problems.list";
 export const PROBLEMS_ROW_NODE_ID_PREFIX = "problems.row.";
@@ -186,13 +193,18 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
 
     // --- the theme + project identity: plain text readouts (the playbar timer's pattern) ---------
     // Not controls, so not kit components — a `title` for the pointer hover, and an aria-label that
-    // carries the field name so assistive tech hears "Active theme: Dark", not a bare word.
+    // carries the field name so assistive tech hears "Active theme: Dark", not a bare word. The
+    // label needs the `group` role to work: ARIA prohibits naming on `generic`, so an aria-label on
+    // a bare span is IGNORED by screen readers — exactly the bare word it exists to avoid. Same
+    // labelled-group treatment as the link + problems fields above.
     const themeField = el("span", STATUSBAR_THEME_CLASS);
+    themeField.setAttribute("role", "group");
     themeField.title = LABEL_THEME;
     themeField.hidden = true;
     slot.append(themeField);
 
     const projectField = el("span", STATUSBAR_PROJECT_CLASS);
+    projectField.setAttribute("role", "group");
     projectField.title = LABEL_PROJECT;
     // The titlebar's exact fallback rule (chrome.ts): the product name when no project is known —
     // the welcome screen's state, and an older Shell with no welcome surface.
@@ -329,7 +341,18 @@ export class StatusbarLinkFeed {
         }
         this.#inFlight = true;
         try {
-            const link = await this.#read();
+            let link: DaemonLinkState | null;
+            try {
+                link = await this.#read();
+            } catch {
+                // TOTAL, the `SessionFeed.refresh` rule: this method's steady caller is the timer
+                // tick's bare `void this.refresh()`, so an unguarded reject here is an unhandled
+                // rejection EVERY TICK in a renderer whose only diagnostic channel is a DOM
+                // attribute (`PanelHost.pollRevisions` documents the same hazard). A reader that
+                // THROWS (a broken transport) rather than answering `null` (a refusal) gets the
+                // same honest rendering: no source, hide the field, stop asking.
+                link = null;
+            }
             this.#apply(link);
             if (link === null) {
                 this.stop();
