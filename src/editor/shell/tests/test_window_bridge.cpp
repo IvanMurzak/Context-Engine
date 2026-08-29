@@ -392,6 +392,13 @@ void window_controls_reach_their_handlers()
     (void)bridge.focus(malformed, focus_error);
     CHECK(focus_error == kErrWindowBadParams);
     CHECK(focused == 2); // the malformed ask never reached the handler
+    // d3: a FRACTIONAL id is refused too — it must not silently truncate onto a window nobody named.
+    focus_error.clear();
+    Json fractional = Json::object();
+    fractional.set("windowId", Json(2.5));
+    (void)bridge.focus(fractional, focus_error);
+    CHECK(focus_error == kErrWindowBadParams);
+    CHECK(focused == 2); // the fractional ask never reached the handler either
 
     // A handler that answers "no window" (a retired session's registry lookup) is the SAME honest
     // degrade as unbound — accepted:false, not an error.

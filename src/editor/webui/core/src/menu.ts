@@ -1142,7 +1142,16 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
             case "ArrowUp": {
                 event.preventDefault();
                 if (inTopLevel) {
-                    openMenuAt(topIndex, true);
+                    // The APG menubar pattern: both arrows open the focused menu; Down enters at
+                    // the FIRST item, Up at the LAST.
+                    openMenuAt(topIndex, event.key === "ArrowDown");
+                    if (event.key === "ArrowUp") {
+                        const opened = topLevel[topIndex];
+                        if (opened !== undefined) {
+                            const items = menuItems(opened.dropdown);
+                            focusItem(items, items.length - 1);
+                        }
+                    }
                     return;
                 }
                 if (openIndex === -1) {
@@ -1284,6 +1293,12 @@ export interface AboutDialog {
  */
 export function openAboutDialog(host: HTMLElement, state: UpdateState | null): AboutDialog {
     const doc = host.ownerDocument;
+    // ONE dialog at a time: re-activating Help > About replaces the open dialog rather than
+    // stacking a second copy on top of it (the re-render rule, not a toggle — the fresh state
+    // renders either way).
+    for (const open of [...host.querySelectorAll(`.${ABOUT_CLASS}`)]) {
+        open.remove();
+    }
     const root = doc.createElement("div");
     root.className = ABOUT_CLASS;
     root.setAttribute("role", "dialog");

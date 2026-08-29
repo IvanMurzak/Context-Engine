@@ -5,7 +5,7 @@
 // THE c1 PATTERN, THIRD APPLICATION (cocoa_chrome.h owns the rationale): the functions below are
 // REAL in cocoa_window.mm — keyed on `IWindowBackend::name() == "cocoa"`, the one string only the
 // live Cocoa backend answers — and honest refusals in cocoa_window.cpp on every other platform, so
-// the off-platform behaviour is assertable as a VALUE on every leg (tests/test_cocoa_menu.cpp)
+// the off-platform behaviour is assertable as a VALUE on every leg (tests/test_menu_facts.cpp)
 // rather than the functions not existing at all.
 //
 // WHAT THE .mm HALF DOES with a model: builds the NSMenu tree (the App menu as the main menu's

@@ -349,7 +349,11 @@ contract::Json WindowBridge::focus(const contract::Json& params, std::string& er
     {
         const std::optional<double> id =
             detail::number_in_range(params, "windowId", 0.0, 4294967295.0);
-        if (!id.has_value())
+        // A fractional id (2.5) must not silently TRUNCATE onto a window nobody named — refused
+        // exactly like a non-numeric one. The comparison is exact and defined: the guard above
+        // proved the double in-range, and an integral in-range double round-trips the cast
+        // losslessly.
+        if (!id.has_value() || *id != static_cast<double>(static_cast<WindowId>(*id)))
         {
             error_code = kErrWindowBadParams;
             return contract::Json{};
