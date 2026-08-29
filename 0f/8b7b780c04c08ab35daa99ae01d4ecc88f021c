@@ -1,0 +1,101 @@
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_7b2854368302f3::t_c5baa64f06fcf6 477
+src/editor/webui/core/src/test/window_a11y.test.ts
+  s_7b2854368302f3::t_16f83f5baf504e 18
+  s_7b2854368302f3::t_628d8bb0c0f548 53
+src/editor/webui/core/src/test/keymap.test.ts
+  s_7b2854368302f3::t_e96c9a7fdb0577 344
+  s_7b2854368302f3::t_a441832c159adc 13
+src/editor/webui/core/src/test/reachability.test.ts
+  s_7b2854368302f3::t_3e708035027b54 106
+  s_7b2854368302f3::t_0a4c3fdb1c1e2c 18
+src/editor/shell/cef/src/cef_shell_drag_smoke.cpp
+  s_7b2854368302f3::t_681b6a18db941f 183
+src/editor/shell/cef/src/cef_shell_iframe_smoke.cpp
+  s_7b2854368302f3::t_53f07d5b5d706d 566
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_7b2854368302f3::t_8c54c27637af2a 185
+src/editor/webui/core/src/test/harness.ts
+  s_7b2854368302f3::t_9f0d0f8daaea88 15-18
+  s_7b2854368302f3::t_514542c56d9926 149-162
+src/editor/shell/cef/src/cef_shell_multiwindow_smoke.cpp
+  s_7b2854368302f3::t_e480bcd11ca457 203
+src/editor/shell/cef/src/cef_shell_restore_smoke.cpp
+  s_7b2854368302f3::t_878145e9aa2b1a 406
+src/editor/webui/core/src/when.ts
+  s_7b2854368302f3::t_c5f7c1023d1388 259-261,263
+src/editor/webui/core/src/test/playbar.test.ts
+  s_7b2854368302f3::t_634fd1ed8996e2 333-336
+src/editor/webui/core/src/test/session.test.ts
+  s_7b2854368302f3::t_2ec422340d9840 44,46-50,52
+  s_7b2854368302f3::t_d9a30b33e1594a 33,37
+  s_7b2854368302f3::t_76a2a3e4557360 323
+  s_7b2854368302f3::t_5a3ac3eb2307bd 79
+  s_7b2854368302f3::t_1a92a8c65ffff4 264-269,271-272,275
+  s_7b2854368302f3::t_76684e10f13792 310-312
+src/editor/shell/panels/src/session_feed.cpp
+  s_7b2854368302f3::t_82630f93a9e564 246-248
+  s_7b2854368302f3::t_deea7bb369bd91 283-292
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_7b2854368302f3::t_b3b3ba6cf838ea 301
+  s_7b2854368302f3::t_b2f6da4005209a 269-280
+  s_7b2854368302f3::t_0cc9404d59d3af 291-292
+src/editor/shell/cef/src/cef_shell_settings_smoke.cpp
+  s_7b2854368302f3::t_acf349822567f1 358
+tools/tests/test_check_webui_assets.py
+  s_7b2854368302f3::t_a99ef4c7b875d9 938-948
+  s_7b2854368302f3::t_31d2627e30e482 962
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_18b07f7ef0e31e 430-435
+  s_7b2854368302f3::t_919e6d40c44806 442
+src/editor/shell/app/editor_main.cpp
+  s_7b2854368302f3::t_1832aa9e9a9741 861-864
+src/editor/webui/core/src/session.ts
+  s_7b2854368302f3::t_b7ed2aeb391eb0 149-151
+  s_7b2854368302f3::t_87ff63e2ffc956 29
+  s_7b2854368302f3::t_9d95d6800d319e 196,199
+  s_7b2854368302f3::t_5b0c134430aec0 215-228
+  s_7b2854368302f3::t_77de58809186da 295
+src/editor/webui/core/src/test/panelverbs.test.ts
+  s_7b2854368302f3::t_de1adad035f686 22
+  s_7b2854368302f3::t_d46d0b568f06bf 205
+src/editor/webui/core/src/test/boot.test.ts
+  s_7b2854368302f3::t_9b392b9f092c57 338-340,342-351,353
+  s_7b2854368302f3::t_088bc8e301769d 23
+src/editor/shell/cef/src/cef_shell_palette_smoke.cpp
+  s_7b2854368302f3::t_7d489f82fb7bdf 391
+src/editor/shell/src/session_bridge.cpp
+  s_7b2854368302f3::t_172187cd5f2b77 82,88,97,99-102
+src/editor/webui/core/src/test/palette.test.ts
+  s_7b2854368302f3::t_9f576d22a0ebbf 12
+  s_7b2854368302f3::t_0f726509e0b3be 79
+src/editor/webui/core/src/playbar.ts
+  s_7b2854368302f3::t_6730573274b789 103-108,110-119,121,124,126,131
+  s_7b2854368302f3::t_96025a843aedfe 170
+  s_7b2854368302f3::t_833631a8eca05e 233-236,239,251,254-255,257-259,262,265-267,270-275,277-279,282-290
+  s_7b2854368302f3::t_f0d1ae17b837e0 329-339
+  s_7b2854368302f3::t_08916607ace3f3 155
+  s_7b2854368302f3::t_e6ccc21f78bfd6 44-50
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_7b2854368302f3::t_f272bbd60caafc 292-296,299
+src/editor/shell/cef/src/cef_shell_inspector_fanout_smoke.cpp
+  s_7b2854368302f3::t_1793100c1914c0 341
+src/editor/shell/cef/src/cef_shell_uimirror_smoke.cpp
+  s_7b2854368302f3::t_e613e0f958bc8a 180
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0f8b7b780c04c08ab35daa99ae01d4ecc88f021c",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
