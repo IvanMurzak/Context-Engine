@@ -1,0 +1,27 @@
+src/editor/shell/tests/test_window.cpp
+  s_7b2854368302f3::t_0a7c182fc04a62 14-15,416-803,2068
+docs/shell.md
+  s_7b2854368302f3::t_08a8f91e6f5322 532-537,795-994,1062-1083,1373-1386
+.taskflow/2026-07-01-context-engine/m9-editor/ROADMAP.md
+  s_7b2854368302f3::t_764679be6dd133 455
+.taskflow/2026-08-28-editor-window-chrome/ROADMAP.md
+  s_7b2854368302f3::t_39ce0e5a0b9160 75
+src/editor/shell/smoke/shell_x11_smoke_main.cpp
+  s_7b2854368302f3::t_62c6e20881f348 185-212,574-750,765-766
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "d65c11af17856387830fd84de0018c69681b7560",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
