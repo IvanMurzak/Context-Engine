@@ -1,0 +1,82 @@
+src/editor/gui/a11y/src/registry.cpp
+  s_7b2854368302f3::t_82cca69247e766 66
+src/editor/gui/contract/tests/test_roster.cpp
+  s_7b2854368302f3::t_d8bf2fccc8e343 101-103,105,109-111
+src/tests/integration/test_m5exit1_walkthrough.cpp
+  s_7b2854368302f3::t_7725f8f2a9d513 506-507,514
+  s_7b2854368302f3::t_d42b1a83cffa82 390-401
+src/tests/integration/test_m5exit2_a11y_coverage.cpp
+  s_7b2854368302f3::t_7a94d118ccda1f 132-137,139,147
+src/editor/shell/panels/tests/test_session_feed.cpp
+  s_7b2854368302f3::t_26846a95ffc84f 399-404,406-416
+  s_7b2854368302f3::t_3a91bc014b34ac 21
+src/editor/gui/a11y/CMakeLists.txt
+  s_7b2854368302f3::t_03e118ba80ebc8 20-22,31
+src/editor/gui/help/src/help_model.cpp
+  s_7b2854368302f3::t_908fb72d072f2c 179-181
+src/editor/shell/panels/tests/test_builtin_panels.cpp
+  s_7b2854368302f3::t_c77b6588c59954 226-232
+  s_7b2854368302f3::t_763641af4fb45c 160-163,173-181
+  s_7b2854368302f3::t_58be93534c00eb 182
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_7b2854368302f3::t_bf3122ca150e8a 304-308
+  s_7b2854368302f3::t_60f2f972ba6885 16,29-32
+  s_7b2854368302f3::t_96ea496593b7ba 33
+src/editor/gui/contract/src/builtin_roster.cpp
+  s_7b2854368302f3::t_98e5e7a8a6e11d 98-102
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_7b2854368302f3::t_62056f2941f1a7 600,603-609
+  s_7b2854368302f3::t_5b88892faa4cb2 550-553
+docs/ci-fleet-manifest.json
+  s_7b2854368302f3::t_bf8d0233a615e9 442
+docs/editor-session-state.md
+  s_7b2854368302f3::t_b635fc3301ac3d 205,227-229
+docs/shell.md
+  s_7b2854368302f3::t_c589f3f4427cf8 489-493,526
+src/editor/gui/a11y/tests/test_coverage.cpp
+  s_7b2854368302f3::t_4f32545af77356 198-204
+src/editor/gui/help/tests/test_contextual.cpp
+  s_7b2854368302f3::t_afc4709a1943ee 51-57
+src/editor/gui/playbar/CMakeLists.txt
+  s_2b64e2b4bfc410::t_4547b44f0ed87c 19-21
+src/editor/gui/playbar/README.md
+  s_7b2854368302f3::t_177b39f712e42f 22,101-108
+src/tests/integration/CMakeLists.txt
+  s_2b64e2b4bfc410::t_6a49cdf67bfef8 155-157,502-504
+src/tests/integration/test_m5exit3_seam_checklist.cpp
+  s_7b2854368302f3::t_ca5733ba9031ae 349-358,360
+src/tests/integration/m5_exit_test.h
+  s_28c8b04f679d65::t_a51647f8ca5c5f 8-10
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "fcb30884b7cd6c9fd5234ddec10e9ed37089ba97",
+  "prompts": {},
+  "sessions": {
+    "s_28c8b04f679d65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7ca1044319d29a9c",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_2b64e2b4bfc410": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00f09d59-c437-4bad-8764-2e7ced0ebc74",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
