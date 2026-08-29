@@ -1,0 +1,19 @@
+src/editor/shell/tests/test_shell.cpp
+  s_e41fb4e3d28067::t_6d8116c9d1fdb5 344-345,347-349
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "d8ea4acf1fa39785878f110896530bafde234400",
+  "prompts": {},
+  "sessions": {
+    "s_e41fb4e3d28067": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a85e025-6cd0-47d4-9438-1cffcaf6f151",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
