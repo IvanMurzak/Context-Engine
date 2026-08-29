@@ -571,6 +571,10 @@ PANEL_BUNDLE = (
     'var WINDOW_MINIMIZE_METHOD = "window.minimize";\n'
     'var WINDOW_TOGGLE_MAXIMIZE_METHOD = "window.toggle-maximize";\n'
     'var WINDOW_FOCUS_METHOD = "window.focus";\n'
+    # editor-window-chrome b1: the appearance report + its fail-closed tokens (window.ts).
+    'var WINDOW_SET_APPEARANCE_METHOD = "window.set-appearance";\n'
+    'var WINDOW_APPEARANCE_DARK = "dark";\n'
+    'var WINDOW_APPEARANCE_LIGHT = "light";\n'
     'var CHROME_STATE_METHOD = "chrome.state";\n'
     'var CHROME_MODE_CUSTOM = "custom";\n'
     'var CHROME_MODE_HYBRID = "hybrid";\n'
@@ -701,6 +705,10 @@ PANEL_CPP_WINDOW = (
     'inline constexpr const char* kWindowMinimizeMethod = "window.minimize";\n'
     'inline constexpr const char* kWindowToggleMaximizeMethod = "window.toggle-maximize";\n'
     'inline constexpr const char* kWindowFocusMethod = "window.focus";\n'
+    # editor-window-chrome b1: the appearance report + its fail-closed tokens ride window_bridge.h.
+    'inline constexpr const char* kWindowSetAppearanceMethod = "window.set-appearance";\n'
+    'inline constexpr const char* kWindowAppearanceDark = "dark";\n'
+    'inline constexpr const char* kWindowAppearanceLight = "light";\n'
     'inline constexpr const char* kChromeStateMethod = "chrome.state";\n'
     'inline constexpr const char* kChromeModeCustom = "custom";\n'
     'inline constexpr const char* kChromeModeHybrid = "hybrid";\n'

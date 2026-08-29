@@ -209,6 +209,71 @@ void test_a_viewport_region_takes_input_away_from_the_browser()
     CHECK(harness.window->input().pointer_dispatches() == 2);
 }
 
+void test_caption_samples_are_suppressed_and_control_samples_reach_the_browser()
+{
+    // b1 (ROADMAP risk 3): a caption sample must never half-reach the browser — on Windows the NC
+    // hit-test consumes it before client routing, and this arbitration IS the suppression on every
+    // backend without an NC path (this headless one included). The CONTROL rects are the opposite:
+    // web-drawn buttons, so their samples MUST reach the browser.
+    Harness harness;
+    harness.window->input().regions().publish(
+        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 700, 38), RegionKind::caption},
+         ShellRegion{"chrome.caption-close", shelltest::rect(700, 0, 46, 38),
+                     RegionKind::caption_close}});
+
+    ShellEvent caption_press;
+    caption_press.kind = ShellEventKind::pointer;
+    caption_press.pointer.action = PointerAction::down;
+    caption_press.pointer.button = MouseButton::left;
+    caption_press.pointer.position = PointI{300, 20};
+    harness.backend->post(caption_press);
+    ShellEvent caption_release = caption_press;
+    caption_release.pointer.action = PointerAction::up;
+    harness.backend->post(caption_release);
+
+    ShellEvent close_press = caption_press;
+    close_press.pointer.position = PointI{720, 20};
+    harness.backend->post(close_press);
+    ShellEvent close_release = close_press;
+    close_release.pointer.action = PointerAction::up;
+    harness.backend->post(close_release);
+
+    CHECK(harness.window->pump_once(1000));
+    // All four samples were arbitrated; only the CONTROL pair reached the browser.
+    CHECK(harness.window->input().pointer_dispatches() == 4);
+    CHECK(harness.browser->pointers().size() == 2u);
+    CHECK(harness.browser->pointers()[0].position == (PointI{720, 20}));
+    CHECK(harness.browser->pointers()[1].position == (PointI{720, 20}));
+}
+
+void test_pump_pushes_republished_chrome_regions_down_to_the_backend()
+{
+    // b1: the published region map reaches the OS backend — the Windows NC hit-test's feed — on
+    // the pump after a publish. Generation-gated and wholesale (shell.cpp § the chrome-region
+    // push), observable on every leg through the headless backend's recorder.
+    Harness harness;
+    CHECK(harness.window->pump_once(1));
+    CHECK(harness.backend->chrome_region_pushes() == 0); // nothing published yet: no push
+
+    harness.window->input().regions().publish(
+        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 700, 38), RegionKind::caption}});
+    CHECK(harness.window->pump_once(2));
+    CHECK(harness.backend->chrome_region_pushes() == 1);
+    CHECK(harness.backend->chrome_regions().size() == 1u);
+    CHECK(harness.backend->chrome_regions().front().id == "chrome.caption");
+
+    // No republish, no push — the one-integer generation gate.
+    CHECK(harness.window->pump_once(3));
+    CHECK(harness.backend->chrome_region_pushes() == 1);
+
+    // A wholesale EMPTY republish is pushed too: "no drag duty any more" is a fact the backend
+    // must also see, or a stale caption rect keeps hit-testing after a mode change.
+    harness.window->input().regions().publish({});
+    CHECK(harness.window->pump_once(4));
+    CHECK(harness.backend->chrome_region_pushes() == 2);
+    CHECK(harness.backend->chrome_regions().empty());
+}
+
 void test_focus_events_reach_the_browser_and_drop_a_live_drag()
 {
     Harness harness;
@@ -541,6 +606,8 @@ int main()
     test_pump_syncs_the_browser_size_in_dip_on_the_first_iteration();
     test_input_round_trip_reaches_the_browser();
     test_a_viewport_region_takes_input_away_from_the_browser();
+    test_caption_samples_are_suppressed_and_control_samples_reach_the_browser();
+    test_pump_pushes_republished_chrome_regions_down_to_the_backend();
     test_focus_events_reach_the_browser_and_drop_a_live_drag();
     test_a_browser_paint_presents_and_an_idle_pump_does_not();
     test_a_popup_composites_through_the_loop();

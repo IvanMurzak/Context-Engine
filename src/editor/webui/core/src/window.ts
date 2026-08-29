@@ -47,6 +47,18 @@ export const WINDOW_TOGGLE_MAXIMIZE_METHOD = "window.toggle-maximize";
 export const WINDOW_FOCUS_METHOD = "window.focus";
 export const CHROME_STATE_METHOD = "chrome.state";
 
+// The appearance report (editor-window-chrome b1, 02 §3): boot tells the Shell whether the ACTIVE
+// theme is dark on every theme apply, so the OS-drawn frame remnants (Windows' DWM edge tint /
+// drop shadow) follow the editor's theme. MUST match window_bridge.h's kWindowSetAppearance* —
+// same gate, and a sharper hazard than the verbs above: the Shell fails CLOSED on an unknown
+// token, so a drift here refuses a call boot makes on EVERY theme apply.
+export const WINDOW_SET_APPEARANCE_METHOD = "window.set-appearance";
+export const WINDOW_APPEARANCE_DARK = "dark";
+export const WINDOW_APPEARANCE_LIGHT = "light";
+export type WindowAppearance =
+    | typeof WINDOW_APPEARANCE_DARK
+    | typeof WINDOW_APPEARANCE_LIGHT;
+
 // The `chrome.state.mode` tokens (02 §1): what the titlebar strip renders. `custom` = full strip
 // including window controls (Windows once b1 lands), `hybrid` = strip minus controls, left-padded
 // by `controlsInset` (macOS once c1 lands), `system` = menu-bar-only strip, no drag duty (Linux,
@@ -386,6 +398,20 @@ export class WindowClient {
         return this.#control(WINDOW_FOCUS_METHOD);
     }
 
+    /**
+     * Report the active theme's appearance (b1, 02 §3) so the OS frame's edge tint follows the
+     * editor's theme. Refusal-tolerant like every chrome call: an older Shell that does not route
+     * it resolves to `accepted:false` and the frame keeps the system tint — the pre-b1 behaviour.
+     */
+    async setAppearance(appearance: WindowAppearance): Promise<WindowControlResult> {
+        return this.#tolerant(
+            WINDOW_SET_APPEARANCE_METHOD,
+            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
+            { accepted: false },
+            { appearance },
+        );
+    }
+
     /** One `{accepted}` control verb (`window.minimize` / `window.focus`), on the shared policy. */
     async #control(method: string): Promise<WindowControlResult> {
         return this.#tolerant(
@@ -401,9 +427,14 @@ export class WindowClient {
      * `unknown_method` (a `BridgeError`), which degrades to `fallback`, the same honest answer a
      * bound-but-window-less handler gives; any other error is a real bug and propagates.
      */
-    async #tolerant<T>(method: string, parse: (result: unknown) => T, fallback: T): Promise<T> {
+    async #tolerant<T>(
+        method: string,
+        parse: (result: unknown) => T,
+        fallback: T,
+        params?: Record<string, unknown>,
+    ): Promise<T> {
         try {
-            return parse(await this.#bridge.call(method));
+            return parse(await this.#bridge.call(method, params));
         } catch (error) {
             if (error instanceof BridgeError) {
                 return fallback;

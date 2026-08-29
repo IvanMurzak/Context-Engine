@@ -338,4 +338,41 @@ export const windowTests: readonly TestCase[] = [
             assert(!(await refused.focus()).accepted, "refused focus degrades");
         },
     },
+    {
+        name: "WindowClient.setAppearance: dispatches the gate-pinned method + token; a refusal degrades",
+        run: async () => {
+            // b1: the appearance report the OS frame's DWM dark-mode tint follows (02 §3).
+            const calls: { method: string; params: Record<string, unknown> }[] = [];
+            const client = new WindowClient(
+                bridgeFor((method, params) => {
+                    calls.push({ method, params });
+                    return { accepted: true };
+                }),
+            );
+            assert((await client.setAppearance("dark")).accepted, "dark report accepted");
+            assert((await client.setAppearance("light")).accepted, "light report accepted");
+            // The wire spellings — pinned as LITERALS here (the uibus.test.ts rationale) AND
+            // byte-compared against window_bridge.h by the webui-panel-contract gate. The Shell
+            // fails CLOSED on any other token, so the params matter as much as the method.
+            assertEqual(
+                calls.map((call) => call.method),
+                ["window.set-appearance", "window.set-appearance"],
+                "the report method, dispatched per apply",
+            );
+            assertEqual(
+                calls.map((call) => call.params["appearance"]),
+                ["dark", "light"],
+                "the pinned appearance tokens travel as the params",
+            );
+
+            // A pre-b1 Shell refuses -> accepted:false, never a throw: a frame tint must not be
+            // able to break the boot that reports it.
+            const refused = new WindowClient(
+                bridgeFor(() => {
+                    throw new Error("unknown_method");
+                }),
+            );
+            assert(!(await refused.setAppearance("dark")).accepted, "refusal degrades");
+        },
+    },
 ];

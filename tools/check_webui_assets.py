@@ -292,6 +292,17 @@ WINDOW_CONSTANTS = (
     ("window.toggle-maximize", "window_bridge.h", "kWindowToggleMaximizeMethod",
      "WINDOW_TOGGLE_MAXIMIZE_METHOD"),
     ("window.focus", "window_bridge.h", "kWindowFocusMethod", "WINDOW_FOCUS_METHOD"),
+    # editor-window-chrome b1 (target design 02 §3): the appearance report boot sends on every
+    # theme apply so the OS frame's DWM edge tint follows the editor's theme. The Shell fails
+    # CLOSED on a token it does not know, so a token drift refuses a call boot makes at BOOT —
+    # tripping every live smoke's `refused() == 0` — which is exactly why the tokens are pinned
+    # beside the method.
+    ("window.set-appearance", "window_bridge.h", "kWindowSetAppearanceMethod",
+     "WINDOW_SET_APPEARANCE_METHOD"),
+    ("window appearance dark", "window_bridge.h", "kWindowAppearanceDark",
+     "WINDOW_APPEARANCE_DARK"),
+    ("window appearance light", "window_bridge.h", "kWindowAppearanceLight",
+     "WINDOW_APPEARANCE_LIGHT"),
 )
 
 # The editor-window-chrome a1 CHROME CONTRACT (target design 02 §1): the `chrome.state` boot read

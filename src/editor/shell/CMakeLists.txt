@@ -153,7 +153,10 @@ if(WIN32)
     # notify-only update banner adds NO third-party dependency, nothing to src/vcpkg.json, and
     # nothing to tools/license-allowlist.json (the standing owner-approval gate of design 08 §3 is
     # not reached). Boundary-clean, exactly like ole32/uuid above.
-    target_link_libraries(context_editor_shell PRIVATE user32 ole32 uuid winhttp shell32)
+    # dwmapi: the ONE Dwm call editor-window-chrome b1 adds (DwmSetWindowAttribute — the dark-mode
+    # edge tint following the active theme, win32_window.cpp § apply_dark_mode). Windows SDK, so the
+    # same no-new-dependency reasoning as every library above.
+    target_link_libraries(context_editor_shell PRIVATE user32 ole32 uuid winhttp shell32 dwmapi)
 endif()
 
 # The Linux window backend (M9 e12a): XCreateWindow / the event pump / EWMH placement live in libX11

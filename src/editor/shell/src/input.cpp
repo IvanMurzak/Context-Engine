@@ -28,7 +28,29 @@ namespace
 
 [[nodiscard]] InputTarget target_for(RegionKind kind)
 {
-    return kind == RegionKind::viewport ? InputTarget::viewport : InputTarget::native;
+    switch (kind)
+    {
+    case RegionKind::viewport:
+        return InputTarget::viewport;
+    // The caption CONTROLS are web-drawn browser content (editor-window-chrome b1, 02 §5): their
+    // rects exist for the Windows NC hit-test (caption-min/max/close → HT*BUTTON), not to divert
+    // input — the clicks the NC path forwards back, and every client-delivered click on the other
+    // platforms, must reach the web button that draws the glyph. Only the caption DRAG surface
+    // stays native: a caption press must never half-reach the browser (a stuck hover in the strip,
+    // ROADMAP risk 3) — on Windows the OS consumes it before client routing ever runs, and this
+    // arm is what suppresses it everywhere else (shell.cpp's native arm drops it).
+    case RegionKind::caption_min:
+    case RegionKind::caption_max:
+    case RegionKind::caption_close:
+        return InputTarget::browser;
+    case RegionKind::caption:
+    case RegionKind::native:
+        return InputTarget::native;
+    }
+    // Exhaustive above with no default arm, so -Wswitch makes a future kind's routing a deliberate
+    // choice here (its OS-frame answer gets the same treatment in window.cpp's hit_test_frame);
+    // an out-of-range value still lands on the suppressing native arm.
+    return InputTarget::native;
 }
 
 } // namespace

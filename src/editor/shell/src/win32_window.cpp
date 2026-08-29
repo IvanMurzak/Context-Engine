@@ -26,6 +26,11 @@
 #endif
 #include <windows.h>
 
+// The ONE Dwm call this design makes (editor-window-chrome b1, 02 §3): the dark-mode edge
+// tint/shadow attribute. dwmapi ships with the Windows SDK on both toolchains and joins the link
+// list in CMakeLists.txt beside user32.
+#include <dwmapi.h>
+
 #include <string>
 #include <vector>
 
@@ -76,6 +81,37 @@ static_assert(context::editor::shell::kWmDpiChanged == 0x02E0, "WM_DPICHANGED dr
 #endif
 static_assert(kSizeMinimized == SIZE_MINIMIZED, "SIZE_MINIMIZED drifted");
 static_assert(kWheelDelta == WHEEL_DELTA, "WHEEL_DELTA drifted");
+// b1 — the frameless-frame messages and the HT* answers hit_test_frame returns.
+static_assert(context::editor::shell::kWmGetMinMaxInfo == WM_GETMINMAXINFO,
+              "WM_GETMINMAXINFO drifted");
+static_assert(context::editor::shell::kWmNcCalcSize == WM_NCCALCSIZE, "WM_NCCALCSIZE drifted");
+static_assert(context::editor::shell::kWmNcHitTest == WM_NCHITTEST, "WM_NCHITTEST drifted");
+static_assert(context::editor::shell::kWmNcMouseMove == WM_NCMOUSEMOVE, "WM_NCMOUSEMOVE drifted");
+static_assert(context::editor::shell::kWmNcLButtonDown == WM_NCLBUTTONDOWN,
+              "WM_NCLBUTTONDOWN drifted");
+static_assert(context::editor::shell::kWmNcLButtonUp == WM_NCLBUTTONUP, "WM_NCLBUTTONUP drifted");
+static_assert(context::editor::shell::kWmNcLButtonDblClk == WM_NCLBUTTONDBLCLK,
+              "WM_NCLBUTTONDBLCLK drifted");
+static_assert(context::editor::shell::kWmNcMouseLeave == WM_NCMOUSELEAVE,
+              "WM_NCMOUSELEAVE drifted");
+static_assert(context::editor::shell::kHtNowhere == HTNOWHERE, "HTNOWHERE drifted");
+static_assert(context::editor::shell::kHtClient == HTCLIENT, "HTCLIENT drifted");
+static_assert(context::editor::shell::kHtCaption == HTCAPTION, "HTCAPTION drifted");
+static_assert(context::editor::shell::kHtMinButton == HTMINBUTTON, "HTMINBUTTON drifted");
+static_assert(context::editor::shell::kHtMaxButton == HTMAXBUTTON, "HTMAXBUTTON drifted");
+static_assert(context::editor::shell::kHtLeft == HTLEFT, "HTLEFT drifted");
+static_assert(context::editor::shell::kHtRight == HTRIGHT, "HTRIGHT drifted");
+static_assert(context::editor::shell::kHtTop == HTTOP, "HTTOP drifted");
+static_assert(context::editor::shell::kHtTopLeft == HTTOPLEFT, "HTTOPLEFT drifted");
+static_assert(context::editor::shell::kHtTopRight == HTTOPRIGHT, "HTTOPRIGHT drifted");
+static_assert(context::editor::shell::kHtBottom == HTBOTTOM, "HTBOTTOM drifted");
+static_assert(context::editor::shell::kHtBottomLeft == HTBOTTOMLEFT, "HTBOTTOMLEFT drifted");
+static_assert(context::editor::shell::kHtBottomRight == HTBOTTOMRIGHT, "HTBOTTOMRIGHT drifted");
+static_assert(context::editor::shell::kHtClose == HTCLOSE, "HTCLOSE drifted");
+// kDwmwaUseImmersiveDarkMode has no assert on purpose: DWMWA_USE_IMMERSIVE_DARK_MODE is an ENUM
+// member of DWMWINDOWATTRIBUTE, not a macro, so `#if defined(...)` (the WM_DPICHANGED precedent for
+// an SDK that may lack it) cannot probe for it — and older MinGW dwmapi.h headers genuinely lack
+// it. The value 20 is the documented, ABI-frozen one (19 was only ever the pre-release 1809 slot).
 } // namespace
 
 #endif // _WIN32
@@ -152,6 +188,29 @@ const Win32DpiApi& win32_dpi_api()
 HANDLE per_monitor_aware_v2_context()
 {
     return reinterpret_cast<HANDLE>(static_cast<INT_PTR>(-4));
+}
+
+// This window's CURRENT dpi through the delay-load-tolerant table above — ONE statement of the
+// fallback policy (kReferenceDpi when GetDpiForWindow is unresolved) for every site that needs a
+// live answer: create()'s post-create correction and the b1 frame messages, which re-query rather
+// than read the tracked dpi_ because both WM_NCCALCSIZE and WM_GETMINMAXINFO are already sent
+// INSIDE CreateWindowExW, before create() has computed dpi_ at all.
+[[nodiscard]] UINT current_hwnd_dpi(HWND hwnd)
+{
+    const Win32DpiApi& api = win32_dpi_api();
+    return api.get_dpi_for_window != nullptr ? api.get_dpi_for_window(hwnd) : kReferenceDpi;
+}
+
+// A SCREEN-relative mouse lParam (the NC family's convention) decoded into the client space every
+// other pointer message — and the region map — is expressed in. The per-word sign extension is the
+// multi-monitor subtlety (coordinates left/above the primary are negative), stated once for
+// WM_NCHITTEST and the NC mouse family alike.
+[[nodiscard]] PointI screen_lparam_to_client(HWND hwnd, LPARAM lparam)
+{
+    POINT point{static_cast<int>(static_cast<std::int16_t>(LOWORD(lparam))),
+                static_cast<int>(static_cast<std::int16_t>(HIWORD(lparam)))};
+    ::ScreenToClient(hwnd, &point);
+    return PointI{point.x, point.y};
 }
 
 [[nodiscard]] std::wstring widen(std::string_view utf8)
@@ -298,6 +357,20 @@ public:
         ::SetWindowPlacement(hwnd_, &wp);
     }
 
+    // b1: the pushed-down chrome facts (window.h § the two chrome FACTS). The regions feed
+    // WM_NCHITTEST; both pushes arrive on the single shell thread that also runs the pump, and a
+    // modal OS loop (a live caption drag) blocks that thread, so the WndProc can never observe a
+    // half-replaced map.
+    void set_chrome_regions(const std::vector<ShellRegion>& regions) override
+    {
+        chrome_regions_.publish(regions);
+    }
+    void set_appearance(bool dark) override
+    {
+        appearance_dark_ = dark;
+        apply_dark_mode();
+    }
+
     [[nodiscard]] WindowPlacement placement() const override;
     void apply_placement(const WindowPlacement& placement) override;
     void close() override
@@ -312,12 +385,34 @@ private:
     static LRESULT CALLBACK wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
     LRESULT handle(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam);
 
+    // Apply the recorded appearance to the DWM edge tint / drop shadow — the ONE Dwm call this
+    // design makes (02 §3). Failure is deliberately ignored: on a Windows too old to know the
+    // attribute the frame simply keeps the system tint, which is the pre-b1 behaviour.
+    void apply_dark_mode()
+    {
+        if (hwnd_ != nullptr && appearance_dark_.has_value())
+        {
+            const BOOL dark = *appearance_dark_ ? TRUE : FALSE;
+            (void)::DwmSetWindowAttribute(hwnd_, kDwmwaUseImmersiveDarkMode, &dark, sizeof(dark));
+        }
+    }
+
     HWND hwnd_ = nullptr;
     std::vector<ShellEvent> pending_;
     render::Extent2D size_{};
     DpiScale dpi_;
     PointI last_client_pointer_{};
+    // b1: the published chrome regions WM_NCHITTEST consults, and the NC forwarding state
+    // translate_win32_nc_mouse threads (window.h § Win32NcMouseDecision).
+    RegionMap chrome_regions_;
+    std::optional<bool> appearance_dark_;
+    bool nc_hover_ = false;
+    bool nc_pressed_ = false;
     bool tracking_mouse_leave_ = false;
+    // b1: whether a TrackMouseEvent(TME_LEAVE | TME_NONCLIENT) request is outstanding. Separate
+    // from tracking_mouse_leave_ because the two requests are independent per-type trackers, and
+    // WM_NCMOUSELEAVE is never posted without one (the client-only TME_LEAVE does not cover it).
+    bool tracking_nc_mouse_leave_ = false;
 };
 
 LRESULT CALLBACK Win32WindowBackend::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -360,6 +455,27 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
             dpi_ = event.dpi;
             break;
         case ShellEventKind::pointer:
+            // b1: a left release arriving as a CLIENT message also closes the NC forwarded-press
+            // bookkeeping — the user pressed a caption control, dragged into the client area
+            // (client messages resumed), and released there.
+            if (event.pointer.action == PointerAction::up && event.pointer.button == MouseButton::left)
+            {
+                nc_pressed_ = false;
+            }
+            // ...and a client MOVE with the left button reported UP while a forwarded NC press is
+            // still outstanding means the release landed OFF this window entirely (the consumed NC
+            // press never took capture, so that release was delivered to nobody). Close the
+            // browser's phantom press with the up it never received, ordered before the move.
+            if (nc_pressed_ && event.pointer.action == PointerAction::move &&
+                !event.pointer.modifiers.left_button_down)
+            {
+                ShellEvent up = event;
+                up.pointer.action = PointerAction::up;
+                up.pointer.button = MouseButton::left;
+                up.pointer.click_count = 1;
+                pending_.push_back(up);
+                nc_pressed_ = false;
+            }
             if (event.pointer.action == PointerAction::wheel)
             {
                 // The decoder deliberately reports no position for a wheel (its lParam is SCREEN
@@ -394,6 +510,137 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
 
     switch (message)
     {
+    // ------------------------------------------------ the frameless frame (b1, 02 §3)
+    case WM_NCCALCSIZE:
+    {
+        // The frame takeover: the (almost) whole window rect becomes client, through the SAME pure
+        // inset function the hit-test bands derive from, so the two can never disagree. Both wParam
+        // forms address the window rect first — TRUE hands NCCALCSIZE_PARAMS whose rgrc[0] is that
+        // rect, FALSE hands the bare RECT, same address either way — so one reinterpret serves
+        // both. `IsZoomed` is already true inside a maximize's frame recalcs, which is what routes
+        // the all-sides maximized inset (ROADMAP risk 2: no 8px overhang).
+        auto* rect = reinterpret_cast<RECT*>(lparam);
+        if (rect == nullptr)
+        {
+            break;
+        }
+        const Win32FrameInsets insets = win32_frameless_client_insets(
+            ::IsZoomed(hwnd) != FALSE, make_dpi_scale(current_hwnd_dpi(hwnd)));
+        rect->left += insets.left;
+        rect->top += insets.top;
+        rect->right -= insets.right;
+        rect->bottom -= insets.bottom;
+        return 0;
+    }
+    case WM_GETMINMAXINFO:
+    {
+        // The maximize geometry that makes the maximized inset above land the client EXACTLY on
+        // the work area — and that keeps a maximize onto a secondary monitor correct, since the OS
+        // default derives from the primary monitor's size. Windows resolves MonitorFromWindow to
+        // the monitor being maximized onto by the time this message is sent for a maximize.
+        auto* info = reinterpret_cast<MINMAXINFO*>(lparam);
+        HMONITOR monitor = ::MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST);
+        MONITORINFO monitor_info{};
+        monitor_info.cbSize = sizeof(monitor_info);
+        if (info == nullptr || monitor == nullptr ||
+            ::GetMonitorInfoW(monitor, &monitor_info) == FALSE)
+        {
+            break; // no monitor to ask: the OS defaults beat a guess
+        }
+        const Win32MaxGeometry geometry = win32_frameless_max_geometry(
+            PointI{monitor_info.rcWork.left - monitor_info.rcMonitor.left,
+                   monitor_info.rcWork.top - monitor_info.rcMonitor.top},
+            render::Extent2D{
+                static_cast<std::uint32_t>(monitor_info.rcWork.right - monitor_info.rcWork.left),
+                static_cast<std::uint32_t>(monitor_info.rcWork.bottom - monitor_info.rcWork.top)},
+            make_dpi_scale(current_hwnd_dpi(hwnd)));
+        info->ptMaxPosition.x = geometry.position.x;
+        info->ptMaxPosition.y = geometry.position.y;
+        info->ptMaxSize.x = static_cast<LONG>(geometry.size.width);
+        info->ptMaxSize.y = static_cast<LONG>(geometry.size.height);
+        // ptMin/MaxTrackSize keep the values Windows pre-filled.
+        return 0;
+    }
+    case WM_NCHITTEST:
+    {
+        // Decided by the pure hit_test_frame over the pushed-down chrome regions (02 §3). The
+        // lParam is SCREEN-relative — the one conversion this OS-side arm owns.
+        return hit_test_frame(screen_lparam_to_client(hwnd, lparam), size_, dpi_,
+                              ::IsZoomed(hwnd) != FALSE, chrome_regions_);
+    }
+    case WM_NCMOUSEMOVE:
+    case WM_NCLBUTTONDOWN:
+    case WM_NCLBUTTONUP:
+    case WM_NCLBUTTONDBLCLK:
+    case WM_NCMOUSELEAVE:
+    {
+        // The NC mouse family over the web-drawn caption controls, classified by the pure
+        // translate_win32_nc_mouse (window.h § Win32NcMouseDecision): forward what keeps the web
+        // buttons live, consume what DefWindowProc must not double-act on, and leave the caption
+        // and bands to the OS.
+        PointI position{};
+        if (message != WM_NCMOUSELEAVE)
+        {
+            position = screen_lparam_to_client(hwnd, lparam);
+        }
+        const std::int32_t hit =
+            message == WM_NCMOUSELEAVE ? kHtNowhere : static_cast<std::int32_t>(wparam);
+        if (message == WM_NCMOUSEMOVE && nc_pressed_ &&
+            (::GetKeyState(VK_LBUTTON) & 0x8000) == 0)
+        {
+            // The forwarded press's RELEASE landed off this window: the consumed NC press never
+            // took capture, so a release over another window (or the desktop) is delivered to
+            // nobody, and the browser is left holding exactly the phantom pressed button the
+            // decision table exists to prevent — every later forwarded move would re-assert
+            // `left_button_down` from the stale flag. Close it through the same pure table a
+            // delivered WM_NCLBUTTONUP takes ("release wherever it lands"), then route this move
+            // with the reconciled state.
+            const Win32NcMouseDecision closed =
+                translate_win32_nc_mouse(kWmNcLButtonUp, hit, position, current_modifier_state(),
+                                         nc_hover_, nc_pressed_);
+            nc_hover_ = closed.hover;
+            nc_pressed_ = closed.pressed;
+            if (closed.event.has_value())
+            {
+                pending_.push_back(*closed.event);
+            }
+        }
+        const Win32NcMouseDecision decision =
+            translate_win32_nc_mouse(static_cast<std::uint32_t>(message), hit, position,
+                                     current_modifier_state(), nc_hover_, nc_pressed_);
+        nc_hover_ = decision.hover;
+        nc_pressed_ = decision.pressed;
+        if (message == WM_NCMOUSELEAVE)
+        {
+            tracking_nc_mouse_leave_ = false; // the request is consumed each time it fires
+        }
+        else if (nc_hover_ && !tracking_nc_mouse_leave_)
+        {
+            // WM_NCMOUSELEAVE — the message the stuck-hover synthesis keys on — is only ever
+            // POSTED after an explicit TrackMouseEvent request carrying TME_NONCLIENT (the
+            // kWmMouseLeave re-arm above tracks the CLIENT area only). Without this arm, a pointer
+            // flying OFF the window from a hovered caption control never produces the leave, and
+            // the web-drawn button stays hover-lit forever (ROADMAP risk 3).
+            TRACKMOUSEEVENT track{};
+            track.cbSize = sizeof(track);
+            track.dwFlags = TME_LEAVE | TME_NONCLIENT;
+            track.hwndTrack = hwnd;
+            tracking_nc_mouse_leave_ = ::TrackMouseEvent(&track) != FALSE;
+        }
+        if (decision.event.has_value())
+        {
+            if (decision.event->pointer.action != PointerAction::leave)
+            {
+                last_client_pointer_ = decision.event->pointer.position;
+            }
+            pending_.push_back(*decision.event);
+        }
+        if (decision.consume)
+        {
+            return 0;
+        }
+        break;
+    }
     case WM_DPICHANGED:
     {
         // Windows supplies the rect the window should occupy on the new monitor. Honouring it is
@@ -480,6 +727,12 @@ bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
         return false;
     }
 
+    // b1 (02 §3): the style STAYS the stock WS_OVERLAPPEDWINDOW — Snap, the maximize animation and
+    // minimize-to-taskbar all key on it. The mockup-frameless look comes from the WM_NCCALCSIZE /
+    // WM_NCHITTEST takeover in handle(), never from stripping style bits. The AdjustWindowRect*
+    // below still sizes the OUTER rect as if the stock frame existed; the actual client our
+    // NCCALCSIZE then carves is a caption-bar taller than the estimate, which is exactly the band
+    // the web titlebar occupies — and the placement restore path applies exact window rects anyway.
     const DWORD style = WS_OVERLAPPEDWINDOW;
     // The window is created at the SYSTEM dpi and then corrected: the real per-monitor DPI is only
     // knowable once the window exists and Windows has decided which monitor it is on.
@@ -513,11 +766,11 @@ bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
     }
     hwnd_ = hwnd;
 
-    if (api.get_dpi_for_window != nullptr)
-    {
-        initial_dpi = api.get_dpi_for_window(hwnd_);
-    }
-    dpi_ = make_dpi_scale(initial_dpi);
+    dpi_ = make_dpi_scale(current_hwnd_dpi(hwnd_));
+
+    // b1: re-assert a dark-mode choice recorded before this window existed (today the appearance
+    // report always arrives after boot, but the ordering must not be load-bearing).
+    apply_dark_mode();
 
     if (desc.visible)
     {

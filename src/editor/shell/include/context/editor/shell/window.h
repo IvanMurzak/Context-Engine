@@ -147,6 +147,26 @@ public:
     virtual void minimize() = 0;
     virtual void set_maximized(bool maximized) = 0;
 
+    // The two chrome FACTS the owning window pushes DOWN to the OS backend (editor-window-chrome
+    // b1, target design 02 §3 / §6). Deliberately NOT pure, unlike the chrome VERBS above, because
+    // "ignore it" is a truthful answer for a backend whose platform does not consume the fact —
+    // where a silently-ignored minimize() would be a broken user-facing button, a silently-ignored
+    // region set just renders stock OS chrome, honestly. The defaults (window.cpp) are no-ops:
+    //   * win32 overrides BOTH — the regions feed its WM_NCHITTEST (hit_test_frame below) and the
+    //     appearance its one Dwm dark-mode attribute;
+    //   * headless overrides BOTH to RECORD (the ctest observable for the push-down wiring, which
+    //     otherwise only a real Windows desktop could exercise);
+    //   * X11 keeps the defaults FOREVER (D6: the WM owns the frame — there is nothing to consume);
+    //   * cocoa keeps them until c1's caption-press drag consumes the caption region.
+    //
+    // `set_chrome_regions` receives the window's WHOLE published region map (a wholesale replace,
+    // mirroring RegionMap::publish — an incremental update is how a stale rect outlives its strip);
+    // filtering to the caption kinds is the consumer's job (hit_test_frame maps every non-caption
+    // kind to the client). `set_appearance` says whether the ACTIVE theme is dark, so the OS-drawn
+    // remnants of the frame (the DWM edge tint / drop shadow on Windows) follow the editor's theme.
+    virtual void set_chrome_regions(const std::vector<ShellRegion>& regions);
+    virtual void set_appearance(bool dark);
+
     [[nodiscard]] virtual WindowPlacement placement() const = 0;
     virtual void apply_placement(const WindowPlacement& placement) = 0;
 
@@ -181,6 +201,16 @@ public:
     // which is exactly the lever the placement-poll -> `editor.ui` fact test flips.
     void minimize() override { minimized_ = true; }
     void set_maximized(bool maximized) override { placement_.maximized = maximized; }
+    // b1: RECORD the pushed-down chrome facts. There is no OS frame here, so recording is the whole
+    // honest behaviour — and it is what lets the ctest pin the EditorWindow push-down wiring
+    // (pump_once § the chrome-region push) on every leg, where the real consumer (the win32
+    // WM_NCHITTEST) only ever runs on an interactive Windows desktop.
+    void set_chrome_regions(const std::vector<ShellRegion>& regions) override
+    {
+        chrome_regions_ = regions;
+        ++chrome_region_pushes_;
+    }
+    void set_appearance(bool dark) override { appearance_dark_ = dark; }
     [[nodiscard]] WindowPlacement placement() const override { return placement_; }
     void apply_placement(const WindowPlacement& placement) override;
     void close() override { alive_ = false; }
@@ -197,6 +227,11 @@ public:
     [[nodiscard]] int redraw_requests() const { return redraw_requests_; }
     // What `minimize()` recorded — the headless observable for the a1 window-control surface.
     [[nodiscard]] bool minimized() const { return minimized_; }
+    // What `set_chrome_regions` / `set_appearance` recorded — the b1 push-down observables.
+    [[nodiscard]] const std::vector<ShellRegion>& chrome_regions() const { return chrome_regions_; }
+    [[nodiscard]] int chrome_region_pushes() const { return chrome_region_pushes_; }
+    // nullopt until the first `set_appearance` — "nothing reported yet" and "light" must differ.
+    [[nodiscard]] std::optional<bool> appearance_dark() const { return appearance_dark_; }
 
 private:
     std::vector<ShellEvent> queued_;
@@ -205,7 +240,10 @@ private:
     DpiScale dpi_;
     WindowPlacement placement_;
     std::string title_;
+    std::vector<ShellRegion> chrome_regions_;
+    std::optional<bool> appearance_dark_;
     int redraw_requests_ = 0;
+    int chrome_region_pushes_ = 0;
     bool minimized_ = false;
     bool alive_ = true;
 };
@@ -241,6 +279,45 @@ inline constexpr std::uint32_t kWmMouseWheel = 0x020A;
 inline constexpr std::uint32_t kWmMouseHWheel = 0x020E;
 inline constexpr std::uint32_t kWmMouseLeave = 0x02A3;
 inline constexpr std::uint32_t kWmDpiChanged = 0x02E0;
+
+// The FRAMELESS-window messages (editor-window-chrome b1, target design 02 §3). The first three are
+// handled entirely OS-side (win32_window.cpp) — WM_NCCALCSIZE reshapes the client through the pure
+// inset functions below, WM_NCHITTEST answers through hit_test_frame, WM_GETMINMAXINFO through
+// win32_frameless_max_geometry — and the NC mouse family is classified by the pure
+// translate_win32_nc_mouse so the web-drawn caption controls stay live (see its comment).
+inline constexpr std::uint32_t kWmGetMinMaxInfo = 0x0024;
+inline constexpr std::uint32_t kWmNcCalcSize = 0x0083;
+inline constexpr std::uint32_t kWmNcHitTest = 0x0084;
+inline constexpr std::uint32_t kWmNcMouseMove = 0x00A0;
+inline constexpr std::uint32_t kWmNcLButtonDown = 0x00A1;
+inline constexpr std::uint32_t kWmNcLButtonUp = 0x00A2;
+inline constexpr std::uint32_t kWmNcLButtonDblClk = 0x00A3;
+inline constexpr std::uint32_t kWmNcMouseLeave = 0x02A2;
+
+// The WM_NCHITTEST answers the frameless window returns (winuser.h HT*). Signed, because a hit-test
+// RESULT is an LRESULT and HTERROR is negative in the real header family. Declared here so
+// hit_test_frame is <windows.h>-free and executed by the ctest on every OS; asserted against the
+// real values in win32_window.cpp like every WM_* above.
+inline constexpr std::int32_t kHtNowhere = 0;
+inline constexpr std::int32_t kHtClient = 1;
+inline constexpr std::int32_t kHtCaption = 2;
+inline constexpr std::int32_t kHtMinButton = 8;
+inline constexpr std::int32_t kHtMaxButton = 9; // what lights Snap Layouts on Windows 11
+inline constexpr std::int32_t kHtLeft = 10;
+inline constexpr std::int32_t kHtRight = 11;
+inline constexpr std::int32_t kHtTop = 12;
+inline constexpr std::int32_t kHtTopLeft = 13;
+inline constexpr std::int32_t kHtTopRight = 14;
+inline constexpr std::int32_t kHtBottom = 15;
+inline constexpr std::int32_t kHtBottomLeft = 16;
+inline constexpr std::int32_t kHtBottomRight = 17;
+inline constexpr std::int32_t kHtClose = 20;
+
+// DWMWA_USE_IMMERSIVE_DARK_MODE — the ONE Dwm attribute this design sets (02 §3: the frame's edge
+// tint / drop shadow follow the active theme). Spelled locally because not every SDK this file
+// compiles under declares it (the 19-vs-20 history predates the SDKs CI uses); asserted against the
+// real value in win32_window.cpp where the header declares it.
+inline constexpr std::uint32_t kDwmwaUseImmersiveDarkMode = 20;
 
 // SIZE_MINIMIZED: WM_SIZE's wParam when the window was minimized. A minimized window reports a 0x0
 // client size, and forwarding that as a resize would ask the swapchain to reconfigure to nothing
@@ -286,6 +363,116 @@ struct Win32Message
 //   * WM_DPICHANGED's DPI is in the LOW word of wParam (X and Y are separate and always equal).
 [[nodiscard]] std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
                                                                 const Win32ModifierState& modifiers);
+
+// ---------------------------------------------------------- Win32 frameless-frame geometry (pure)
+//
+// editor-window-chrome b1 (target design 02 §3): the window keeps WS_OVERLAPPEDWINDOW (Snap,
+// animations, minimize-to-taskbar all preserved) and takes the frame over in WM_NCCALCSIZE /
+// WM_NCHITTEST. Everything DECIDABLE lives here as pure functions over plain integers, executed by
+// the ctest on all three OS legs; win32_window.cpp only converts coordinates and applies the
+// answers. The load-bearing agreements:
+//   * the NCCALCSIZE insets and the hit-test's resize bands derive from the SAME
+//     win32_resize_border_thickness, so the client shape and the band geometry cannot disagree;
+//   * WM_GETMINMAXINFO's maximize geometry (win32_frameless_max_geometry) and the maximized insets
+//     COMPOSE to client == monitor work area exactly — the classic 8px frame overhang (ROADMAP
+//     risk 2) cancels out by construction, pinned by the tests at 96 and 144 dpi.
+
+// The DPI-scaled resize border: SM_CXSIZEFRAME (4) + SM_CXPADDEDBORDER (4) at the 96-dpi reference,
+// scaled round-to-nearest — 8 px at 96 dpi, 12 px at 150%. Computed rather than queried from
+// GetSystemMetricsForDpi so the pure hit-test and the OS-side inset use one number by construction
+// (and so the function exists at all off-Windows).
+[[nodiscard]] std::int32_t win32_resize_border_thickness(DpiScale dpi);
+
+// How far a corner grip extends along each edge (16 px at 96 dpi — twice the border, so a corner is
+// acquirable without pixel-hunting). Within a resize band, a point closer than this to either end
+// resolves to the corner code; the metric never claims points OUTSIDE the bands, so the caption a
+// few pixels below the top band is unaffected.
+[[nodiscard]] std::int32_t win32_resize_corner_extent(DpiScale dpi);
+
+// What WM_NCCALCSIZE subtracts from the window rect to produce the client rect. Restored (not
+// maximized): left/right/bottom keep the system resize border — the OS strip the l/r/b resize
+// bands live in — and TOP IS ZERO, which is the whole point: the client reaches the window's top
+// edge and the web titlebar draws there. Maximized: ALL sides inset by the border, cancelling the
+// frame Windows hangs off-monitor (see win32_frameless_max_geometry).
+struct Win32FrameInsets
+{
+    std::int32_t left = 0;
+    std::int32_t top = 0;
+    std::int32_t right = 0;
+    std::int32_t bottom = 0;
+};
+[[nodiscard]] Win32FrameInsets win32_frameless_client_insets(bool maximized, DpiScale dpi);
+
+// The maximize geometry WM_GETMINMAXINFO answers: the window rect is the monitor WORK AREA inflated
+// by the resize border on all sides (`position` is relative to the MONITOR origin — the space
+// MINMAXINFO::ptMaxPosition speaks; `work_origin_in_monitor` is work-area top-left minus monitor
+// top-left, i.e. the taskbar offset). The maximized insets then subtract the same border back, so
+// the CLIENT equals the work area exactly — content never spills off-monitor and never leaves a
+// letterbox gap. Overriding the message at all is what keeps a maximize onto a SECONDARY monitor
+// correct: the OS default derives from the primary monitor's size.
+struct Win32MaxGeometry
+{
+    PointI position;
+    render::Extent2D size;
+};
+[[nodiscard]] Win32MaxGeometry win32_frameless_max_geometry(PointI work_origin_in_monitor,
+                                                            render::Extent2D work_size,
+                                                            DpiScale dpi);
+
+// THE WM_NCHITTEST DECISION (02 §3), pure. `point` is in CLIENT coordinates (the backend runs the
+// screen point through ScreenToClient first) and is legitimately negative or past the client size:
+// the l/r/b resize strips live OUTSIDE the client rect the insets carved. Order is load-bearing —
+// resize bands FIRST, then the published chrome regions, else client:
+//   * restored only (a maximized window has no resize bands): the top band is the first
+//     border-thickness rows INSIDE the client (the top inset is zero, so there is no NC strip to
+//     put it in — every frameless app steals these rows, including over the caption controls,
+//     which is also what a stock titlebar does); the l/r/b bands are the NC strips; within a band,
+//     the corner extent resolves the diagonal codes;
+//   * the region lookup is the map's own back-to-front last-match-wins, so a control published
+//     after the caption wins over it with no carve-out token (input.h): caption → HTCAPTION (the
+//     OS then owns drag/snap/double-click/system-menu — the point of the pattern), caption-min /
+//     -max / -close → HTMINBUTTON / HTMAXBUTTON / HTCLOSE (HTMAXBUTTON is what lights Snap
+//     Layouts), every other kind → HTCLIENT (viewport/native regions are CLIENT content; their
+//     routing is the InputArbiter's, not the OS frame's).
+[[nodiscard]] std::int32_t hit_test_frame(PointI point, render::Extent2D client_size, DpiScale dpi,
+                                          bool maximized, const RegionMap& regions);
+
+// WHAT THE FRAMELESS WINDOW DOES WITH ONE NC MOUSE MESSAGE, pure. Returning the HT*BUTTON codes
+// makes the control rects NON-client, so the OS stops sending client mouse messages there — but
+// the buttons are WEB-drawn (02 §5): their hover is CSS and their click dispatches
+// window.minimize/toggle-maximize/close over the bridge. This decision table is what keeps them
+// live, the same shape Chromium uses for its caption buttons:
+//   * NC moves OVER a control are FORWARDED to the browser pipeline as ordinary client-space moves
+//     (CSS hover lights), never consumed — DefWindowProc's own NC handling (the Snap Layouts
+//     flyout timing) keeps running;
+//   * NC left presses/releases OVER a control are forwarded as pointer down/up AND CONSUMED:
+//     DefWindowProc would otherwise run the CLASSIC caption-button tracking and fire SC_CLOSE /
+//     SC_MINIMIZE / SC_MAXIMIZE itself — the double-action this consume exists to prevent. The
+//     `pressed` flag carries a forwarded press across messages so the RELEASE is forwarded
+//     wherever it lands (a browser left holding a phantom pressed button is the stuck state);
+//   * everything NOT over a control (HTCAPTION, the bands) is DefWindowProc's — drag, snap,
+//     double-click-maximize, system menu — and if a control was hovered, a LEAVE is synthesized so
+//     the pointer sliding from the close button onto the caption cannot leave a stuck hover
+//     (ROADMAP risk 3's mirror image; the caption itself is suppressed wholesale: no caption
+//     point is ever forwarded, so a caption press cannot half-reach the browser).
+// The caller threads `hover_live` / `pressed_live` in and stores `hover` / `pressed` back —
+// exactly how the backend threads Win32ModifierState into translate_win32_message.
+struct Win32NcMouseDecision
+{
+    // The event to feed the ordinary input pipeline (position already client-space), if any.
+    std::optional<ShellEvent> event;
+    // True: handled — return 0 instead of calling DefWindowProc.
+    bool consume = false;
+    // A caption control is hovered after this message (the forwarded-hover state).
+    bool hover = false;
+    // A forwarded control press is outstanding after this message.
+    bool pressed = false;
+};
+[[nodiscard]] Win32NcMouseDecision translate_win32_nc_mouse(std::uint32_t message,
+                                                            std::int32_t hit_code,
+                                                            PointI client_position,
+                                                            const Win32ModifierState& keys,
+                                                            bool hover_live, bool pressed_live);
 
 // --------------------------------------------------------------------- X11 event decoding (pure)
 

@@ -89,6 +89,18 @@ inline constexpr const char* kWindowToggleMaximizeMethod = "window.toggle-maximi
 inline constexpr const char* kWindowFocusMethod = "window.focus";
 inline constexpr const char* kChromeStateMethod = "chrome.state";
 
+// The APPEARANCE report (editor-window-chrome b1, target design 02 §3): editor-core tells the Shell
+// whether the ACTIVE theme is dark, whenever the theme engine applies one (boot included), so the
+// OS-drawn remnants of the frame — Windows' DWM edge tint / drop shadow — follow the editor's
+// theme instead of the machine's. The write-shaped sibling of `chrome.state`: it rides this same
+// surface (installed on every window that installs `window.*`, i.e. every live smoke, with no
+// per-smoke change) and degrades honestly when unbound (`accepted:false`, never `unknown_method`).
+// The tokens are pinned by the `webui-panel-contract` gate like the mode tokens above: a drift here
+// refuses a call editor-core makes AT BOOT, tripping every live smoke's `refused() == 0`.
+inline constexpr const char* kWindowSetAppearanceMethod = "window.set-appearance";
+inline constexpr const char* kWindowAppearanceDark = "dark";
+inline constexpr const char* kWindowAppearanceLight = "light";
+
 // `chrome.state.mode` — what the titlebar strip renders (02 §1): `custom` = full strip including
 // window controls (Windows, once b1 makes the frame ours), `hybrid` = strip minus controls,
 // padded by `controlsInset` (macOS — LIVE since c1: cocoa_chrome.h's query reads the real window
@@ -272,6 +284,9 @@ public:
     using ToggleMaximizeHandler = std::function<std::optional<bool>()>;
     using FocusHandler = std::function<bool()>;
     using ChromeStateProvider = std::function<ChromeState()>;
+    // b1: the appearance report's sink — `dark` is true for a dark theme. Optional like the four
+    // above: unbound is the honest `accepted:false` degrade (a build with no OS window to tint).
+    using AppearanceHandler = std::function<bool(bool dark)>;
 
     // `self_id` is THIS window's id — the source of every request from this window's editor-core, and
     // the key its `window.seed` / `window.rehomed` read. `store` outlives every window (it is owned by
@@ -295,6 +310,8 @@ public:
     void bind_toggle_maximize(ToggleMaximizeHandler handler);
     void bind_focus(FocusHandler handler);
     void bind_chrome_state(ChromeStateProvider provider);
+    // b1: bind the appearance report's sink (see the using above).
+    void bind_appearance(AppearanceHandler handler);
 
     // Bind the shared cross-window drag relay (e10c). NULL — the default — leaves `drag.probe` /
     // `drag.report-zone` INERT: probe answers `{active:false}` and report-zone is an accepted no-op, so
@@ -335,6 +352,15 @@ public:
     [[nodiscard]] contract::Json toggle_maximize();
     [[nodiscard]] contract::Json focus();
     [[nodiscard]] contract::Json chrome_state();
+
+    // b1 — the appearance report. Total over renderer-controlled `params`; `error_code` is set
+    // (kErrWindowBadParams) when `appearance` is missing or is neither pinned token — fail-closed,
+    // like `drag_report_zone`, because a drifted token silently mapped to a default would tint the
+    // frame wrong with both builds green (the exact hazard the contract gate pins the tokens for).
+    // A well-formed report answers `{accepted}` — false when no handler is bound, the same honest
+    // degrade every control verb above uses.
+    [[nodiscard]] contract::Json set_appearance(const contract::Json& params,
+                                                std::string& error_code);
 
     // e10c — the cross-window drag probe/answer. `drag_probe` reports the hover THIS window (`self_id_`)
     // should act on: `{active, panelId, x, y, generation}`, with x/y in this window's client pixels, or
@@ -380,6 +406,11 @@ public:
     [[nodiscard]] std::size_t maximize_toggles() const { return maximize_toggles_; }
     [[nodiscard]] std::size_t focus_requests() const { return focus_requests_; }
     [[nodiscard]] std::size_t chrome_reads() const { return chrome_reads_; }
+    // b1: how many WELL-FORMED appearance reports arrived (routed, bound or not — the ten-smoke
+    // discipline), and the last one's value (meaningful once `appearance_reports() >= 1`; the live
+    // boot smoke asserts it matches its pinned theme's appearance).
+    [[nodiscard]] std::size_t appearance_reports() const { return appearance_reports_; }
+    [[nodiscard]] bool last_appearance_dark() const { return last_appearance_dark_; }
     // How many `drag.probe` calls saw an ACTIVE hover for this window, and how many `drag.report-zone`
     // answers it forwarded to the store — the live smoke asserts an editor-core round trip from these.
     [[nodiscard]] std::size_t drag_probes_active() const { return drag_probes_active_; }
@@ -414,6 +445,7 @@ private:
     ToggleMaximizeHandler toggle_maximize_;
     FocusHandler focus_;
     ChromeStateProvider chrome_state_;
+    AppearanceHandler appearance_;
     std::size_t tear_outs_ = 0;
     std::size_t moves_ = 0;
     std::size_t seeds_served_ = 0;
@@ -421,6 +453,8 @@ private:
     std::size_t maximize_toggles_ = 0;
     std::size_t focus_requests_ = 0;
     std::size_t chrome_reads_ = 0;
+    std::size_t appearance_reports_ = 0;
+    bool last_appearance_dark_ = false;
     std::size_t drag_probes_active_ = 0;
     std::size_t drag_zones_reported_ = 0;
     std::size_t ui_mirrors_published_ = 0;

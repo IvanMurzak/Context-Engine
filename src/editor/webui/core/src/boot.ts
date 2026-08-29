@@ -59,7 +59,13 @@ import {
 } from "./panelverbs.js";
 import { ShellPackageGrants } from "./packagegrants.js";
 import { PANEL_UI_DELIVER_VERB, PackageUiFanout } from "./packageui.js";
-import { WindowClient, type ChromeState, type WindowSeed } from "./window.js";
+import {
+    WINDOW_APPEARANCE_DARK,
+    WINDOW_APPEARANCE_LIGHT,
+    WindowClient,
+    type ChromeState,
+    type WindowSeed,
+} from "./window.js";
 import {
     findChromeStripElements,
     startChromeStrips,
@@ -90,6 +96,7 @@ import {
     defaultMediaQueryProbe,
     defaultThemeId,
     parsePinnedThemeId,
+    type ThemeChangedPayload,
     type ThemeRoot,
 } from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
@@ -304,6 +311,28 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // the live boot smoke can assert their routing end to end. Awaited so the smoke's counters
         // are settled before boot reports ready.
         await runChromeSmoke(chromeClient);
+
+        // --- the appearance report (editor-window-chrome b1, target design 02 §3) ----------------
+        // The Shell's OS window chrome — Windows' DWM dark-mode edge tint / drop shadow — follows
+        // the ACTIVE theme's appearance. ONE subscription serves boot AND every later switch: the
+        // theme bus RETAINS the last `theme-changed` envelope (snapshot-on-subscribe, uibus.ts), so
+        // subscribing here — after startTheme's boot apply above — is handed the current appearance
+        // immediately, and a live Dark → Light toggle re-reports through the same listener.
+        // Fire-and-forget by design: the client is refusal-tolerant, and a frame tint must never
+        // gate the boot. The ternary below is NOT a redundant re-derivation of the payload's
+        // already-closed "dark" | "light" type: it is boot's only PRODUCTION value-reference to
+        // the two token constants, which is what keeps them in the shipped bundle for
+        // check_webui_assets' cross-check — a test-only reference gets tree-shaken out (the
+        // WELCOME_MODE_PROJECT precedent in that gate's own comments).
+        if (theme !== undefined) {
+            theme.bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, (event): void => {
+                void chromeClient.setAppearance(
+                    event.payload.appearance === WINDOW_APPEARANCE_LIGHT
+                        ? WINDOW_APPEARANCE_LIGHT
+                        : WINDOW_APPEARANCE_DARK,
+                );
+            });
+        }
 
         // --- the chrome strips (editor-window-chrome a2, target design 02 §2 / §6) ---------------
         // Mounted BEFORE the welcome branch, deliberately: the mockup's frame is the app's frame,
