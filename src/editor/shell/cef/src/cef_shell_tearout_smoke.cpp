@@ -625,7 +625,20 @@ int main(int argc, char** argv)
         }
         // …and the channels never crossed: window 0's OWN strip regions are still on window 0's
         // map (the mis-routing hazard editor_main.cpp's region sink names — a secondary publish
-        // handed to the primary's arbiter would double up here and vanish above).
+        // handed to the primary's arbiter would double up here and vanish above). Unlike the
+        // secondary's assertions, window 0's publish has no seed wait to ride: `boot_window` proved
+        // only the handshake, which PRECEDES the strips in boot.ts — so give the primary's initial
+        // publish the same bounded pump the seed got before reading its map.
+        {
+            const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+            while (std::chrono::steady_clock::now() < deadline &&
+                   primary->input().regions().generation() == 0)
+            {
+                if (!manager.pump_once(now_us()))
+                    break;
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
         SMOKE_CHECK(primary->input().regions().find("chrome.caption") != nullptr &&
                         primary->input().regions().size() == 4,
                     "window 0 keeps its own four chrome regions — per-window channels never crossed");
