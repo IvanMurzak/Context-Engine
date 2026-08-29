@@ -29,7 +29,9 @@ import {
     bootEditorCore,
     makePackageDaemonCall,
 } from "../boot.js";
+import { DAEMON_LINK_STATE_METHOD } from "../banners.js";
 import { SESSION_CONTROL_METHOD, SESSION_STATE_METHOD } from "../session.js";
+import { STATUSBAR_ATTRIBUTE } from "../statusbar.js";
 import { CHROME_STATE_METHOD, WINDOW_SET_APPEARANCE_METHOD } from "../window.js";
 
 /** A mutable answer table so a case can change what the Shell serves mid-run. */
@@ -366,6 +368,91 @@ export const bootTests: readonly TestCase[] = [
                 playbar.remove();
                 statusbar.remove();
                 root.remove();
+            }
+        },
+    },
+    {
+        // editor-window-chrome d2 — THE WIRING CLAIM, end to end in a REAL boot: the statusbar
+        // content mounts in the a2 shell from the boot feeds (the ONE `daemon.linkState` fetch, the
+        // theme engine's retained envelope, `welcome.state`'s projectName), and the link feed boot
+        // STARTED observes a mid-session transition. Every link below is one a stub could sever
+        // with the whole statusbar.test.ts unit tier still green (a mount boot never performs, a
+        // feed boot never starts, a bus subscription against a copy), which is why this case drives
+        // `bootEditorCore` itself.
+        name: "boot d2: the statusbar mounts from the boot feeds and the link feed tracks a transition",
+        run: async () => {
+            clearSessionAttribute();
+            const statusbar = document.createElement("footer");
+            statusbar.id = "editor-statusbar";
+            const root = document.createElement("main");
+            root.id = "editor-root";
+            document.body.append(statusbar, root);
+
+            const answers = baseAnswers();
+            answers["welcome.state"] = { mode: "project", projectName: "Asteroids" };
+            answers[DAEMON_LINK_STATE_METHOD] = {
+                readOnly: false,
+                reconnectAttempts: 0,
+                ownership: "owned",
+                lastError: "",
+            };
+            const shell = mockShell(answers);
+            try {
+                const report = await bootEditorCore(new ShellBridge(shell.query));
+                assert(report.ready, "the editor boots");
+                assert(
+                    shell.methods.includes(DAEMON_LINK_STATE_METHOD),
+                    "boot READ the link state (a boot that never asks cannot be tracking it)",
+                );
+                const detail = (): string =>
+                    document.documentElement.getAttribute(STATUSBAR_ATTRIBUTE) ?? "(absent)";
+                assert(
+                    detail().includes("link Live"),
+                    `the boot fetch seeded the link field, got: ${detail()}`,
+                );
+                assert(
+                    detail().includes("project Asteroids"),
+                    `the welcome.state name reached the project field, got: ${detail()}`,
+                );
+                assert(
+                    !detail().includes("theme none"),
+                    `the theme engine's retained envelope reached the theme field, got: ${detail()}`,
+                );
+
+                // THE TRANSITION: the daemon goes away mid-session; the poll boot started must
+                // re-render the field from the SAME read the banners consume — no reload, no click.
+                answers[DAEMON_LINK_STATE_METHOD] = {
+                    readOnly: true,
+                    reconnectAttempts: 2,
+                    ownership: "owned",
+                    lastError: "",
+                };
+                await waitFor(
+                    "the link feed to observe the lost daemon and re-render the field",
+                    () => detail().includes("link Reconnecting (2)"),
+                    5_000,
+                    () => `statusbar ${detail()}`,
+                );
+            } finally {
+                // Withdraw the surface so the link poll self-stops on its next refused tick (the
+                // session-relay cleanup rule, re-exercised on the REAL boot path) — and WAIT for
+                // that tick before dropping the fixture: its `applyLink(null)` re-writes the
+                // report attribute, so removing the attribute first would let a stray
+                // `link none` report reappear on the shared document mid-way through a later
+                // suite. Best-effort (`catch`), so a timeout here can never mask the real
+                // assertion failure above.
+                delete answers[DAEMON_LINK_STATE_METHOD];
+                await waitFor(
+                    "the link poll to observe the withdrawn surface and self-stop",
+                    () =>
+                        (
+                            document.documentElement.getAttribute(STATUSBAR_ATTRIBUTE) ?? ""
+                        ).includes("link none"),
+                    5_000,
+                ).catch(() => undefined);
+                statusbar.remove();
+                root.remove();
+                document.documentElement.removeAttribute(STATUSBAR_ATTRIBUTE);
             }
         },
     },

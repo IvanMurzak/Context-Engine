@@ -69,6 +69,7 @@ import {
 } from "./window.js";
 import {
     EDITOR_PLAYBAR_ID,
+    EDITOR_STATUSBAR_ID,
     findChromeStripElements,
     startChromeStrips,
     subscribeChromeFacts,
@@ -76,6 +77,12 @@ import {
     type ChromeStrips,
 } from "./chrome.js";
 import { makePlayActions, mountPlaybar, type PlaybarHolder } from "./playbar.js";
+import {
+    StatusbarLinkFeed,
+    mountStatusbar,
+    subscribeStatusbarTheme,
+    type StatusbarMount,
+} from "./statusbar.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
 import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
@@ -103,7 +110,7 @@ import {
     type ThemeRoot,
 } from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
-import { BannerClient, mountBanners, type BannerData } from "./banners.js";
+import { BannerClient, mountBanners, type BannerData, type DaemonLinkState } from "./banners.js";
 import {
     SessionControlClient,
     SessionFeed,
@@ -378,6 +385,46 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             // Reported by the absence of `data-editor-strips`; the editor is up and usable.
         }
 
+        // --- the statusbar content (editor-window-chrome d2, target design 02 §8) -----------------
+        // Mounted BEFORE the welcome branch, like the strips themselves: the statusbar is part of
+        // the frame and renders in BOTH modes. Each field renders an EXISTING feed (statusbar.ts's
+        // honesty rule — a field with no source hides): the link seeds from the ONE banner fetch
+        // above and stays live over `StatusbarLinkFeed`'s re-read of the same method (started only
+        // when the Shell actually serves it — the session feed's bargain); the theme rides the
+        // retained `theme-changed` envelope; the project is the titlebar's own `welcome.state`
+        // name. The problems count arrives later, on the editor path's panel refresh tick (d2's
+        // hook in startPanels). NEVER fatal, like every boot feed. The slot is looked up directly
+        // rather than through `findChromeStripElements`: that lookup is all-or-nothing over the
+        // full strip set, and the statusbar mounts even in a frame where a sibling strip is
+        // missing.
+        let statusbarMount: StatusbarMount | undefined;
+        try {
+            const statusbarSlot =
+                typeof document === "undefined"
+                    ? null
+                    : document.getElementById(EDITOR_STATUSBAR_ID);
+            if (statusbarSlot !== null) {
+                const statusbar = mountStatusbar(statusbarSlot, {
+                    projectName: welcomeState?.projectName ?? "",
+                });
+                statusbarMount = statusbar;
+                statusbar.applyLink(bannerData.link);
+                if (theme !== undefined) {
+                    subscribeStatusbarTheme(theme.bus, statusbar);
+                }
+                if (bannerData.link !== null) {
+                    new StatusbarLinkFeed(
+                        (): Promise<DaemonLinkState | null> => banners.daemonLinkState(),
+                        (link): void => {
+                            statusbar.applyLink(link);
+                        },
+                    ).start();
+                }
+            }
+        } catch {
+            // Reported by the absence of `data-editor-statusbar`; the editor is up and usable.
+        }
+
         // --- the welcome screen (e14c, design 07 §4 / D13) ----------------------------------------
         // A BARE launch shows the app's front door (recent projects / "Open project…" / "New from
         // template") instead of the editor. Ask the Shell, and DEFAULT to the editor path when there
@@ -454,7 +501,11 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             chromeStrips,
             liveRegistry,
             playActions,
+            statusbarMount,
         );
+        // d2: seed the problems count from whatever the bring-up already hydrated; the refresh tick
+        // inside startPanels re-derives it from then on (and hides it again if the panel closes).
+        statusbarMount?.refreshProblems();
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
         // Load the per-user `~/.context/keybindings.json` override the Shell watches and serves
@@ -527,6 +578,10 @@ async function startPanels(
     // threaded into buildCommandRegistry so the palette's transports write the same path the strip
     // buttons do.
     playActions: PlayCommandActions,
+    // d2: the statusbar mount (undefined when the document carries no statusbar shell), threaded
+    // through to the window mechanism's runtime tick, which re-derives the problems count after
+    // each `pollRevisions` pass.
+    statusbar?: StatusbarMount,
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -701,6 +756,7 @@ async function startPanels(
                         });
                     },
                     chrome?.mount,
+                    statusbar,
                 );
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
@@ -1107,6 +1163,11 @@ async function startWindowMechanism(
     // window id `window.list` reports. On the welcome path (no window mechanism) the glyph simply
     // keeps the boot snapshot, which is the honest state of a window nothing is relaying to.
     chromeMount?: ChromeMount,
+    // d2: the statusbar mount (undefined when the document carries no statusbar shell). One duty:
+    // the runtime tick below re-derives the problems count AFTER each `pollRevisions` pass, so the
+    // count tracks the hydrated Problems panel — the diagnostics feed's only rendering in this
+    // window — and hides again when that panel closes.
+    statusbar?: StatusbarMount,
 ): Promise<number> {
     let windowId = 0;
     let detail = "single window";
@@ -1201,7 +1262,21 @@ async function startWindowMechanism(
                 // rides the roster; nothing is built Shell-side) and issues a `panel.render` only for
                 // a panel whose model actually moved — see `PanelHost.pollRevisions` on why the
                 // unconditional `refreshAll` must NOT be what a tick calls.
-                void host.pollRevisions();
+                //
+                // d2: the statusbar's problems count re-derives after each poll pass, and
+                // unconditionally rather than only when something refreshed — a CLOSED panel
+                // moves no revision, and the count must hide with its source rather than go stale.
+                // The bound this buys is loose, deliberately: `pollRevisions` kicks each panel's
+                // re-render FIRE-AND-FORGET (`void renderer.refresh()` — an async `panel.render`
+                // plus a DOM replace), so a diagnostic that moved the model on this tick is usually
+                // counted on the NEXT one; the unconditional re-derivation is what makes the count
+                // converge rather than needing the settle.
+                // Cheap: the mount caches the list node (the document-wide lookup re-runs only
+                // while none is cached), so the steady tick pays a scoped row count plus the
+                // unchanged short-circuit.
+                void host.pollRevisions().then((): void => {
+                    statusbar?.refreshProblems();
+                });
                 void windowClient.rehomed().then((seeds) => {
                     if (seeds.length > 0) {
                         void applyRehomedPanels(host, client, seeds);

@@ -262,22 +262,36 @@ html[data-theme-transition="true"] * {
     gap: var(--ctx-shape-space-sm, 8px);
 }
 
-/* The status DOT: decoration (aria-hidden), hue bound 1:1 to the reserved status semantics via
- * `data-tone` (06 §2) — the same indirection the kit's tones use. NO animation here: motion rules
- * belong to the theme layer's flourish derivation, and the strip adds none. */
-.ctx-playbar__dot {
-    width: 8px;
-    height: 8px;
+/* The status DOTS (playbar + statusbar): decoration (aria-hidden), hue bound 1:1 to the reserved
+ * status semantics via `data-tone` (06 §2) — the same indirection the kit's tones use, spelled as
+ * ONE tone→hue table shared by every strip dot so the binding cannot drift per strip (`warn` is
+ * the statusbar's tone — a read-only link a user must know about; the playbar never sets it,
+ * harmlessly). NO animation here: motion rules belong to the theme layer's flourish derivation,
+ * and the strips add none. Size stays per strip, below. */
+.ctx-playbar__dot,
+.ctx-statusbar__dot {
     border-radius: 50%;
     background: var(--ctx-colors-semantic-idle, #8b949e);
 }
 
-.ctx-playbar__dot[data-tone="good"] {
+.ctx-playbar__dot[data-tone="good"],
+.ctx-statusbar__dot[data-tone="good"] {
     background: var(--ctx-colors-semantic-good, #3fb950);
 }
 
-.ctx-playbar__dot[data-tone="wait"] {
+.ctx-playbar__dot[data-tone="wait"],
+.ctx-statusbar__dot[data-tone="wait"] {
     background: var(--ctx-colors-semantic-wait, #a855f7);
+}
+
+.ctx-playbar__dot[data-tone="warn"],
+.ctx-statusbar__dot[data-tone="warn"] {
+    background: var(--ctx-colors-semantic-warn, #d29922);
+}
+
+.ctx-playbar__dot {
+    width: 8px;
+    height: 8px;
 }
 
 .ctx-playbar__timer {
@@ -296,13 +310,65 @@ html[data-theme-transition="true"] * {
     flex: none;
 }
 
-/* The statusbar (02 §8): an empty 24px shell until d2 gives it truthful content. */
+/* The statusbar (02 §8, filled by d2 — statusbar.ts): daemon link dot + label / problems count /
+ * active theme + project identity. LAYOUT + the one decoration (the dot) ONLY, the `.ctx-settings`
+ * discipline: the live readouts inside are stock kit badges and nothing here paints one. Every
+ * field hides when its source is absent (statusbar.ts's honesty rule), so the explicit `[hidden]`
+ * rule below keeps the hide working for the flex field. The strip keeps `colors.panel2` — the a2
+ * geometry and the live smokes' coverage recalibration are untouched by content. */
 .ctx-statusbar {
     flex: 0 0 auto;
     height: var(--ctx-chrome-statusbar-height);
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-md, 12px);
+    padding: 0 var(--ctx-shape-space-md, 12px);
     background: var(--ctx-colors-panel2, #141414);
     border-top: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
     box-sizing: border-box;
+    font-size: var(--ctx-typography-size-2xs, 10.5px);
+    color: var(--ctx-colors-muted, #93a1b1);
+    user-select: none;
+}
+
+.ctx-statusbar__link {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+}
+
+.ctx-statusbar__link[hidden] {
+    display: none;
+}
+
+/* The link DOT: sized here; its tone→hue binding is the ONE shared strip-dot table beside
+ * `.ctx-playbar__dot` above (06 §2). */
+.ctx-statusbar__dot {
+    width: 7px;
+    height: 7px;
+}
+
+.ctx-statusbar__problems {
+    flex: none;
+}
+
+.ctx-statusbar__fill {
+    flex: 1 1 auto;
+}
+
+.ctx-statusbar__theme {
+    flex: none;
+    color: var(--ctx-colors-muted2, #7e7e7e);
+}
+
+.ctx-statusbar__project {
+    flex: none;
+    max-width: 40%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: var(--ctx-colors-muted2, #7e7e7e);
 }
 
 /* --- the docking surface (M9 e05d1) ---------------------------------------------------------- *

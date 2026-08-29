@@ -84,10 +84,16 @@ function reply(state: string, attached: boolean, generation: number): Answer {
     return { result: { event: "play-state", state, origin: 0, attached, generation } };
 }
 
-/** A scheduler whose ticks the test fires by hand, so no case depends on wall-clock timing. */
-class ManualScheduler implements SessionScheduler {
+/**
+ * A scheduler whose ticks the test fires by hand, so no case depends on wall-clock timing.
+ * Exported for every suite that drives a `SessionScheduler` seam (statusbar.test.ts's link feed) —
+ * one fake per seam, the `mockShell` rule.
+ */
+export class ManualScheduler implements SessionScheduler {
     #next = 1;
     readonly ticks = new Map<number, () => void>();
+    /** Every handle `clearInterval` was asked to clear — the self-stop tests' observation. */
+    readonly cleared: number[] = [];
 
     setInterval(callback: () => void, _delayMs: number): number {
         const handle = this.#next++;
@@ -96,6 +102,7 @@ class ManualScheduler implements SessionScheduler {
     }
 
     clearInterval(handle: number): void {
+        this.cleared.push(handle);
         this.ticks.delete(handle);
     }
 
