@@ -561,7 +561,14 @@ int main(int argc, char** argv)
     SMOKE_CHECK(banner_bridge.install(bridge), "the banner bridge surface installed");
 
     shell::SessionBridge session_bridge;
-    SMOKE_CHECK(session_bridge.install(bridge), "the session.state bridge surface installed");
+    SMOKE_CHECK(session_bridge.install(bridge),
+                "the session.state + session.control bridge surfaces installed");
+    // editor-window-chrome d1: install() registers `session.control` (the play-bar strip's
+    // transport relay) beside `session.state`, so every live smoke serves it with no per-smoke
+    // wiring — asserted here so the ten-smoke rule is mechanised rather than trusted. Unbound, it
+    // answers the honest "nothing to drive" (never `unknown_method`), so `refused() == 0` holds.
+    SMOKE_CHECK(bridge.has_method(shell::kSessionControlMethod),
+                "the d1 session.control write surface routes");
 
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);

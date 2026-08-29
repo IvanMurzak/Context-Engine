@@ -341,6 +341,12 @@ export const keymapTests: readonly TestCase[] = [
                     movePanelToPrimary: () => record("moveToPrimary"),
                 },
                 sessionActions: { undo: () => record("undo"), redo: () => record("redo") },
+                playActions: {
+                    play: () => ({ ok: true, note: "play" }),
+                    pause: () => ({ ok: true, note: "pause" }),
+                    stop: () => ({ ok: true, note: "stop" }),
+                    step: () => ({ ok: true, note: "step" }),
+                },
                 roster: { contractMajor: 2, panels: [] },
                 panelDispatch: (panelId, commandId) => record(`${panelId}/${commandId}`),
             });

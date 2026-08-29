@@ -386,7 +386,14 @@ int main(int argc, char** argv)
     // reports `state:"edit", attached:false` — which is also what makes the boot deterministic here
     // (no live session can change the play state under the scenario).
     shell::SessionBridge session_bridge;
-    SMOKE_CHECK(session_bridge.install(bridge), "the session.state bridge surface installed");
+    SMOKE_CHECK(session_bridge.install(bridge),
+                "the session.state + session.control bridge surfaces installed");
+    // editor-window-chrome d1: install() registers `session.control` (the play-bar strip's
+    // transport relay) beside `session.state`, so every live smoke serves it with no per-smoke
+    // wiring — asserted here so the ten-smoke rule is mechanised rather than trusted. Unbound, it
+    // answers the honest "nothing to drive" (never `unknown_method`), so `refused() == 0` holds.
+    SMOKE_CHECK(bridge.has_method(shell::kSessionControlMethod),
+                "the d1 session.control write surface routes");
     // e10b: editor-core's boot now calls `window.seed` / `window.list` / `window.rehomed`; install
     // the surface (unbound — no tear-out is driven here) so those calls are not `unknown_method`
     // refusals that trip this smoke's `refused() == 0` invariant (the e06d regression).

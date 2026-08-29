@@ -560,6 +560,12 @@ PANEL_BUNDLE = (
     # e08d session-relay vocabulary (session.ts + when.ts).
     'var SESSION_STATE_METHOD = "session.state";\n'
     'var PLAY_STATE_EVENT = "play-state";\n'
+    # editor-window-chrome d1: the session.control write half + its verbs (session.ts).
+    'var SESSION_CONTROL_METHOD = "session.control";\n'
+    'var SESSION_CONTROL_VERB_PLAY = "play";\n'
+    'var SESSION_CONTROL_VERB_PAUSE = "pause";\n'
+    'var SESSION_CONTROL_VERB_STOP = "stop";\n'
+    'var SESSION_CONTROL_VERB_STEP = "step";\n'
     # e10b window-management vocabulary (window.ts).
     'var WINDOW_LIST_METHOD = "window.list";\n'
     'var WINDOW_TEAR_OUT_METHOD = "window.tear-out";\n'
@@ -682,6 +688,14 @@ PANEL_CPP_CONFIG = (
 PANEL_CPP_SESSION = (
     'inline constexpr const char* kSessionStateMethod = "session.state";\n'
     'inline constexpr const char* kSessionPlayStateEvent = "play-state";\n'
+    # editor-window-chrome d1: the write half. The verbs are pinned beside the method because
+    # a drifted verb fails SOFTER but just as silently -- the Shell answers `session.bad_verb`
+    # and the strip's press does nothing, with both builds green.
+    'inline constexpr const char* kSessionControlMethod = "session.control";\n'
+    'inline constexpr const char* kSessionControlVerbPlay = "play";\n'
+    'inline constexpr const char* kSessionControlVerbPause = "pause";\n'
+    'inline constexpr const char* kSessionControlVerbStop = "stop";\n'
+    'inline constexpr const char* kSessionControlVerbStep = "step";\n'
 )
 
 # The e10b window-management surface's methods live in window_bridge.h, same plain-constant way. A
@@ -921,7 +935,11 @@ def test_a_renamed_themes_cpp_constant_is_a_config_error(tmp_path: Path) -> None
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, themes=renamed)
 
-@pytest.mark.parametrize("ts_name", ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT"])
+@pytest.mark.parametrize(
+    "ts_name",
+    ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT", "SESSION_CONTROL_METHOD",
+     "SESSION_CONTROL_VERB_PLAY", "SESSION_CONTROL_VERB_PAUSE", "SESSION_CONTROL_VERB_STOP",
+     "SESSION_CONTROL_VERB_STEP"])
 def test_session_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     """The e08d session relay: a drift here re-freezes editor-core's `playState` at its baseline.
 
@@ -935,7 +953,11 @@ def test_session_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     assert _run_panel(tmp_path, bundle=drifted) == 1
 
 
-@pytest.mark.parametrize("ts_name", ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT"])
+@pytest.mark.parametrize(
+    "ts_name",
+    ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT", "SESSION_CONTROL_METHOD",
+     "SESSION_CONTROL_VERB_PLAY", "SESSION_CONTROL_VERB_PAUSE", "SESSION_CONTROL_VERB_STOP",
+     "SESSION_CONTROL_VERB_STEP"])
 def test_bundle_missing_a_session_constant_fails(tmp_path: Path, ts_name: str) -> None:
     """An ABSENT session constant means editor-core is not on the relay the Shell serves at all."""
     stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)

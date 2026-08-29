@@ -80,6 +80,36 @@ inline constexpr const char* kSessionPlayStateEvent = "play-state";
 // § Play state for why `edit` (not "stopped") is the authored-truth token.
 inline constexpr const char* kSessionPlayStateEdit = "edit";
 
+// The WRITE half of the session surface (editor-window-chrome d1, target design 02 §7): the ONE
+// bridge method the play-bar strip's transport (and the `play.*` palette commands behind it)
+// dispatches. Grep-stable and MIRRORED by the TS side (session.ts `SESSION_CONTROL_METHOD`); the
+// `webui-panel-contract` gate cross-checks it exactly as it does `session.state`. The handler relays
+// to the surviving `SessionFeed` writer — the proven e08b chain (`editor.play|pause|stop|step` with
+// its `origin` echo suppression) — so the strip, the palette and the dock panel drive ONE
+// implementation. NOT the D19 contract fan-in: that is a later, separate seam (boot.ts keeps its
+// honest-refusal stub), and this method carries exactly the four verbs that already have a tested
+// writer.
+//
+// ⚠ THE SMOKES: registered by `install()` alongside `session.state`, so every live CEF smoke that
+// installs this bridge serves it with no per-smoke wiring — but each smoke still ASSERTS the method
+// routes (`has_method`), the window_bridge.h ten-smoke rule.
+inline constexpr const char* kSessionControlMethod = "session.control";
+
+// The `verb` vocabulary `session.control` accepts — the daemon's own transport verbs, minus the
+// `editor.` prefix (each maps 1:1 onto `editor.<verb>`). Mirrored by the TS side (session.ts
+// `SESSION_CONTROL_VERB_*`) and cross-checked by the same gate: a drifted verb would be refused as
+// `session.bad_verb` on every press of a button that looks perfectly wired.
+inline constexpr const char* kSessionControlVerbPlay = "play";
+inline constexpr const char* kSessionControlVerbPause = "pause";
+inline constexpr const char* kSessionControlVerbStop = "stop";
+inline constexpr const char* kSessionControlVerbStep = "step";
+
+// The bridge-local error code for a `session.control` request whose `verb` is missing or not in the
+// vocabulary above (the `window.bad_params` pattern — a bridge-envelope code, not an R-CLI-008
+// catalog code). editor-core only ever sends the four constants, so answering this is a wiring bug
+// surfacing loudly, never a user-reachable state.
+inline constexpr const char* kSessionControlBadVerbCode = "session.bad_verb";
+
 // What the Shell knows about the live session right now.
 struct SessionStateSnapshot
 {
@@ -88,15 +118,49 @@ struct SessionStateSnapshot
     // Is there a live daemon link behind `play_state` at all? Reported so a consumer can tell
     // "no daemon" from "a daemon that is in edit" — see § KNOWN STALENESS above.
     bool attached = false;
-    // Bumped by the provider whenever a fact actually moved the state. editor-core re-applies only
-    // when it moves, so an idle poll is one integer compare (the `keybindings.get` discipline).
+    // Bumped by the provider whenever the relayed state actually moved — a fact applied from ANOTHER
+    // client, and (since d1) a transport write THIS Shell adopted, which is invisible to
+    // `facts_applied` alone because the daemon's echo of our own write is dropped (session_feed.h).
+    // editor-core re-applies only when it moves, so an idle poll is one integer compare (the
+    // `keybindings.get` discipline).
     std::uint64_t generation = 0;
+    // The running session's simTick, as the daemon last reported it (0 in edit). ADDITIVE
+    // (editor-window-chrome d1): the daemon already mints it on every `play-state` fact and every
+    // transport reply (kernel_server.cpp), and `SessionFeed` already holds it — relaying it is what
+    // makes the strip's `t+` timer daemon truth rather than a browser-local clock. It advances only
+    // when a fact/reply lands (CE #356's restart-staleness caveat is inherited, not solved here).
+    std::uint64_t sim_tick = 0;
+};
+
+// One `session.control` outcome, as the composition root's handler reports it — the model's own
+// `PlayAction` vocabulary (playbar_model.h), relayed rather than re-derived:
+//
+//   * `changed`      — something actually moved (`PlayAction::ok`, which is fed from the daemon's
+//                      `changed`). The state/tick below are then the daemon's answer.
+//   * `error_code`   — the reserved `play.*` catalog code on a REFUSAL; empty otherwise.
+//   * `changed:false` with an EMPTY code deliberately covers all three of "benign no-op", "no
+//     daemon link" and "no handler bound" — the model itself does not distinguish them (playbar_
+//     model.h: a gateway-less or daemon-less transport reports exactly this), and inventing a
+//     distinction here would be a second truth the dock panel does not render.
+//   * `play_state`/`sim_tick` — the state AFTER, as the DAEMON last reported it (never a locally
+//     computed transition).
+struct SessionControlOutcome
+{
+    bool changed = false;
+    std::string error_code;
+    std::string play_state = kSessionPlayStateEdit;
+    std::uint64_t sim_tick = 0;
 };
 
 class SessionBridge
 {
 public:
     using Provider = std::function<SessionStateSnapshot()>;
+    // The `session.control` relay. The composition root binds a lambda over the Shell's
+    // `SessionFeed` (through the `panels::session_control` seam — the same forward-declaration
+    // discipline as the Provider); the T1 suite binds a scripted one. The handler receives ONLY a
+    // verb from the vocabulary above — the bridge validates before dispatching.
+    using ControlHandler = std::function<SessionControlOutcome(const std::string& verb)>;
 
     SessionBridge() = default;
 
@@ -113,25 +177,44 @@ public:
     // with `attached:false`, which is exactly what a Shell with no daemon knows.
     void bind_provider(Provider provider);
 
+    // Point the WRITE half at the live session. An EMPTY handler (the default, and what the CEF
+    // smokes install) is not an error: `session.control` then answers the same honest "nothing to
+    // drive" a gateway-less PlaybarModel reports — `changed:false` with NO code, the current
+    // snapshot's state — rather than refusing, so the smokes' strict `refused() == 0` invariant
+    // holds with no daemon anywhere in sight.
+    void bind_control(ControlHandler handler);
+
     // The current snapshot. A provider that THROWS is contained here and degrades to the boot
     // baseline: a session read must never be able to take the renderer's boot down with it.
     [[nodiscard]] SessionStateSnapshot snapshot() const;
 
     // The snapshot as the `session.state` reply — the daemon's own `play-state` fact shape plus the
-    // two relay facts (`attached`, `generation`) editor-core needs to poll cheaply.
+    // relay facts (`attached`, `generation`, `simTick`) editor-core needs to poll cheaply.
     [[nodiscard]] contract::Json snapshot_json() const;
 
-    // Bind `session.state` on `router`. False when the binding was refused (a name collision), which
-    // the caller must treat as a wiring bug rather than ignore.
+    // One `session.control` verb, resolved to the reply object `{changed, state, simTick,
+    // errorCode}`. The verb MUST already be validated (install() does); an unbound or THROWING
+    // handler degrades to the honest "nothing to drive" answer — this runs on the renderer's query
+    // path, exactly like `snapshot()`.
+    [[nodiscard]] contract::Json control_json(const std::string& verb);
+
+    // Bind `session.state` AND `session.control` on `router`. False when either binding was refused
+    // (a name collision), which the caller must treat as a wiring bug rather than ignore.
     [[nodiscard]] bool install(BridgeRouter& router);
 
     // How many times `session.state` was served over the router — non-zero after a live renderer
     // boots is the end-to-end proof the channel is wired (the `keybindings.get` `reads()` pattern).
     [[nodiscard]] std::size_t reads() const { return reads_; }
 
+    // How many `session.control` verbs were dispatched to the handler (valid-verb requests only) —
+    // the same wiring evidence for the write half.
+    [[nodiscard]] std::size_t controls() const { return controls_; }
+
 private:
     Provider provider_;
+    ControlHandler control_;
     std::size_t reads_ = 0;
+    std::size_t controls_ = 0;
 };
 
 } // namespace context::editor::shell

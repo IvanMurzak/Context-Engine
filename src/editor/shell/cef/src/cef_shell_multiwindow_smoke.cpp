@@ -200,6 +200,10 @@ struct WindowSurfaces
         ok = config.install(router) && ok;
         // Unbound: no `bind_provider`, so it serves the `edit`/`attached:false` boot baseline.
         ok = session_bridge.install(router) && ok;
+        // editor-window-chrome d1: install() registers `session.control` (the play-bar strip's
+        // transport relay) beside `session.state`; asserted so the ten-smoke rule is mechanised
+        // rather than trusted. Unbound, it answers the honest "nothing to drive", never a refusal.
+        ok = router.has_method(shell::kSessionControlMethod) && ok;
         // e13c-4: the package.grants.* surface, bound to an EMPTY scan + an EMPTY document.
         package_grants =
             std::make_unique<shell::PackageGrantHost>(package_scan, std::filesystem::path{});

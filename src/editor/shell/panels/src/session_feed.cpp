@@ -5,6 +5,7 @@
 
 #include "context/editor/client/client.h" // the wire writes (complete type HERE only)
 #include "context/editor/gui/playbar/playbar_panel.h"
+#include "context/editor/shell/session_bridge.h" // the session.control verb vocabulary (d1)
 #include "wire_read.h" // read_string / read_bool / read_u64 / envelope_data
 
 #include <cstdio>
@@ -238,6 +239,37 @@ playbar::PlayCommandResult SessionFeed::step(std::uint64_t ticks)
     // hand-written RPC caller has no reason to pay the string round trip.
     params.set("ticks", contract::Json(ticks));
     return drive_play("editor.step", std::move(params));
+}
+
+std::optional<playbar::PlayAction> SessionFeed::control(const std::string& verb)
+{
+    // The verb -> model dispatch mirrors make_provider()'s command dispatch below, deliberately:
+    // both are projections of the SAME four PlaybarModel transports, so the strip's press and the
+    // dock panel's press are indistinguishable from the daemon's point of view (same wire method,
+    // same origin, same echo suppression).
+    playbar::PlayAction action;
+    if (verb == kSessionControlVerbPlay)
+    {
+        action = playbar_.play();
+    }
+    else if (verb == kSessionControlVerbPause)
+    {
+        action = playbar_.pause();
+    }
+    else if (verb == kSessionControlVerbStop)
+    {
+        action = playbar_.stop();
+    }
+    else if (verb == kSessionControlVerbStep)
+    {
+        action = playbar_.step(1);
+    }
+    else
+    {
+        return std::nullopt;
+    }
+    host_.touch(playbar_panel_id_);
+    return action;
 }
 
 PanelProvider SessionFeed::make_provider()

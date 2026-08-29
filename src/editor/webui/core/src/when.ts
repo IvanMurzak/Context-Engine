@@ -161,11 +161,23 @@ export class DaemonSessionState implements SessionStateSource {
     clientId = 0;
 
     #playState: PlayState = "edit";
+    #simTick = 0;
     #applied = 0;
     #echoesDropped = 0;
 
     get playState(): PlayState {
         return this.#playState;
+    }
+
+    /**
+     * The running session's simTick, as the daemon last reported it (0 in edit) — the source the
+     * play-bar strip's `t+` timer renders (editor-window-chrome d1). NOT a when-context key: the
+     * six keys are a closed set (05 §6), and a tick is a number to display, not a fact to guard on.
+     * It advances only when a fact/reply lands (the daemon publishes `play-state` on CHANGES), so
+     * it is the daemon's last word, not a browser-local clock — which is the honest reading.
+     */
+    get simTick(): number {
+        return this.#simTick;
     }
 
     /** How many facts actually moved the state, and how many were dropped as our own echo. */
@@ -177,8 +189,9 @@ export class DaemonSessionState implements SessionStateSource {
     }
 
     /**
-     * Apply one `session` topic payload. Returns true only when the state actually changed, so a
-     * caller can skip a palette re-filter it does not need.
+     * Apply one `session` topic payload. Returns true only when the rendered state actually moved —
+     * the play-state token OR its simTick (mirroring the C++ twin, `PlaybarModel.apply_play_state`)
+     * — so a caller can skip a palette re-filter it does not need.
      *
      * Recognises `play-state` and ignores the rest (`selection-changed` / `camera-changed` carry no
      * when-context key — the six keys are a closed set, 05 §6).
@@ -196,8 +209,20 @@ export class DaemonSessionState implements SessionStateSource {
             return false;
         }
         const state = toPlayState(payload["state"]);
-        if (state === null || state === this.#playState) {
+        if (state === null) {
+            // An unreadable token leaves EVERYTHING alone, the tick included: a fact this build
+            // cannot name is not a fact about the current session (see toPlayState below).
             return false;
+        }
+        // The tick is tolerated separately: a fact without one (an older Shell's relay) moves the
+        // state and leaves the last known tick — believed about what it says, silent on the rest.
+        const tick = toSimTick(payload["simTick"]);
+        const moved = state !== this.#playState || (tick !== null && tick !== this.#simTick);
+        if (!moved) {
+            return false;
+        }
+        if (tick !== null) {
+            this.#simTick = tick;
         }
         this.#playState = state;
         this.#applied += 1;
@@ -207,7 +232,16 @@ export class DaemonSessionState implements SessionStateSource {
     /** Reset to the boot baseline — what a reconnect means (a restarted daemon holds no session). */
     reset(): void {
         this.#playState = "edit";
+        this.#simTick = 0;
     }
+}
+
+/**
+ * A wire `simTick` -> a non-negative integer, or `null` for anything else (absent, non-numeric,
+ * negative, fractional) — tolerated, never thrown, like every wire read here.
+ */
+function toSimTick(value: unknown): number | null {
+    return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
 /** A plain-object type guard, local so this module keeps its zero-import surface. */
@@ -219,8 +253,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
  * A wire `state` token -> PlayState. `null` for anything else, so an unknown token from a NEWER
  * daemon leaves the last known state alone rather than silently reading as `edit` — claiming "no live
  * session" on a token we simply do not understand would be a confident lie.
+ *
+ * Exported since editor-window-chrome d1: the `session.control` reply parser (session.ts) applies
+ * the SAME rule to the same wire vocabulary — a second hand-rolled reader is how the two drift.
  */
-function toPlayState(token: unknown): PlayState | null {
+export function toPlayState(token: unknown): PlayState | null {
     return token === "edit" || token === "playing" || token === "paused" ? token : null;
 }
 

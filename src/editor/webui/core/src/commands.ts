@@ -500,6 +500,95 @@ export function sessionCommands(actions: SessionCommandActions): readonly Comman
     ];
 }
 
+// --------------------------------------------------------------------- (b'') play commands
+//
+// The four transport commands (editor-window-chrome d1, target design 02 §7). The ids deliberately
+// REUSE the dock playbar's C++ command ids (`playbar_model.h` kPlayCommand/kPauseCommand/
+// kStopCommand/kStepCommand — they are the daemon verbs' own names), for palette/keymap/docs
+// continuity across the panel's e1 retirement. The HANDLERS route to an injected
+// `PlayCommandActions` — boot.ts wires the real `session.control` dispatch (playbar.ts
+// `makePlayActions`) — so the strip's buttons, the palette and the d3 menu all resolve through ONE
+// registry to ONE write path.
+
+/** The strip/palette transport command ids (mirroring playbar_model.h's C++ vocabulary). */
+export const PLAY_COMMAND_ID = "play.play";
+export const PAUSE_COMMAND_ID = "play.pause";
+export const STOP_COMMAND_ID = "play.stop";
+export const STEP_COMMAND_ID = "play.step";
+
+/** The play actions the built-in transport commands dispatch to (play / pause / stop / step). */
+export interface PlayCommandActions {
+    play(): CommandOutcome | Promise<CommandOutcome>;
+    pause(): CommandOutcome | Promise<CommandOutcome>;
+    stop(): CommandOutcome | Promise<CommandOutcome>;
+    step(): CommandOutcome | Promise<CommandOutcome>;
+}
+
+/**
+ * The built-in transport command set (play / pause / stop / step).
+ *
+ * The `when` guards mirror the L-51 state machine the daemon itself enforces (a pause in edit is
+ * refused `play.not_running`), so the palette surfaces exactly the transports that can currently do
+ * something — while the strip's own buttons flip `disabled` off the same session state. `play` is
+ * available from `edit` (start) AND `paused` (resume): the daemon answers one `playing` either way.
+ */
+export function playCommands(actions: PlayCommandActions): readonly Command[] {
+    return [
+        {
+            id: PLAY_COMMAND_ID,
+            title: "Play",
+            category: "editor",
+            when: "playState != playing",
+            docs: {
+                summary: "Start (or resume) the play session",
+                detail:
+                    "transport action (L-51); dispatches `session.control {verb: play}` over the " +
+                    "Shell's e08b daemon chain (`editor.play`); from `paused` it resumes",
+            },
+            handler: () => actions.play(),
+        },
+        {
+            id: PAUSE_COMMAND_ID,
+            title: "Pause",
+            category: "editor",
+            when: "playState == playing",
+            docs: {
+                summary: "Pause the running play session",
+                detail:
+                    "transport action (L-51); dispatches `session.control {verb: pause}`; the " +
+                    "daemon refuses it outside `playing` (play.not_running)",
+            },
+            handler: () => actions.pause(),
+        },
+        {
+            id: STOP_COMMAND_ID,
+            title: "Stop",
+            category: "editor",
+            when: "playState != edit",
+            docs: {
+                summary: "Stop the play session and return to authored truth (edit)",
+                detail:
+                    "transport action (L-51); dispatches `session.control {verb: stop}` — the " +
+                    "runtime session state is discarded, never written back",
+            },
+            handler: () => actions.stop(),
+        },
+        {
+            id: STEP_COMMAND_ID,
+            title: "Step One Tick",
+            category: "editor",
+            when: "playState != edit",
+            docs: {
+                summary: "Advance the play session by one fixed tick",
+                detail:
+                    "transport action (R-SIM-002); dispatches `session.control {verb: step}`; " +
+                    "valid from `playing` or `paused` — the daemon refuses it in `edit`",
+            },
+            handler: () => actions.step(),
+        },
+    ];
+}
+
 // ------------------------------------------------------------------- (c) panel-manifest commands
 
 /** How a panel-manifest command reaches its panel: the caller supplies the dispatch (panel.command). */
@@ -549,13 +638,14 @@ export interface RegistrySources {
     readonly contractDispatch: ContractDispatch;
     readonly editorActions: EditorCommandActions;
     readonly sessionActions: SessionCommandActions;
+    readonly playActions: PlayCommandActions;
     readonly roster: PanelRoster;
     readonly panelDispatch: PanelCommandDispatch;
 }
 
 /**
- * Build a registry from every source, in the (a) contract → (b) editor → (b') session → (c) panel
- * order.
+ * Build a registry from every source, in the (a) contract → (b) editor → (b') session → (b'') play
+ * → (c) panel order.
  *
  * ⚠ NEVER THROWS ON A COLLISION (M9 e13b-2), and the ORDER above is what makes that safe. Assembly
  * uses the non-fatal `tryRegisterAll`, which is incumbent-wins, and the panel source runs LAST — so a
@@ -574,6 +664,7 @@ export function buildCommandRegistry(sources: RegistrySources): CommandRegistry 
     registry.tryRegisterAll(projectContractCommands(sources.contractDispatch));
     registry.tryRegisterAll(editorCommands(sources.editorActions));
     registry.tryRegisterAll(sessionCommands(sources.sessionActions));
+    registry.tryRegisterAll(playCommands(sources.playActions));
     registry.tryRegisterAll(projectPanelCommands(sources.roster, sources.panelDispatch));
     return registry;
 }

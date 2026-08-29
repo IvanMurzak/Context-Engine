@@ -403,6 +403,15 @@ SessionOutcome run_session(const std::filesystem::path& project,
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;
     }
+    // editor-window-chrome d1: SessionBridge::install registers `session.control` (the play-bar
+    // strip's transport relay) beside `session.state`; asserted so the ten-smoke rule is mechanised
+    // rather than trusted. Unbound, it answers the honest "nothing to drive", never a refusal.
+    if (!bridge.has_method(shell::kSessionControlMethod))
+    {
+        std::fprintf(stderr, "[%s] FAIL: the d1 session.control write surface did not route\n",
+                     cfg.label);
+        return out;
+    }
 
     shell::WindowDesc desc;
     desc.title = "Context Editor (restore smoke)";

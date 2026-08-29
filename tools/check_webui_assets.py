@@ -269,6 +269,19 @@ CONFIG_CONSTANTS = (
 SESSION_CONSTANTS = (
     ("session.state", "session_bridge.h", "kSessionStateMethod", "SESSION_STATE_METHOD"),
     ("session play-state event", "session_bridge.h", "kSessionPlayStateEvent", "PLAY_STATE_EVENT"),
+    # editor-window-chrome d1: the WRITE half — the play-bar strip's transport relay and its verb
+    # vocabulary. The method has the family's usual failure mode (a drift refuses every press of a
+    # button that looks wired); a drifted VERB fails softer but just as silently — the Shell answers
+    # `session.bad_verb` and the strip's press does nothing, with both builds green.
+    ("session.control", "session_bridge.h", "kSessionControlMethod", "SESSION_CONTROL_METHOD"),
+    ("session control verb play", "session_bridge.h", "kSessionControlVerbPlay",
+     "SESSION_CONTROL_VERB_PLAY"),
+    ("session control verb pause", "session_bridge.h", "kSessionControlVerbPause",
+     "SESSION_CONTROL_VERB_PAUSE"),
+    ("session control verb stop", "session_bridge.h", "kSessionControlVerbStop",
+     "SESSION_CONTROL_VERB_STOP"),
+    ("session control verb step", "session_bridge.h", "kSessionControlVerbStep",
+     "SESSION_CONTROL_VERB_STEP"),
 )
 
 # The M9 e10b WINDOW-MANAGEMENT surface (design 03 §1 / §7, 04 §2), whose vocabulary lives in

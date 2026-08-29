@@ -256,6 +256,40 @@ std::size_t session_facts_applied(const SessionFeed& feed)
     return feed.facts_applied();
 }
 
+std::uint64_t session_sim_tick(const SessionFeed& feed)
+{
+    return feed.playbar_model().sim_tick();
+}
+
+std::uint64_t session_control_generation(const SessionFeed& feed)
+{
+    return feed.playbar_model().control_generation();
+}
+
+SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb)
+{
+    SessionControlOutcome outcome;
+    const std::optional<playbar::PlayAction> action = feed.control(verb);
+    if (!action.has_value())
+    {
+        // Unreachable through the bridge (install() validates the verb first), but a seam that
+        // silently mapped an unknown verb to "no-op" would hide exactly the wiring bug the bridge's
+        // own validation exists to surface.
+        outcome.error_code = kSessionControlBadVerbCode;
+        outcome.play_state = playbar::state_token(feed.playbar_model().state());
+        outcome.sim_tick = feed.playbar_model().sim_tick();
+        return outcome;
+    }
+    // PlayAction::ok is fed from the daemon's `changed` (playbar_model.h) — a refused command
+    // carries a reserved play.* code, a benign no-op (and a daemon-less write) carries neither.
+    // Relayed as-is so the browser side renders exactly what the dock panel would.
+    outcome.changed = action->ok;
+    outcome.error_code = action->error_code;
+    outcome.play_state = playbar::state_token(action->state);
+    outcome.sim_tick = feed.playbar_model().sim_tick();
+    return outcome;
+}
+
 void bind_session_client(SessionFeed& feed, client::Client* client)
 {
     // The id comes from the client itself (0 when there is none), so the pointer and the identity

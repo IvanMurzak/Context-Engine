@@ -117,6 +117,15 @@ public:
     [[nodiscard]] playbar::PlayCommandResult stop() override;
     [[nodiscard]] playbar::PlayCommandResult step(std::uint64_t ticks) override;
 
+    // The `session.control` write path (editor-window-chrome d1): one verb token
+    // (session_bridge.h's `play|pause|stop|step` vocabulary) driven through the SAME
+    // `PlaybarModel` transport write the dock panel's invoke path uses — one implementation for the
+    // strip, the palette and the panel — touching the hosted panel identically so the docked playbar
+    // re-renders while it coexists (its retirement is e1's). `step` advances 1 tick, the button
+    // gesture. Returns `std::nullopt` for a verb this build does not name: nothing is dispatched,
+    // and the bridge answers a handler error rather than a silent drop.
+    [[nodiscard]] std::optional<playbar::PlayAction> control(const std::string& verb);
+
     // --- the hosted playbar -----------------------------------------------------------------------
 
     [[nodiscard]] playbar::PlaybarModel& playbar_model() noexcept { return playbar_; }

@@ -76,6 +76,12 @@ function fullRegistry(editorRecord?: string[]): CommandRegistry {
         contractDispatch: (method) => ({ ok: true, note: method }),
         editorActions: noopEditorActions(editorRecord),
         sessionActions: noopSessionActions(),
+        playActions: {
+            play: () => ({ ok: true, note: "play" }),
+            pause: () => ({ ok: true, note: "pause" }),
+            stop: () => ({ ok: true, note: "stop" }),
+            step: () => ({ ok: true, note: "step" }),
+        },
         roster: rosterWithPanelCommand(),
         panelDispatch: noopPanelDispatch,
     });

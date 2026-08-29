@@ -202,6 +202,12 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
             contractDispatch: (method) => ({ ok: true, note: method }),
             editorActions: noopEditor,
             sessionActions: noopSession,
+            playActions: {
+                play: () => ({ ok: true, note: "play" }),
+                pause: () => ({ ok: true, note: "pause" }),
+                stop: () => ({ ok: true, note: "stop" }),
+                step: () => ({ ok: true, note: "step" }),
+            },
             roster,
             panelDispatch: (panelId, commandId) => {
                 invoked.push(`panel.command:${panelId}/${commandId}`);

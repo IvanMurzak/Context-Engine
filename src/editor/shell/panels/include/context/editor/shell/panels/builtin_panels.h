@@ -36,6 +36,10 @@
 #pragma once
 
 #include "context/editor/shell/panel_host.h"
+// The session.control outcome + verb vocabulary (editor-window-chrome d1). Deliberately INCLUDED
+// rather than forward-declared: session_bridge.h is CEF-free and `-fno-rtti`-safe by design (its
+// header says why), so it costs the smokes nothing — unlike the panel headers this file forwards.
+#include "context/editor/shell/session_bridge.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -274,6 +278,27 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
 // above: the caller never sees `SessionFeed`'s complete type.
 [[nodiscard]] std::string session_play_state(const SessionFeed& feed);
 [[nodiscard]] std::size_t session_facts_applied(const SessionFeed& feed);
+
+// The d1 additions to that READ half (editor-window-chrome d1, target design 02 §7), for the same
+// forward-declaration reason:
+//
+//   * `session_sim_tick` — the running session's simTick as the feed's playbar model last adopted
+//     it (a fact from another client, or this Shell's own transport reply). Relayed in
+//     `session.state` so the strip's `t+` timer is daemon truth.
+//   * `session_control_generation` — the model's control generation, which moves on EVERY rendered
+//     play transition INCLUDING this Shell's own writes. `facts_applied` alone cannot see those
+//     (the daemon's echo of our own write is dropped — session_feed.h), so a `session.state`
+//     generation built only from it would freeze every poller in this process across a locally
+//     driven transition. The composition root sums the two.
+[[nodiscard]] std::uint64_t session_sim_tick(const SessionFeed& feed);
+[[nodiscard]] std::uint64_t session_control_generation(const SessionFeed& feed);
+
+// The d1 WRITE seam: drive one `session.control` verb through the feed's `PlaybarModel` — the SAME
+// transport write the dock panel's invoke path uses (`SessionFeed::control`), reported in the shape
+// the bridge relays. An unknown verb answers `error_code = kSessionControlBadVerbCode` with nothing
+// dispatched (belt-and-braces — the bridge validates first); a feed with no daemon client reports
+// the model's own honest "nothing to drive" (`ok:false`, no code, state unmoved).
+[[nodiscard]] SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb);
 
 // Point the Session feed at the daemon link's CURRENT client — `nullptr` to clear it. The feed's
 // pointer is a NON-OWNING view of a client the daemon lifecycle owns and can destroy (a lost daemon

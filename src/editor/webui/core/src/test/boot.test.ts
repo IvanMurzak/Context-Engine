@@ -29,7 +29,7 @@ import {
     bootEditorCore,
     makePackageDaemonCall,
 } from "../boot.js";
-import { SESSION_STATE_METHOD } from "../session.js";
+import { SESSION_CONTROL_METHOD, SESSION_STATE_METHOD } from "../session.js";
 import { CHROME_STATE_METHOD, WINDOW_SET_APPEARANCE_METHOD } from "../window.js";
 
 /** A mutable answer table so a case can change what the Shell serves mid-run. */
@@ -259,6 +259,114 @@ export const bootTests: readonly TestCase[] = [
                 detail.includes('playState "edit"'),
                 `and the baseline it fell back to is stated, got: ${detail}`,
             );
+        },
+    },
+    {
+        // editor-window-chrome d1 — THE WIRING CLAIM, end to end in a REAL boot: the strip mounts
+        // into the a2 slot from the SERVED session state (simTick included), and a strip button
+        // press travels strip -> live registry -> play action -> `session.control` -> reply adopted
+        // -> strip re-rendered. Every link below is one a stub could sever with every unit tier
+        // still green (noop playActions handed to the registry; a strip fed from a copy of the
+        // sink; a mount that never happens), which is why this case drives `bootEditorCore` itself.
+        name: "boot d1: the play-bar strip mounts from the served session and a press round-trips session.control",
+        run: async () => {
+            clearSessionAttribute();
+            // The a2 strip fixture + the dock root (the harness loads the real dockview engine, so
+            // an EMPTY roster brings the command layer up without mounting any panel).
+            const titlebar = document.createElement("header");
+            titlebar.id = "editor-titlebar";
+            const playbar = document.createElement("div");
+            playbar.id = "editor-playbar";
+            const statusbar = document.createElement("footer");
+            statusbar.id = "editor-statusbar";
+            const root = document.createElement("main");
+            root.id = "editor-root";
+            document.body.append(titlebar, playbar, statusbar, root);
+
+            const controlVerbs: unknown[] = [];
+            const answers = baseAnswers();
+            answers["panel.list"] = { contractMajor: 2, panels: [] };
+            // The persistence restore READS this at boot (LayoutPersistence.restore); an empty
+            // persisted state is the fresh-project answer. Without it the restore's BridgeError
+            // lands in startPanels' silent degrade and the command layer never comes up.
+            answers["editor.state.get"] = { layout: null, panels: {} };
+            answers[SESSION_STATE_METHOD] = {
+                event: "play-state",
+                state: "playing",
+                origin: 0,
+                attached: true,
+                generation: 1,
+                simTick: 41,
+            };
+            answers[SESSION_CONTROL_METHOD] = {
+                changed: true,
+                state: "edit",
+                simTick: 0,
+                errorCode: "",
+            };
+            const shell = mockShell(answers, (method: string, params: unknown): void => {
+                if (method === SESSION_CONTROL_METHOD) {
+                    controlVerbs.push((params as { verb?: unknown } | undefined)?.verb);
+                }
+            });
+            try {
+                const report = await bootEditorCore(new ShellBridge(shell.query));
+                assert(report.ready, "the editor boots");
+
+                // The strip mounted into the a2 slot, seeded from the SERVED state — tick included.
+                const stop = playbar.querySelector<HTMLButtonElement>(
+                    '[data-playbar-control="stop"]',
+                );
+                assert(stop !== null, "the strip's transport mounted into #editor-playbar");
+                assertEqual(
+                    document.documentElement.getAttribute("data-editor-playbar"),
+                    "state playing; simTick 41",
+                    "the strip renders the served session truth, not a boot baseline",
+                );
+                assertEqual(
+                    playbar
+                        .querySelector('[data-playbar-control="play"]')
+                        ?.getAttribute("data-play-state"),
+                    "running",
+                    "the first data-play-state writer wrote the honest mapping",
+                );
+
+                // THE PRESS: stop is enabled while playing; the click must flow through the LIVE
+                // registry (the same holder the palette uses) to `session.control` and back.
+                assert(stop !== null && !stop.disabled, "stop is enabled while playing");
+                stop?.click();
+                let settled = false;
+                for (let i = 0; i < 100 && !settled; i += 1) {
+                    await new Promise((resolve) => setTimeout(resolve, 5));
+                    settled =
+                        document.documentElement.getAttribute("data-editor-playbar") ===
+                        "state edit; simTick 0";
+                }
+                const commandsDetail =
+                    document.documentElement.getAttribute("data-editor-commands") ?? "(absent)";
+                assertEqual(
+                    controlVerbs,
+                    ["stop"],
+                    `the press dispatched session.control {stop} (commands: ${commandsDetail}; ` +
+                        `bootError: ${report.error})`,
+                );
+                assert(settled, "the reply was adopted and the strip re-rendered edit/t+0");
+                assertEqual(
+                    playbar
+                        .querySelector('[data-playbar-control="play"]')
+                        ?.getAttribute("data-play-state"),
+                    "idle",
+                    "the flourish followed the daemon's answer",
+                );
+            } finally {
+                // Withdraw the relay so the 500ms poll startSession started self-stops on its next
+                // refused tick (the same cleanup the sibling cases use), then drop the fixture.
+                delete answers[SESSION_STATE_METHOD];
+                titlebar.remove();
+                playbar.remove();
+                statusbar.remove();
+                root.remove();
+            }
         },
     },
     {

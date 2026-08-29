@@ -700,6 +700,13 @@ export const chromeTests: readonly TestCase[] = [
                     fixture.elements.playbar.hidden === true,
                     "…with the play-bar slot hidden (no session to control)",
                 );
+                // d1: the strip CONTENT is not mounted on the welcome path either — hidden is the
+                // a2 gate, empty is d1's (startPlaybar runs on the editor path only).
+                assertEqual(
+                    fixture.elements.playbar.children.length,
+                    0,
+                    "the welcome boot mounts no transport into the hidden slot",
+                );
             } finally {
                 fixture.dispose();
                 root.replaceChildren();

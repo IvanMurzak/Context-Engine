@@ -27,6 +27,9 @@ export * from "./window.js";
 // `webui-assets` asserts the entry's symbols survive into the bundle, and the DOM tier drives the
 // mount/publisher through these exports.
 export * from "./chrome.js";
+// d1 — the play-bar strip in the a2 slot. Same load-bearing build reason: the CEF smokes and the
+// DOM tier reach the mount/actions through these exports.
+export * from "./playbar.js";
 export * from "./editorstate.js";
 export * from "./when.js";
 export * from "./commands.js";

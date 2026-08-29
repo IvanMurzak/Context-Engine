@@ -103,6 +103,12 @@ export const reachabilityTests: readonly TestCase[] = [
                 contractDispatch: (method) => ({ ok: true, note: method }),
                 editorActions: editorSpy,
                 sessionActions: sessionSpy,
+                playActions: {
+                    play: () => ({ ok: true, note: "play" }),
+                    pause: () => ({ ok: true, note: "pause" }),
+                    stop: () => ({ ok: true, note: "stop" }),
+                    step: () => ({ ok: true, note: "step" }),
+                },
                 roster: { contractMajor: 2, panels: [] },
                 panelDispatch: (p, c) => ({ ok: true, note: `${p}/${c}` }),
             });

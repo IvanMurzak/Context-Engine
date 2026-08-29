@@ -858,11 +858,30 @@ int main(int argc, char** argv)
             if (session_feed != nullptr)
             {
                 snapshot.play_state = shell::panels::session_play_state(*session_feed);
-                snapshot.generation = static_cast<std::uint64_t>(
-                    shell::panels::session_facts_applied(*session_feed));
+                // The generation SUMS the applied-fact count and the model's control generation
+                // (editor-window-chrome d1): a locally driven transition (`session.control`, the
+                // dock panel) never bumps `facts_applied` — the daemon's echo of our own write is
+                // dropped (session_feed.h) — so a generation built from it alone would freeze every
+                // `session.state` poller in this process across exactly the transitions the strip
+                // now drives. Both counters are monotone, so the sum is too.
+                snapshot.generation =
+                    static_cast<std::uint64_t>(
+                        shell::panels::session_facts_applied(*session_feed)) +
+                    shell::panels::session_control_generation(*session_feed);
+                snapshot.sim_tick = shell::panels::session_sim_tick(*session_feed);
             }
             return snapshot;
         });
+    // The WRITE half (d1): `session.control` relays to the feed's PlaybarModel — the e08b chain
+    // (`editor.play|pause|stop|step` through the Shell's own client, echo-suppressed) — so the
+    // strip, the palette and the dock panel drive ONE implementation. With no feed the bridge's own
+    // unbound degrade answers "nothing to drive".
+    if (session_feed != nullptr)
+    {
+        session_bridge.bind_control(
+            [session_feed](const std::string& verb) -> shell::SessionControlOutcome
+            { return shell::panels::session_control(*session_feed, verb); });
+    }
     if (!session_bridge.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the session bridge surface\n");

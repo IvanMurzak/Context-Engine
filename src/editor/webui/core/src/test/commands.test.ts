@@ -24,9 +24,14 @@ import {
     CommandRegistry,
     contractCommandId,
     editorCommands,
+    PAUSE_COMMAND_ID,
+    PLAY_COMMAND_ID,
+    playCommands,
     projectContractCommands,
     projectPanelCommands,
     sessionCommands,
+    STEP_COMMAND_ID,
+    STOP_COMMAND_ID,
 } from "../commands.js";
 import type {
     Command,
@@ -34,6 +39,7 @@ import type {
     ContractDispatch,
     EditorCommandActions,
     PanelCommandDispatch,
+    PlayCommandActions,
     SessionCommandActions,
 } from "../commands.js";
 import { parsePanelRoster } from "../panels.js";
@@ -97,6 +103,27 @@ function sessionSpy(): SessionSpy {
         actions: {
             undo: () => record("undo"),
             redo: () => record("redo"),
+        },
+    };
+}
+
+interface PlaySpy {
+    readonly actions: PlayCommandActions;
+    readonly calls: string[];
+}
+function playSpy(): PlaySpy {
+    const calls: string[] = [];
+    const record = (tag: string) => {
+        calls.push(tag);
+        return { ok: true, note: tag };
+    };
+    return {
+        calls,
+        actions: {
+            play: () => record("play"),
+            pause: () => record("pause"),
+            stop: () => record("stop"),
+            step: () => record("step"),
         },
     };
 }
@@ -495,6 +522,46 @@ export const commandsTests: readonly TestCase[] = [
         },
     },
 
+    // ------------------------------------------------------------- (b'') play commands (d1)
+    {
+        name: "playCommands: the four transports with the dock playbar's ids, guarded by L-51 state",
+        run: () => {
+            const play = playSpy();
+            const commands = playCommands(play.actions);
+            // The ids REUSE the dock playbar's C++ vocabulary (playbar_model.h kPlayCommand /
+            // kPauseCommand / kStopCommand / kStepCommand — the daemon verbs' own names), pinned
+            // here as literals so a rename on the TS side alone cannot silently break the
+            // palette/keymap/docs continuity d1 promises across the panel's e1 retirement.
+            assertEqual(
+                commands.map((command) => command.id),
+                ["play.play", "play.pause", "play.stop", "play.step"],
+                "the four transport ids, byte-identical to the C++ panel's",
+            );
+            assertEqual(PLAY_COMMAND_ID, "play.play", "the exported id constant agrees");
+            assertEqual(PAUSE_COMMAND_ID, "play.pause", "the exported id constant agrees");
+            assertEqual(STOP_COMMAND_ID, "play.stop", "the exported id constant agrees");
+            assertEqual(STEP_COMMAND_ID, "play.step", "the exported id constant agrees");
+
+            // The guards mirror the daemon's own L-51 state machine, so the palette surfaces
+            // exactly the transports that can currently do something.
+            const byId = new Map(commands.map((command) => [command.id, command]));
+            assertEqual(byId.get(PLAY_COMMAND_ID)?.when, "playState != playing", "play guard");
+            assertEqual(byId.get(PAUSE_COMMAND_ID)?.when, "playState == playing", "pause guard");
+            assertEqual(byId.get(STOP_COMMAND_ID)?.when, "playState != edit", "stop guard");
+            assertEqual(byId.get(STEP_COMMAND_ID)?.when, "playState != edit", "step guard");
+
+            // Each command dispatches to its injected action — the ONE write path boot wires.
+            for (const command of commands) {
+                void command.handler();
+            }
+            assertEqual(
+                play.calls,
+                ["play", "pause", "stop", "step"],
+                "each command routes to its own action",
+            );
+        },
+    },
+
     // ------------------------------------------------------------- (c) panel-manifest commands
     {
         name: "projectPanelCommands: reads manifest commands from the roster, carrying their when-clause",
@@ -532,26 +599,30 @@ export const commandsTests: readonly TestCase[] = [
             const contract = contractSpy();
             const editor = actionSpy();
             const session = sessionSpy();
+            const play = playSpy();
             const panel = panelSpy();
             const registry = buildCommandRegistry({
                 contractDispatch: contract.dispatch,
                 editorActions: editor.actions,
                 sessionActions: session.actions,
+                playActions: play.actions,
                 roster: rosterWithCommands(),
                 panelDispatch: panel.dispatch,
             });
             const contractCount = RPC_METHOD_NAMES.length;
             const editorCount = editorCommands(editor.actions).length;
             const sessionCount = sessionCommands(session.actions).length;
+            const playCount = playCommands(play.actions).length;
             const panelCount = 2;
             assertEqual(
                 registry.size,
-                contractCount + editorCount + sessionCount + panelCount,
+                contractCount + editorCount + sessionCount + playCount + panelCount,
                 "every source's commands are present",
             );
             assert(registry.has(contractCommandId("describe")), "a contract command is present");
             assert(registry.has("view.theme.toggle"), "an editor command is present");
             assert(registry.has("session.undo"), "a session command is present");
+            assert(registry.has(PLAY_COMMAND_ID), "a play transport command is present");
             assert(registry.has("hello.greet"), "a panel command is present");
 
             // A focused-ext.hello context activates hello.greet; typing suppresses the guarded ones.
@@ -616,6 +687,7 @@ export const commandsTests: readonly TestCase[] = [
                 contractDispatch: contractSpy().dispatch,
                 editorActions: editor.actions,
                 sessionActions: sessionSpy().actions,
+                playActions: playSpy().actions,
                 roster: collidingRoster ?? { contractMajor: 2, panels: [] },
                 panelDispatch: panel.dispatch,
             });
@@ -626,6 +698,7 @@ export const commandsTests: readonly TestCase[] = [
                 RPC_METHOD_NAMES.length +
                     editorCommands(editor.actions).length +
                     sessionCommands(sessionSpy().actions).length +
+                    playCommands(playSpy().actions).length +
                     1, // the panel's non-colliding command
                 "assembly completed: every command except the colliding one is registered",
             );

@@ -48,6 +48,27 @@ Json dispatch_state(BridgeRouter& router, bool& refused)
     return response.at("result");
 }
 
+// One `session.control` dispatch. Returns the WHOLE response envelope: a bad verb answers a handler
+// ERROR (result absent, error.code set), which callers here must be able to see.
+Json dispatch_control(BridgeRouter& router, Json params, bool& refused)
+{
+    Json request = Json::object();
+    request.set("jsonrpc", Json("2.0"));
+    request.set("id", Json(8));
+    request.set("method", Json(kSessionControlMethod));
+    request.set("params", std::move(params));
+    const BridgeDispatch dispatch = router.dispatch(request.dump());
+    refused = dispatch.refused();
+    return Json::parse(dispatch.response);
+}
+
+Json verb_params(const char* verb)
+{
+    Json params = Json::object();
+    params.set("verb", Json(std::string(verb)));
+    return params;
+}
+
 // An UNBOUND bridge is a supported state, not a hole: the CEF smokes install exactly this, and so
 // does a Shell whose panel composition produced no session feed.
 void unbound_serves_the_boot_baseline()
@@ -58,6 +79,11 @@ void unbound_serves_the_boot_baseline()
     CHECK(snapshot.at("state").as_string() == std::string(kSessionPlayStateEdit));
     CHECK(snapshot.at("attached").as_bool() == false);
     CHECK(snapshot.at("generation").as_int() == 0);
+    // d1: the additive simTick relay — 0 with no session is the honest baseline, and its PRESENCE
+    // is the contract (an absent member reads as 0 browser-side, so a dropped relay would freeze
+    // the strip's timer with nothing reporting it).
+    CHECK(snapshot.contains("simTick"));
+    CHECK(snapshot.at("simTick").as_int() == 0);
 }
 
 // The reply is the DAEMON's fact shape (docs/editor-session-state.md), because editor-core hands it
@@ -73,6 +99,7 @@ void a_live_provider_is_relayed_in_the_daemon_fact_shape()
             snapshot.play_state = "playing";
             snapshot.attached = true;
             snapshot.generation = 4;
+            snapshot.sim_tick = 42;
             return snapshot;
         });
     const Json snapshot = bridge.snapshot_json();
@@ -81,6 +108,7 @@ void a_live_provider_is_relayed_in_the_daemon_fact_shape()
     CHECK(snapshot.at("origin").as_int() == 0);
     CHECK(snapshot.at("attached").as_bool() == true);
     CHECK(snapshot.at("generation").as_int() == 4);
+    CHECK(snapshot.at("simTick").as_int() == 42);
 }
 
 // The provider is read on EVERY call — a cached first answer would freeze the browser side exactly
@@ -175,6 +203,128 @@ void a_duplicate_install_is_refused()
     CHECK(!second.install(router));
 }
 
+// --- the d1 `session.control` write half ---------------------------------------------------------
+
+// UNBOUND control is the smokes' (and a feed-less Shell's) state: SERVED, never refused, answering
+// the same honest "nothing to drive" a gateway-less PlaybarModel reports — changed:false, NO code.
+void an_unbound_control_serves_nothing_to_drive()
+{
+    BridgeRouter router;
+    SessionBridge bridge;
+    CHECK(bridge.install(router));
+    CHECK(router.has_method(kSessionControlMethod));
+
+    bool refused = true;
+    const Json response = dispatch_control(router, verb_params(kSessionControlVerbPlay), refused);
+    CHECK(!refused);
+    const Json& result = response.at("result");
+    CHECK(result.at("changed").as_bool() == false);
+    CHECK(result.at("errorCode").as_string().empty());
+    CHECK(result.at("state").as_string() == std::string(kSessionPlayStateEdit));
+    CHECK(result.at("simTick").as_int() == 0);
+    CHECK(bridge.controls() == 1);
+}
+
+// A bound handler receives the validated verb and its outcome is relayed member-for-member — the
+// strip renders exactly what the dock panel would.
+void a_bound_control_handler_round_trips()
+{
+    BridgeRouter router;
+    SessionBridge bridge;
+    std::string seen;
+    bridge.bind_control(
+        [&seen](const std::string& verb)
+        {
+            seen = verb;
+            SessionControlOutcome outcome;
+            outcome.changed = true;
+            outcome.play_state = "playing";
+            outcome.sim_tick = 7;
+            return outcome;
+        });
+    CHECK(bridge.install(router));
+
+    bool refused = true;
+    const Json response = dispatch_control(router, verb_params(kSessionControlVerbStep), refused);
+    CHECK(!refused);
+    CHECK(seen == std::string(kSessionControlVerbStep));
+    const Json& result = response.at("result");
+    CHECK(result.at("changed").as_bool() == true);
+    CHECK(result.at("state").as_string() == "playing");
+    CHECK(result.at("simTick").as_int() == 7);
+    CHECK(bridge.controls() == 1);
+
+    // A daemon refusal's reserved play.* code rides through verbatim (each maps to an exit class).
+    bridge.bind_control(
+        [](const std::string&)
+        {
+            SessionControlOutcome outcome;
+            outcome.error_code = "play.not_running";
+            outcome.play_state = "edit";
+            return outcome;
+        });
+    const Json refusal = dispatch_control(router, verb_params(kSessionControlVerbPause), refused);
+    CHECK(!refused);
+    CHECK(refusal.at("result").at("changed").as_bool() == false);
+    CHECK(refusal.at("result").at("errorCode").as_string() == "play.not_running");
+}
+
+// A verb outside the closed vocabulary — or a missing one — is a handler ERROR, never a router
+// refusal (the envelope was valid, so `refused() == 0` holds even against a hostile caller), and
+// the handler is never consulted.
+void a_malformed_verb_is_an_error_not_a_refusal()
+{
+    BridgeRouter router;
+    SessionBridge bridge;
+    bool called = false;
+    bridge.bind_control(
+        [&called](const std::string&)
+        {
+            called = true;
+            return SessionControlOutcome{};
+        });
+    CHECK(bridge.install(router));
+
+    bool refused = true;
+    const Json unknown = dispatch_control(router, verb_params("rewind"), refused);
+    CHECK(!refused);
+    CHECK(unknown.at("error").at("data").at("reason").as_string() ==
+          std::string(kSessionControlBadVerbCode));
+    const Json missing = dispatch_control(router, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(missing.contains("error"));
+    CHECK(!called);
+    CHECK(bridge.controls() == 0);
+}
+
+// The renderer's query path again: a throwing handler costs the press its effect — reported through
+// the provider's honest state — never the editor its boot.
+void a_throwing_control_handler_degrades()
+{
+    BridgeRouter router;
+    SessionBridge bridge;
+    bridge.bind_provider(
+        []
+        {
+            SessionStateSnapshot snapshot;
+            snapshot.play_state = "paused";
+            snapshot.sim_tick = 3;
+            return snapshot;
+        });
+    bridge.bind_control([](const std::string&) -> SessionControlOutcome
+                        { throw std::runtime_error("no feed"); });
+    CHECK(bridge.install(router));
+
+    bool refused = true;
+    const Json response = dispatch_control(router, verb_params(kSessionControlVerbStop), refused);
+    CHECK(!refused);
+    const Json& result = response.at("result");
+    CHECK(result.at("changed").as_bool() == false);
+    CHECK(result.at("errorCode").as_string().empty());
+    CHECK(result.at("state").as_string() == "paused");
+    CHECK(result.at("simTick").as_int() == 3);
+}
+
 } // namespace
 
 int main()
@@ -186,5 +336,9 @@ int main()
     a_throwing_provider_degrades_to_the_baseline();
     served_over_a_real_router();
     a_duplicate_install_is_refused();
+    an_unbound_control_serves_nothing_to_drive();
+    a_bound_control_handler_round_trips();
+    a_malformed_verb_is_an_error_not_a_refusal();
+    a_throwing_control_handler_degrades();
     SHELL_TEST_MAIN_END();
 }
