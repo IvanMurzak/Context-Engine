@@ -134,6 +134,13 @@ if(NOT CMAKE_SIZEOF_VOID_P)
         "intermittent — re-run the job, and see Context-Engine#460.")
 endif()
 
+# Python interpreter policy (../cmake/ContextPython.cmake): an interpreter handed in through
+# CONTEXT_PYTHON3_EXECUTABLE is pinned for every find_package(Python3) below and the Windows registry
+# lookup is turned OFF — the machine-global HKLM PythonCore key is not this build's to trust
+# (docs/self-hosted-runners.md § 6). Included FIRST: it must precede the first find_package(Python3),
+# which is reached through add_subdirectory(packages/ui) further down.
+include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextPython.cmake)
+
 # Warnings-as-errors baseline: the `context_warnings` interface target (../cmake/ContextWarnings.cmake).
 include(${CMAKE_CURRENT_SOURCE_DIR}/../cmake/ContextWarnings.cmake)
 

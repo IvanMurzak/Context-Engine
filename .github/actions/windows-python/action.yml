@@ -1,0 +1,100 @@
+name: Resolve Python (Windows, registry-independent)
+description: >-
+  Locate a Python >= 3.12 interpreter for a Windows leg WITHOUT consulting the Windows registry or
+  the `py` launcher (which reads it), prove it runs, and hand it to CMake and to every later step.
+  This is what makes the build immune to another tenant of a shared self-hosted box rewriting
+  HKLM\SOFTWARE\Python\PythonCore — the 2026-08-27 and 2026-08-29 outages, where CMake's
+  registry-FIRST FindPython3 followed a dead InstallPath and seven legs died at configure
+  (docs/self-hosted-runners.md § 6).
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve Python without the registry
+      if: runner.os == 'Windows'
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        # The documented floor: tools/fetch_cef.py's tarfile filter contract assumes >= 3.12.
+        $floor = [version]'3.12'
+
+        # --- 1. Gather candidates. Directory scans and PATH only: NO registry, NO `py` launcher. ---
+        $candidates = [System.Collections.Generic.List[string]]::new()
+        function Add-Candidate([string]$path) {
+            if ($path -and (Test-Path -LiteralPath $path -PathType Leaf)) {
+                $full = (Resolve-Path -LiteralPath $path).Path
+                if (-not $candidates.Contains($full)) { $candidates.Add($full) }
+            }
+        }
+        # An explicit pin wins outright: the runner's own .env (docs/self-hosted-runners.md § 6) or
+        # a workflow-level env. A pin that does not run is a configuration error and fails below.
+        $pin = $env:CONTEXT_PYTHON3_EXECUTABLE
+        if ($pin) { Add-Candidate $pin }
+        foreach ($name in 'python.exe', 'python3.exe') {
+            Get-Command $name -All -ErrorAction SilentlyContinue | ForEach-Object { Add-Candidate $_.Source }
+        }
+        $roots = @(
+            "$env:RUNNER_TOOL_CACHE\Python\*\x64",
+            "C:\hostedtoolcache\windows\Python\*\x64",
+            "$env:ProgramFiles\Python3*",
+            "${env:ProgramFiles(x86)}\Python3*",
+            "$env:LOCALAPPDATA\Programs\Python\Python3*",
+            "C:\Users\*\AppData\Local\Programs\Python\Python3*",
+            "C:\Python3*"
+        )
+        foreach ($root in $roots) {
+            Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue |
+                ForEach-Object { Add-Candidate (Join-Path $_.FullName 'python.exe') }
+        }
+
+        # --- 2. Validate by RUNNING each one — a path that exists is not an interpreter that works. ---
+        function Get-PythonVersion([string]$exe) {
+            try {
+                $out = & $exe -c "import sys, tarfile, urllib.request, json; print('%d.%d.%d' % sys.version_info[:3])" 2>$null
+                if ($LASTEXITCODE -ne 0 -or -not $out) { return $null }
+                return [version]$out.Trim()
+            } catch { return $null }
+        }
+        $valid = @()
+        foreach ($exe in $candidates) {
+            $v = Get-PythonVersion $exe
+            $state = if ($null -eq $v) { 'does not run' } elseif ($v -lt $floor) { "$v < $floor" } else { "$v ok" }
+            Write-Host "  candidate: $exe -> $state"
+            if ($null -ne $v -and $v -ge $floor) { $valid += [pscustomobject]@{ Exe = $exe; Version = $v } }
+        }
+
+        # --- 3. Choose: the pin, else the newest valid one. ---
+        $chosen = $null
+        if ($pin) {
+            $chosen = $valid | Where-Object { $_.Exe -eq (Resolve-Path -LiteralPath $pin -ErrorAction SilentlyContinue).Path } | Select-Object -First 1
+            if (-not $chosen) {
+                Write-Host "::error::CONTEXT_PYTHON3_EXECUTABLE is set to '$pin' but it is not a working Python >= $floor — fix the runner's .env pin (docs/self-hosted-runners.md § 6)."
+                exit 1
+            }
+        } else {
+            $chosen = $valid | Sort-Object Version -Descending | Select-Object -First 1
+        }
+        if (-not $chosen) {
+            Write-Host "::error::No working Python >= $floor was found without the registry (probed PATH and $($roots.Count) install roots; see the candidate list above). Install Python >= 3.12 on this machine, or pin one with CONTEXT_PYTHON3_EXECUTABLE in the runner's .env (docs/self-hosted-runners.md § 6)."
+            exit 1
+        }
+
+        # --- 4. Hand it on. CONTEXT_PYTHON3_EXECUTABLE is what cmake/ContextPython.cmake reads (it
+        #        pins Python3_EXECUTABLE and turns the registry lookup OFF); Python3_ROOT_DIR is the
+        #        CMake-native hint for any configure that bypasses the module; the PATH entry gives
+        #        scripted steps a plain `python`.
+        $dir = Split-Path -Parent $chosen.Exe
+        "CONTEXT_PYTHON3_EXECUTABLE=$($chosen.Exe)", "Python3_ROOT_DIR=$dir" |
+            Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        $dir, (Join-Path $dir 'Scripts') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        Write-Host "::notice title=Python::$($chosen.Exe) ($($chosen.Version)) — resolved without the registry"
+
+        # --- 5. Informational only: say when the machine's registry is broken, so the box owner
+        #        learns it from a green run instead of from the next tenant's red one. ---
+        Get-ChildItem 'HKLM:\SOFTWARE\Python\PythonCore' -ErrorAction SilentlyContinue | ForEach-Object {
+            $ip = Get-ItemProperty -Path (Join-Path $_.PSPath 'InstallPath') -ErrorAction SilentlyContinue
+            $p = if ($ip) { $ip.'(default)' } else { $null }
+            if ($p -and -not (Test-Path -LiteralPath (Join-Path $p 'python.exe'))) {
+                Write-Host "::warning title=Registry::HKLM\SOFTWARE\Python\PythonCore\$($_.PSChildName)\InstallPath points at a missing install ($p) — another tenant of this machine rewrote it. This job is unaffected; `py` and a bare FindPython3 on this box are not (docs/self-hosted-runners.md § 6)."
+            }
+        }
