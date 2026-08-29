@@ -232,9 +232,10 @@ bool pump_until_stable(shell::WindowManager& manager, std::uint64_t& clock_us, R
     });
 }
 
-// THE INJECTED-SAMPLE MARKER: Shift+Control+Option, set on the way out and tested on the way back.
-// The pair lives in ONE place so "these exact flags round-tripped" is structurally true rather than
-// true only while two literal lists happen to agree.
+// THE INJECTED-SAMPLE MARKER: Shift+Control+Option, set on the way out and tested on the way back —
+// the shared `smoke::apply_marker` / `smoke::has_marker` pair (smoke_window.h), ONE place for both
+// windowed smokes so "these exact flags round-tripped" is structurally true rather than true only
+// while per-smoke literal lists happen to agree.
 //
 // WHY A MARKER AT ALL. The position claims below name their samples ("the FIRST move", "the SECOND
 // move"), but the stream they are read out of is the desktop's, not this smoke's — the same reason the
@@ -253,17 +254,6 @@ bool pump_until_stable(shell::WindowManager& manager, std::uint64_t& clock_us, R
 // a context-menu gesture. It is harmless HERE for a checked reason and not by luck — this smoke's
 // content view carries no `menu`, so `-menuForEvent:` yields nil and nothing opens. A view that DOES
 // carry one would need a chord-free mask (Shift+Option alone).
-void apply_marker(shell::Modifiers& modifiers)
-{
-    modifiers.shift = true;
-    modifiers.control = true;
-    modifiers.alt = true;
-}
-
-[[nodiscard]] bool has_marker(const shell::Modifiers& modifiers)
-{
-    return modifiers.shift && modifiers.control && modifiers.alt;
-}
 
 bool has_flag(int argc, char** argv, const char* flag)
 {
@@ -570,7 +560,7 @@ int main(int argc, char** argv)
     // The marker the delivered-sample loop below selects on — the mask, and why the samples are no
     // longer identified by their ORDINAL position, are `apply_marker`'s own comment. The three
     // remaining samples inherit it by copy-construction from this one.
-    apply_marker(move_high.pointer.modifiers);
+    smoke::apply_marker(move_high.pointer.modifiers);
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, move_high),
                 "a pointer MOVE near the TOP was accepted for injection through AppKit");
 
@@ -640,7 +630,7 @@ int main(int argc, char** argv)
         // silently, and both counts are reported below, so a desktop delivering its own input stays
         // VISIBLE. Split so a foreign MOVE — the shape the old positional identification could have
         // confused with one of ours — stays legible separately from the already-anticipated `leave`.
-        if (!has_marker(pointer.modifiers))
+        if (!smoke::has_marker(pointer.modifiers))
         {
             if (pointer.action == shell::PointerAction::move)
             {
@@ -877,7 +867,7 @@ int main(int argc, char** argv)
     zoom_press.pointer.position =
         shell::PointI{static_cast<std::int32_t>(chrome_client.width / 2u),
                       static_cast<std::int32_t>(chrome_client.height / 4u)};
-    apply_marker(zoom_press.pointer.modifiers);
+    smoke::apply_marker(zoom_press.pointer.modifiers);
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, zoom_press),
                 "a double-click caption press was accepted for injection");
     shell::ShellEvent zoom_release = zoom_press;
@@ -948,7 +938,7 @@ int main(int argc, char** argv)
         const std::vector<shell::PointerEvent>& samples = browser->pointers();
         for (std::size_t i = baseline; i < samples.size(); ++i)
         {
-            if (has_marker(samples[i].modifiers) &&
+            if (smoke::has_marker(samples[i].modifiers) &&
                 samples[i].action == shell::PointerAction::down)
             {
                 ++marked_downs;

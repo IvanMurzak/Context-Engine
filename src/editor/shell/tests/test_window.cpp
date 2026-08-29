@@ -424,9 +424,12 @@ void test_hit_test_frame_maximized_has_no_resize_bands()
 // insets carved, i.e. the whole domain WM_NCHITTEST can ask about — at five DPIs, in both frame
 // states, over three region maps, and judges every answer two ways:
 //
-//   1. against an INDEPENDENT ORACLE written from the spec (window.h § hit_test_frame) in ZONE
-//      terms — which strip, which corner zone, which rect contains the point — with its own DPI
-//      arithmetic, rather than by re-running the implementation's control flow;
+//   1. against an ORACLE written from the spec (window.h § hit_test_frame) in ZONE terms — which
+//      strip, which corner zone, which rect contains the point — with its OWN metric arithmetic
+//      (integer round-to-nearest, not the shipped float path) and its own last-match-wins lookup.
+//      Honestly: the zone predicates restate the spec's rules in the spec's order, so a rule that
+//      is WRONG IN THE SPEC would agree; what the oracle is independent of is the implementation's
+//      metric functions, `RegionMap::hit_test`, and every off-by-one in how those are combined;
 //   2. against oracle-FREE invariants of the spec that must hold whatever the oracle says: the
 //      answer set is CLOSED; a maximized window has NO band answer anywhere; the band answers do
 //      not depend on the region map (bands come first); an empty map is left/right
@@ -681,6 +684,12 @@ void test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point()
     const std::int32_t width = static_cast<std::int32_t>(client.width);
     const std::int32_t height = static_cast<std::int32_t>(client.height);
     const RegionMap bare;
+    // The live maps the implementation reads, published once: they do not depend on the DPI.
+    std::vector<RegionMap> published(std::size(maps));
+    for (std::size_t i = 0; i < std::size(maps); ++i)
+    {
+        published[i].publish(maps[i].regions);
+    }
 
     for (const std::uint32_t dpi_value : dpis)
     {
@@ -692,19 +701,21 @@ void test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point()
         const std::int32_t x_end = width + metrics.border;
         const std::int32_t y_end = height + metrics.border;
 
-        for (const SweepMap& map : maps)
+        for (std::int32_t y = 0; y < y_end; ++y)
         {
-            RegionMap regions;
-            regions.publish(map.regions);
-            for (const bool maximized : {false, true})
+            for (std::int32_t x = x_begin; x < x_end; ++x)
             {
-                for (std::int32_t y = 0; y < y_end; ++y)
+                const PointI point{x, y};
+                // The bare frame's answer at this point, once per point: the band-independence
+                // invariant below reads it against every map.
+                const std::int32_t plain = hit_test_frame(point, client, dpi, false, bare);
+                for (std::size_t i = 0; i < std::size(maps); ++i)
                 {
-                    for (std::int32_t x = x_begin; x < x_end; ++x)
+                    const SweepMap& map = maps[i];
+                    for (const bool maximized : {false, true})
                     {
-                        const PointI point{x, y};
                         const std::int32_t got =
-                            hit_test_frame(point, client, dpi, maximized, regions);
+                            hit_test_frame(point, client, dpi, maximized, published[i]);
                         const std::int32_t expected =
                             sweep_oracle(point, client, metrics, maximized, map.regions);
                         report.note(got == expected, "the answer matches the spec oracle",
@@ -718,8 +729,6 @@ void test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point()
                         {
                             // Bands come FIRST: the empty map's band answer is every map's answer,
                             // and where the empty map says client, no map may say band.
-                            const std::int32_t plain =
-                                hit_test_frame(point, client, dpi, false, bare);
                             const bool band_agrees = sweep_is_band_code(plain)
                                                          ? got == plain
                                                          : !sweep_is_band_code(got);

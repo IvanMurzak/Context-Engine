@@ -316,6 +316,18 @@ PointI region_mid(const ShellRegion& region)
                   static_cast<std::int32_t>(region.rect.origin.y + region.rect.size.height / 2u)};
 }
 
+void apply_marker(Modifiers& modifiers)
+{
+    modifiers.shift = true;
+    modifiers.control = true;
+    modifiers.alt = true;
+}
+
+bool has_marker(const Modifiers& modifiers)
+{
+    return modifiers.shift && modifiers.control && modifiers.alt;
+}
+
 PresentSetup attach_smoke_present(EditorWindow& window, WindowMode mode)
 {
     PresentSetup setup;

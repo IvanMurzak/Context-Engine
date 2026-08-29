@@ -182,34 +182,6 @@ bool pump_until(shell::WindowManager& manager, std::uint64_t& clock_us, Predicat
     return predicate();
 }
 
-// The modifier MARKER the chrome drills (step 6c) stamp on every sample they inject, so OUR samples
-// are identified POSITIVELY among whatever else the desktop delivers (a LeaveNotify, a real cursor
-// crossing the window) rather than by their ordinal position in the stream. The X arm carries the
-// flags in the event's `state` mask (smoke_window.cpp § x11_state_mask) and the shipping decoder
-// reads them back (window.cpp § translate_x11_event), so a marked sample in the browser's record is
-// one of ours by construction. Same mask as the Cocoa smoke's marker; on X it carries no chord
-// semantics — nothing here is a WM binding, and XSendEvent never touches the server's real modifier
-// state.
-void apply_marker(shell::Modifiers& modifiers)
-{
-    modifiers.shift = true;
-    modifiers.control = true;
-    modifiers.alt = true;
-}
-
-[[nodiscard]] bool has_marker(const shell::Modifiers& modifiers)
-{
-    return modifiers.shift && modifiers.control && modifiers.alt;
-}
-
-[[nodiscard]] bool inside(const render::Rect2D& rect, shell::PointI point)
-{
-    const std::int64_t x0 = rect.origin.x;
-    const std::int64_t y0 = rect.origin.y;
-    return point.x >= x0 && point.x < x0 + rect.size.width && point.y >= y0 &&
-           point.y < y0 + rect.size.height;
-}
-
 bool has_flag(int argc, char** argv, const char* flag)
 {
     for (int i = 1; i < argc; ++i)
@@ -646,8 +618,10 @@ int main(int argc, char** argv)
     X11_CHECK(editor->input().regions().hit_test(dock_mid) == nullptr,
               "the dock point lies in no published region");
 
-    // A marked pointer sample. X reports the button MASK as it was BEFORE the event, so a press
-    // carries no button and a mid-drag move / the release carry the held button (the 6b rule).
+    // A MARKED pointer sample (smoke_window.h § apply_marker — on X the mask carries no chord
+    // semantics: nothing here is a WM binding, and XSendEvent never touches the server's real
+    // modifier state). X reports the button MASK as it was BEFORE the event, so a press carries no
+    // button and a mid-drag move / the release carry the held button (the 6b rule).
     const auto marked_pointer = [](shell::PointerAction action, shell::PointI position,
                                    bool left_held) {
         shell::ShellEvent event;
@@ -656,7 +630,7 @@ int main(int argc, char** argv)
         event.pointer.button = action == shell::PointerAction::move ? shell::MouseButton::none
                                                                    : shell::MouseButton::left;
         event.pointer.position = position;
-        apply_marker(event.pointer.modifiers);
+        smoke::apply_marker(event.pointer.modifiers);
         event.pointer.modifiers.left_button_down = left_held;
         return event;
     };
@@ -667,7 +641,7 @@ int main(int argc, char** argv)
         const std::vector<shell::PointerEvent>& samples = browser->pointers();
         for (std::size_t i = baseline; i < samples.size(); ++i)
         {
-            if (has_marker(samples[i].modifiers) && samples[i].action == action)
+            if (smoke::has_marker(samples[i].modifiers) && samples[i].action == action)
             {
                 ++count;
             }
@@ -725,6 +699,10 @@ int main(int argc, char** argv)
               "was dropped, not leaked");
 
     // --- 3 + 4: a CONTROL press is forwarded, inside the physical rect it was aimed at -------
+    // The chrome drills' samples are MARKED (smoke_window.h § apply_marker: the X arm carries the
+    // flags in the event's `state` mask, window.cpp § translate_x11_event reads them back), so a
+    // marked sample in the browser's record is one of ours among whatever else the desktop
+    // delivered.
     const std::size_t control_baseline = browser->pointers().size();
     X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
                                   marked_pointer(shell::PointerAction::down, close_mid, false)),
@@ -740,17 +718,20 @@ int main(int argc, char** argv)
               "the close control's press AND release reached the browser — the web-drawn button is "
               "live on a backend with no OS frame");
     {
+        // Judged by the LIVE map's own hit-test at the coordinates the browser was handed — the
+        // close rect is the last-published region, so last-match-wins answers it exactly when the
+        // sample lies inside it.
         int inside_close = 0;
         int marked_control_samples = 0;
         const std::vector<shell::PointerEvent>& samples = browser->pointers();
         for (std::size_t i = control_baseline; i < samples.size(); ++i)
         {
-            if (!has_marker(samples[i].modifiers))
+            if (!smoke::has_marker(samples[i].modifiers))
             {
                 continue;
             }
             ++marked_control_samples;
-            if (inside(close_rect, samples[i].position))
+            if (editor->input().regions().hit_test(samples[i].position) == close_region)
             {
                 ++inside_close;
             }

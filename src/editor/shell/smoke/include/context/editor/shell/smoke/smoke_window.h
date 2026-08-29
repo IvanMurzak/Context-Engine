@@ -162,6 +162,21 @@ struct BrowserGeometry
 // drift.
 [[nodiscard]] PointI region_mid(const ShellRegion& region);
 
+// THE INJECTED-SAMPLE MARKER: Shift+Control+Alt(Option), stamped on a pointer sample on the way OUT
+// and tested on the way BACK, so a windowed smoke identifies ITS samples POSITIVELY among whatever
+// else the desktop delivers (a LeaveNotify / MouseExited, a real cursor crossing the window) rather
+// than by their ordinal position in the stream. The flags travel ON the event — the X `state` mask
+// (`x11_state_mask`) or the NSEvent modifier flags (smoke_inject_cocoa.mm) — and come back through
+// the SHIPPING decoders, which is what makes a marked sample in the browser's record one of ours by
+// construction. One pair, shared, so "these exact flags round-tripped" is structurally true rather
+// than true only while two per-smoke literal lists happen to agree.
+//
+// ⚠ The mask is NOT chord-free on every platform: the Cocoa smoke's own comment records why
+// Control (macOS's secondary-click chord) is harmless THERE; on X nothing here is a WM binding and
+// XSendEvent never touches the server's real modifier state.
+void apply_marker(Modifiers& modifiers);
+[[nodiscard]] bool has_marker(const Modifiers& modifiers);
+
 // What `attach_smoke_present` resolved to. `ok` is the whole verdict.
 //
 // Deliberately NO blitter HANDLE: the compositor owns the blitter and destroys it at `detach()`, so
