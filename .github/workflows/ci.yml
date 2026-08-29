@@ -177,6 +177,13 @@ jobs:
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -424,6 +431,13 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -810,6 +824,13 @@ jobs:
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -881,6 +902,13 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1025,6 +1053,13 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1204,6 +1239,13 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1805,6 +1847,13 @@ jobs:
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -1905,6 +1954,13 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+
+      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
+      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
+      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
+      # so the two never resolve Python by different rules.
+      - name: Python (Windows, registry-independent)
+        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain

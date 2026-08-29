@@ -86,7 +86,9 @@ on `pwsh` regardless so steps are account-agnostic.)*
 
 ### 3. `python` vs `py`; `git safe.directory`; dubious ownership
 
-* Python is exposed as **`py`** on the runners, not `python`.
+* Python is exposed as **`py`** on the runners, not `python` — but `py` resolves through the
+  registry, and the registry is not ours (§ 6). The BUILD never uses it: every Windows leg resolves
+  its interpreter registry-free through `.github/actions/windows-python` and hands it to CMake.
 * Any `git` command on the checked-out repo needs `safe.directory` set (handled in §1), or git
   aborts with *"detected dubious ownership in repository"*.
 
@@ -119,6 +121,52 @@ own visual-equivalence scope ("Linux-Vulkan + one browser blocking, other backen
 Windows-specific D3D12 render validation, if wanted at M4, belongs on a real **interactive-session
 GPU runner** — not this throwaway spike on a headless service. `context-spike-webgpu render` still
 works if you run it by hand on Windows for debugging.
+
+### 6. The Windows registry is NOT ours — Python is resolved without it
+
+**What happened (2026-08-27, again 2026-08-29).** Seven Windows legs died at configure with
+`Could NOT find Python3` while a perfectly good Python 3.12 sat on disk. Another tenant of the same
+machine (a runner-manager provisioning its own tools with `actions/setup-python`) had rewritten
+`HKLM\SOFTWARE\Python\PythonCore\3.12\InstallPath` to point at ITS ephemeral tool cache
+(`…\runtime\<id>\_work\_tool\Python\3.12.10\x64`) and then garbage-collected that directory.
+CMake's `FindPython3` on Windows consults the registry FIRST (`Python3_FIND_REGISTRY=FIRST` by
+default), followed the dead path, and gave up — and because a LocalSystem service has no user PATH,
+there was nothing to fall back to. The first time it went unnoticed for 26 days. Nothing in this
+repository had changed either time; an elevated registry repair "fixed" it, and the next
+provisioning run undid the repair.
+
+**What this repo does about it — immunity, not repair.** The build no longer trusts the machine's
+registry at all:
+
+* **`.github/actions/windows-python`** runs on every Windows leg, right after the MSVC step. It
+  locates a Python **>= 3.12** through directory scans and PATH only — never the registry, never the
+  `py` launcher (which reads the registry) — and PROVES each candidate by running it. It then exports
+  `CONTEXT_PYTHON3_EXECUTABLE` and `Python3_ROOT_DIR` for later steps and prepends the interpreter's
+  directory to `PATH`. No usable interpreter is a legible `::error::` naming what was probed, not a
+  CMake stack trace.
+* **`cmake/ContextPython.cmake`** (included first in `src/CMakeLists.txt`) pins that interpreter as
+  `Python3_EXECUTABLE` and sets `Python3_FIND_REGISTRY=NEVER`, so every one of the tree's
+  `find_package(Python3)` calls uses it and none can reach the registry. A pin that names a missing
+  file is a `FATAL_ERROR`, not a silent fall-through to the lookup the pin exists to bypass.
+* The step also prints a `::warning::` when the registry's `InstallPath` points at a missing
+  install — a green run tells the box owner the machine is broken for its other tenants, instead of
+  the next tenant's red run doing it.
+
+**Pinning an interpreter on a runner.** If a machine has several Pythons or one in an unusual place,
+add to that runner's `.env` (the same file § 1 uses for `GIT_CONFIG_GLOBAL`), then restart the
+service:
+
+```
+CONTEXT_PYTHON3_EXECUTABLE=C:\Users\<user>\AppData\Local\Programs\Python\Python312\python.exe
+```
+
+A pin that does not run fails the leg loudly (it is a configuration error), and it never falls back
+to the registry.
+
+**What is deliberately NOT done.** CI does not repair the registry: a LocalSystem service could, but
+a CI job writing machine-global state is precisely the class of behaviour that caused the outage,
+and two tenants "repairing" the same key would race forever. The registry belongs to whoever
+administers the box; this repo simply stopped depending on it.
 
 ## Service account: LocalSystem vs a dedicated user
 

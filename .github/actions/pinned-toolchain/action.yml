@@ -127,10 +127,13 @@ runs:
     - name: Apply toolchain manifest (Windows)
       if: runner.os == 'Windows'
       shell: pwsh
-      # Informational only (Windows = documented reality, no live install/verify). Use the `py`
-      # launcher (`python`/`python3` are not on a self-hosted LocalSystem service's PATH), and never
-      # block the build on Python availability.
+      # Informational only (Windows = documented reality, no live install/verify). Prefer the
+      # interpreter the windows-python action resolved WITHOUT the registry
+      # (CONTEXT_PYTHON3_EXECUTABLE); fall back to the `py` launcher only when no such step ran —
+      # `py` resolves through HKLM PythonCore, the key another tenant of the box has rewritten twice
+      # (docs/self-hosted-runners.md § 6) — and never block the build on Python availability.
       run: |
-        if (Get-Command py -ErrorAction SilentlyContinue) { py tools/check_toolchain.py --platform windows-x86_64 --describe }
-        else { Write-Host "::notice::Python launcher unavailable on this runner; skipping the informational Windows toolchain describe." }
+        if ($env:CONTEXT_PYTHON3_EXECUTABLE) { & $env:CONTEXT_PYTHON3_EXECUTABLE tools/check_toolchain.py --platform windows-x86_64 --describe }
+        elseif (Get-Command py -ErrorAction SilentlyContinue) { py tools/check_toolchain.py --platform windows-x86_64 --describe }
+        else { Write-Host "::notice::No Python resolved on this runner; skipping the informational Windows toolchain describe." }
         exit 0
