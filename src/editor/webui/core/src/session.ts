@@ -26,7 +26,7 @@
 // rather than one per tick forever.
 
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
-import { DaemonSessionState, type PlayState } from "./when.js";
+import { DaemonSessionState, toSimTick, type PlayState } from "./when.js";
 
 /**
  * The Shell method that relays the daemon's session state.
@@ -38,6 +38,33 @@ import { DaemonSessionState, type PlayState } from "./when.js";
  * `playState` silently freezes at `edit` again with NOTHING reporting it.
  */
 export const SESSION_STATE_METHOD = "session.state";
+
+/**
+ * The Shell method the play-bar strip's transport writes through (editor-window-chrome d1).
+ *
+ * MUST match `kSessionControlMethod` in session_bridge.h — the `webui-panel-contract` gate
+ * cross-checks it exactly as it does `SESSION_STATE_METHOD` above. The Shell relays the verb to its
+ * `SessionFeed` writer (the proven e08b chain: `editor.play|pause|stop|step` over the Shell's own
+ * client, with its `origin` echo suppression), so the strip, the palette's `play.*` commands and
+ * the docked playbar drive ONE implementation.
+ */
+export const SESSION_CONTROL_METHOD = "session.control";
+
+/**
+ * The `verb` vocabulary `session.control` accepts — MUST match `kSessionControlVerb*` in
+ * session_bridge.h (same gate). A drifted verb is refused as `session.bad_verb` on every press of a
+ * button that looks perfectly wired, which is why the tokens are pinned rather than trusted.
+ */
+export const SESSION_CONTROL_VERB_PLAY = "play";
+export const SESSION_CONTROL_VERB_PAUSE = "pause";
+export const SESSION_CONTROL_VERB_STOP = "stop";
+export const SESSION_CONTROL_VERB_STEP = "step";
+
+export type SessionControlVerb =
+    | typeof SESSION_CONTROL_VERB_PLAY
+    | typeof SESSION_CONTROL_VERB_PAUSE
+    | typeof SESSION_CONTROL_VERB_STOP
+    | typeof SESSION_CONTROL_VERB_STEP;
 
 /**
  * How often the feed re-reads the relay, in milliseconds.
@@ -58,6 +85,8 @@ export interface SessionReadReport {
     readonly attached: boolean;
     /** The state the sink holds AFTER applying this read. */
     readonly playState: PlayState;
+    /** The simTick the sink holds AFTER applying this read (d1 — the strip's `t+` source). */
+    readonly simTick: number;
     /** Did this read actually move the sink? */
     readonly changed: boolean;
     /** `""` on a served read; the refusal reason otherwise. */
@@ -110,6 +139,93 @@ export class SessionClient {
     }
 }
 
+/** What one `session.control` write produced (editor-window-chrome d1). TOTAL — never a throw. */
+export interface SessionControlReport {
+    /** Did the Shell serve the method? False = an older Shell, or a transport fault. */
+    readonly served: boolean;
+    /** Did something actually move (the daemon's `changed`)? */
+    readonly changed: boolean;
+    /**
+     * The reply's raw state token — relayed to the sink VERBATIM, never re-spelled or pre-parsed:
+     * `DaemonSessionState.applyFact` (when.ts) is the one parser of this vocabulary, and a token it
+     * cannot name applies nothing (keep the last known state, never invent `edit`).
+     */
+    readonly stateToken: string;
+    /**
+     * The running session's simTick, as the daemon reports it — `null` when the reply carried no
+     * readable tick (the `toSimTick` rule: the consumer keeps its last known value, never a
+     * fabricated 0).
+     */
+    readonly simTick: number | null;
+    /** The reserved `play.*` catalog code on a daemon refusal; `""` otherwise. */
+    readonly errorCode: string;
+    /** `""` on a served write; the refusal reason otherwise. */
+    readonly diagnostic: string;
+}
+
+/**
+ * The seam the play actions write through — what `SessionControlClient` implements, named so the T1
+ * tier can drive `makePlayActions` (playbar.ts) with a scripted sender instead of a wired bridge.
+ */
+export interface SessionControlSender {
+    send(verb: SessionControlVerb): Promise<SessionControlReport>;
+}
+
+/**
+ * The typed client over `session.control` (editor-window-chrome d1) — the strip's ONE write path.
+ *
+ * TOTAL like `SessionFeed`: a refusal (an older Shell that does not route the method, a transport
+ * fault) is a REPORT, never a throw — a transport button sits in a click handler nobody awaits, so
+ * an escaping rejection would be an unhandled rejection in a renderer nobody watches. `changed:
+ * false` with an empty `errorCode` is the Shell's honest "nothing to drive / nothing to do" (a
+ * benign no-op, or no daemon link — the Shell deliberately does not distinguish them; see
+ * session_bridge.h `SessionControlOutcome`).
+ */
+export class SessionControlClient implements SessionControlSender {
+    readonly #bridge: ShellBridge;
+
+    constructor(bridge: ShellBridge) {
+        this.#bridge = bridge;
+    }
+
+    async send(verb: SessionControlVerb): Promise<SessionControlReport> {
+        let reply: unknown;
+        try {
+            reply = await this.#bridge.call(SESSION_CONTROL_METHOD, { verb });
+        } catch (error) {
+            return controlFailure(false, bridgeDiagnostic(error));
+        }
+        if (!isRecord(reply)) {
+            return controlFailure(true, "the Shell answered session.control with a non-record");
+        }
+        const stateToken = typeof reply["state"] === "string" ? reply["state"] : "";
+        return {
+            served: true,
+            changed: reply["changed"] === true,
+            stateToken,
+            // The SAME null-tolerant rule the fact path applies (when.ts toSimTick): an unreadable
+            // tick is reported as unknown, never re-spelled as a fabricated 0.
+            simTick: toSimTick(reply["simTick"]),
+            errorCode: typeof reply["errorCode"] === "string" ? reply["errorCode"] : "",
+            diagnostic: "",
+        };
+    }
+}
+
+/** A failed `session.control` write, as a report — the one spelling of both failure shapes. */
+function controlFailure(served: boolean, diagnostic: string): SessionControlReport {
+    return { served, changed: false, stateToken: "", simTick: null, errorCode: "", diagnostic };
+}
+
+/** One spelling of "why did this bridge call fail" — shared by both catch paths in this module. */
+function bridgeDiagnostic(error: unknown): string {
+    return error instanceof BridgeError
+        ? `${error.reason}: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : String(error);
+}
+
 /**
  * The live feed: read the relay, hand the reply to the sink, repeat.
  *
@@ -121,6 +237,7 @@ export class SessionFeed {
     readonly #client: SessionClient;
     readonly #state: DaemonSessionState;
     readonly #scheduler: SessionScheduler | undefined;
+    readonly #onRead: ((report: SessionReadReport) => void) | undefined;
     #handle: number | null = null;
     #reads = 0;
     #generation = -1;
@@ -129,10 +246,16 @@ export class SessionFeed {
         bridge: ShellBridge,
         state: DaemonSessionState,
         scheduler: SessionScheduler | undefined = defaultSessionScheduler(),
+        // Called after EVERY completed read (served or refused) with the report — the d1 strip's
+        // update channel: boot hands it a callback that re-renders the play bar, so the strip is
+        // FED exactly as the sink is, never a second poller. Total like the feed itself: a throwing
+        // callback is contained (a strip that cannot paint must not stop the when-context feed).
+        onRead?: (report: SessionReadReport) => void,
     ) {
         this.#client = new SessionClient(bridge);
         this.#state = state;
         this.#scheduler = scheduler;
+        this.#onRead = onRead;
     }
 
     /** How many reads have completed (served or refused) — the T1 tier's poll evidence. */
@@ -163,27 +286,24 @@ export class SessionFeed {
         try {
             reply = await this.#client.get();
         } catch (error) {
-            return {
+            return this.#report({
                 served: false,
                 attached: false,
                 playState: this.#state.playState,
+                simTick: this.#state.simTick,
                 changed: false,
-                diagnostic:
-                    error instanceof BridgeError
-                        ? `${error.reason}: ${error.message}`
-                        : error instanceof Error
-                          ? error.message
-                          : String(error),
-            };
+                diagnostic: bridgeDiagnostic(error),
+            });
         }
         if (reply === null) {
-            return {
+            return this.#report({
                 served: true,
                 attached: false,
                 playState: this.#state.playState,
+                simTick: this.#state.simTick,
                 changed: false,
                 diagnostic: "the Shell answered session.state with a non-record",
-            };
+            });
         }
         const generation =
             typeof reply["generation"] === "number" ? reply["generation"] : Number.NaN;
@@ -192,13 +312,24 @@ export class SessionFeed {
         if (!Number.isNaN(generation)) {
             this.#generation = generation;
         }
-        return {
+        return this.#report({
             served: true,
             attached: reply["attached"] === true,
             playState: this.#state.playState,
+            simTick: this.#state.simTick,
             changed,
             diagnostic: "",
-        };
+        });
+    }
+
+    /** Hand the report to the d1 strip callback (contained), then return it to the caller. */
+    #report(report: SessionReadReport): SessionReadReport {
+        try {
+            this.#onRead?.(report);
+        } catch {
+            // A strip that cannot paint must not stop the when-context feed.
+        }
+        return report;
     }
 
     /**

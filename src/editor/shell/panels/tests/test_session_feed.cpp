@@ -30,11 +30,20 @@
 #include <vector>
 
 using context::editor::shell::PanelHost;
+using context::editor::shell::SessionControlOutcome;
+using context::editor::shell::kSessionControlBadVerbCode;
+using context::editor::shell::kSessionControlVerbPause;
+using context::editor::shell::kSessionControlVerbPlay;
+using context::editor::shell::kSessionControlVerbStep;
+using context::editor::shell::kSessionControlVerbStop;
 using context::editor::shell::panels::SessionFeed;
 using context::editor::shell::panels::kCameraChangedEvent;
 using context::editor::shell::panels::kPlayStateEvent;
 using context::editor::shell::panels::kSelectionChangedEvent;
 using context::editor::shell::panels::kSessionTopicName;
+using context::editor::shell::panels::session_control;
+using context::editor::shell::panels::session_control_generation;
+using context::editor::shell::panels::session_sim_tick;
 namespace client = context::editor::client;
 namespace playbar = context::editor::gui::playbar;
 namespace scenetree = context::editor::gui::panels::scenetree;
@@ -413,6 +422,88 @@ int main()
                            dispatched, error_code));
         CHECK(!dispatched);
         CHECK(!error_code.empty());
+    }
+
+    // --- the d1 `session.control` write path: the SAME e08b chain, addressed by verb token ---------
+    // The strip's press, the `play.*` palette commands and the dock panel's buttons all resolve to
+    // ONE implementation: `SessionFeed::control` drives the same `PlaybarModel` transports over the
+    // same wire methods, so the daemon cannot tell them apart — and the echo-suppression contract
+    // binds them identically.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+
+        Wired wired = make_client(kShellId);
+        wired.channel->on("editor.play",
+                          [](const clientmock::Request&) { return play_reply("playing", 5, true); });
+        wired.channel->on("editor.step",
+                          [](const clientmock::Request&) { return play_reply("playing", 6, true); });
+        wired.channel->on("editor.pause",
+                          [](const clientmock::Request&) { return play_reply("paused", 6, true); });
+        feed.bind_client(wired.client.get(), wired.client->client_id());
+
+        // A verb outside the vocabulary dispatches NOTHING (the bridge validates first; this is the
+        // seam's own guarantee that a drift cannot silently no-op).
+        CHECK(!feed.control("rewind").has_value());
+        CHECK(feed.writes_issued() == 0);
+
+        // `play` rides the SAME wire method the dock panel's transport does.
+        const std::optional<playbar::PlayAction> played = feed.control(kSessionControlVerbPlay);
+        CHECK(played.has_value());
+        CHECK(played.has_value() && played->ok);
+        CHECK(feed.playbar_model().state() == playbar::PlayState::playing);
+        CHECK(wired.channel->requests_for("editor.play").size() == 1);
+
+        // `step` advances exactly ONE tick — the button gesture.
+        CHECK(feed.control(kSessionControlVerbStep).has_value());
+        const std::vector<clientmock::Request> steps = wired.channel->requests_for("editor.step");
+        CHECK(steps.size() == 1);
+        if (steps.size() == 1)
+        {
+            CHECK(steps[0].params.at("ticks").as_int() == 1);
+        }
+        CHECK(feed.playbar_model().sim_tick() == 6);
+        CHECK(session_sim_tick(feed) == 6);
+
+        // The seam the composition root binds relays the model's outcome member-for-member — what
+        // the bridge puts on the wire IS what the dock panel rendered.
+        SessionControlOutcome outcome = session_control(feed, kSessionControlVerbPause);
+        CHECK(outcome.changed);
+        CHECK(outcome.play_state == "paused");
+        CHECK(outcome.sim_tick == 6);
+
+        // ECHO SUPPRESSION on the strip's own writes, pinned: the fact this write publishes carries
+        // OUR origin and is DROPPED — the strip was told the outcome by the reply, exactly once.
+        const std::uint64_t generation = session_control_generation(feed);
+        CHECK(generation > 0);
+        CHECK(!feed.apply_event(kSessionTopicName, play_fact(kShellId, "paused", 6)));
+        CHECK(feed.echoes_dropped() == 1);
+        CHECK(session_control_generation(feed) == generation);
+
+        // ...which is exactly why the `session.state` generation must sum in the control
+        // generation: three transitions landed here and `facts_applied` saw NONE of them.
+        CHECK(feed.facts_applied() == 0);
+
+        // A daemon refusal maps to ok:false + the reserved code, verbatim; the state is never
+        // invented.
+        wired.channel->fail_method("editor.stop", "no live play session",
+                                   playbar::kPlayNotRunningCode);
+        outcome = session_control(feed, kSessionControlVerbStop);
+        CHECK(!outcome.changed);
+        CHECK(outcome.error_code == std::string(playbar::kPlayNotRunningCode));
+        CHECK(outcome.play_state == "paused"); // unmoved, not `edit`
+
+        // The seam's own unknown-verb guard (belt-and-braces below the bridge's validation).
+        CHECK(session_control(feed, "rewind").error_code ==
+              std::string(kSessionControlBadVerbCode));
+
+        // NO DAEMON: the model's honest "nothing to drive" — changed:false, NO code, state
+        // unmoved (indistinguishable from a benign no-op BY DESIGN — see SessionControlOutcome).
+        feed.bind_client(nullptr, 0);
+        outcome = session_control(feed, kSessionControlVerbPlay);
+        CHECK(!outcome.changed);
+        CHECK(outcome.error_code.empty());
+        CHECK(outcome.play_state == "paused");
     }
 
     // --- THE LIFETIME CONTRACT: clearing the client clears the IDENTITY with it -------------------

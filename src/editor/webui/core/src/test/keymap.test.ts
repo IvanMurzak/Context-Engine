@@ -10,7 +10,7 @@
 // async bridge fetch (KeybindingsClient) and command execution are the thin wrappers the CEF smoke
 // exercises end to end.
 
-import { assert, assertEqual, assertNull, type TestCase } from "./harness.js";
+import { assert, assertEqual, assertNull, noopPlayActions, type TestCase } from "./harness.js";
 import {
     canonicalizeChord,
     DEFAULT_KEYBINDINGS,
@@ -341,6 +341,7 @@ export const keymapTests: readonly TestCase[] = [
                     movePanelToPrimary: () => record("moveToPrimary"),
                 },
                 sessionActions: { undo: () => record("undo"), redo: () => record("redo") },
+                playActions: noopPlayActions(),
                 roster: { contractMajor: 2, panels: [] },
                 panelDispatch: (panelId, commandId) => record(`${panelId}/${commandId}`),
             });

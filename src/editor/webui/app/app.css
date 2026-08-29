@@ -217,11 +217,19 @@ html[data-theme-transition="true"] * {
     gap: 2px;
 }
 
-/* The play-bar SLOT (02 §2): an empty 40px shell until d1 fills it, hidden on the welcome screen
- * (chrome.ts sets `hidden` — no session to control there). The explicit `[hidden]` rule is what
- * keeps the hide working once d1 gives this strip a `display: flex` of its own. */
+/* The play-bar strip (02 §7, filled by d1 — playbar.ts): transport / status dot + label / `t+`
+ * timer / target chip, hidden on the welcome screen (chrome.ts sets `hidden` — no session to
+ * control there). The explicit `[hidden]` rule is what keeps the hide working now this strip has a
+ * `display: flex` of its own. LAYOUT + the two decorations (dot, timer) ONLY, the `.ctx-settings`
+ * discipline: every CONTROL inside is a stock kit component and nothing here paints one. The strip
+ * keeps `colors.panel` as its background — the byte the live smokes' coverage scan counts (see
+ * cef_shell_smoke.cpp § RECALIBRATED FOR THE a2 STRIPS). */
 .ctx-playbar {
     flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-md, 12px);
+    padding: 0 var(--ctx-shape-space-md, 12px);
     height: var(--ctx-chrome-playbar-height);
     background: var(--ctx-colors-panel, #0a0a0a);
     border-bottom: 1px solid var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
@@ -230,6 +238,62 @@ html[data-theme-transition="true"] * {
 
 .ctx-playbar[hidden] {
     display: none;
+}
+
+.ctx-playbar__transport {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: 2px;
+}
+
+.ctx-playbar__divider {
+    flex: none;
+    width: 1px;
+    align-self: stretch;
+    margin: 8px 0;
+    background: var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+}
+
+.ctx-playbar__status {
+    flex: none;
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-sm, 8px);
+}
+
+/* The status DOT: decoration (aria-hidden), hue bound 1:1 to the reserved status semantics via
+ * `data-tone` (06 §2) — the same indirection the kit's tones use. NO animation here: motion rules
+ * belong to the theme layer's flourish derivation, and the strip adds none. */
+.ctx-playbar__dot {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--ctx-colors-semantic-idle, #8b949e);
+}
+
+.ctx-playbar__dot[data-tone="good"] {
+    background: var(--ctx-colors-semantic-good, #3fb950);
+}
+
+.ctx-playbar__dot[data-tone="wait"] {
+    background: var(--ctx-colors-semantic-wait, #a855f7);
+}
+
+.ctx-playbar__timer {
+    flex: none;
+    font-family: var(--ctx-typography-font-mono, ui-monospace, monospace);
+    font-size: var(--ctx-typography-size-2xs, 10.5px);
+    font-variant-numeric: tabular-nums;
+    color: var(--ctx-colors-muted2, #7e7e7e);
+}
+
+.ctx-playbar__fill {
+    flex: 1 1 auto;
+}
+
+.ctx-playbar__target {
+    flex: none;
 }
 
 /* The statusbar (02 §8): an empty 24px shell until d2 gives it truthful content. */

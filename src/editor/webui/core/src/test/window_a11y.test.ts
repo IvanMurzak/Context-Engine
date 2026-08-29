@@ -15,7 +15,7 @@
 //   3. asserts the negative guards — no panel focused, or a text field focused — so the path is a
 //      real when-gated binding, not a global that would fire mid-typing (03 §6 keyboard routing).
 
-import { assert, assertEqual, type TestCase } from "./harness.js";
+import { assert, assertEqual, noopPlayActions, type TestCase } from "./harness.js";
 import { Keymap, KeymapController, keyStrokeToChord, type KeyStroke } from "../keymap.js";
 import { buildCommandRegistry, type CommandOutcome, type DockDirection } from "../commands.js";
 import type { WhenContext } from "../when.js";
@@ -50,6 +50,7 @@ function harness(): {
             movePanelToPrimary: () => record("moveToPrimary"),
         },
         sessionActions: { undo: () => record("undo"), redo: () => record("redo") },
+        playActions: noopPlayActions(),
         roster: { contractMajor: 2, panels: [] },
         panelDispatch: (panelId, commandId) => record(`${panelId}/${commandId}`),
     });

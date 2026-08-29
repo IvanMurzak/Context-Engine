@@ -200,6 +200,8 @@ struct WindowSurfaces
         ok = config.install(router) && ok;
         // Unbound: no `bind_provider`, so it serves the `edit`/`attached:false` boot baseline.
         ok = session_bridge.install(router) && ok;
+        // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
+        ok = router.has_method(shell::kSessionControlMethod) && ok;
         // e13c-4: the package.grants.* surface, bound to an EMPTY scan + an EMPTY document.
         package_grants =
             std::make_unique<shell::PackageGrantHost>(package_scan, std::filesystem::path{});

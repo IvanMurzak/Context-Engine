@@ -19,7 +19,7 @@
 // ⚠ NON-VACUITY PROVEN BY PLANTING, each reverted byte-exact — recorded inline at its own case as
 // `⚠ PLANT (x)`.
 
-import { assert, assertEqual, type TestCase } from "./harness.js";
+import { assert, assertEqual, noopPlayActions, type TestCase } from "./harness.js";
 import { CommandRegistry, buildCommandRegistry } from "../commands.js";
 import type { Command, CommandOutcome, EditorCommandActions, SessionCommandActions } from "../commands.js";
 import { parsePanelRoster } from "../panels.js";
@@ -202,6 +202,7 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
             contractDispatch: (method) => ({ ok: true, note: method }),
             editorActions: noopEditor,
             sessionActions: noopSession,
+            playActions: noopPlayActions(),
             roster,
             panelDispatch: (panelId, commandId) => {
                 invoked.push(`panel.command:${panelId}/${commandId}`);

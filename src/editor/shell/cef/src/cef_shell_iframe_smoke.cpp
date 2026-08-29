@@ -561,7 +561,11 @@ int main(int argc, char** argv)
     SMOKE_CHECK(banner_bridge.install(bridge), "the banner bridge surface installed");
 
     shell::SessionBridge session_bridge;
-    SMOKE_CHECK(session_bridge.install(bridge), "the session.state bridge surface installed");
+    SMOKE_CHECK(session_bridge.install(bridge),
+                "the session.state + session.control bridge surfaces installed");
+    // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
+    SMOKE_CHECK(bridge.has_method(shell::kSessionControlMethod),
+                "the d1 session.control write surface routes");
 
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);

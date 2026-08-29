@@ -15,7 +15,7 @@
 // This is the assertion the design calls a "structural accessibility property" (10): a pointer-only
 // capability would be a gap this test turns red, not a nicety.
 
-import { assert, type TestCase } from "./harness.js";
+import { assert, noopPlayActions, type TestCase } from "./harness.js";
 import {
     buildCommandRegistry,
     editorCommands,
@@ -103,6 +103,7 @@ export const reachabilityTests: readonly TestCase[] = [
                 contractDispatch: (method) => ({ ok: true, note: method }),
                 editorActions: editorSpy,
                 sessionActions: sessionSpy,
+                playActions: noopPlayActions(),
                 roster: { contractMajor: 2, panels: [] },
                 panelDispatch: (p, c) => ({ ok: true, note: `${p}/${c}` }),
             });

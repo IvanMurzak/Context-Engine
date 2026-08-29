@@ -403,6 +403,13 @@ SessionOutcome run_session(const std::filesystem::path& project,
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;
     }
+    // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
+    if (!bridge.has_method(shell::kSessionControlMethod))
+    {
+        std::fprintf(stderr, "[%s] FAIL: the d1 session.control write surface did not route\n",
+                     cfg.label);
+        return out;
+    }
 
     shell::WindowDesc desc;
     desc.title = "Context Editor (restore smoke)";

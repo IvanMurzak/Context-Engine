@@ -346,6 +346,69 @@ export const whenTests: readonly TestCase[] = [
         },
     },
     {
+        name: "DaemonSessionState d1: simTick rides the fact; a tick-only move still reports true",
+        run: () => {
+            const session = new DaemonSessionState();
+            assertEqual(session.simTick, 0, "boot baseline: no session, tick 0");
+            assert(
+                session.applyFact({ event: "play-state", origin: 9, state: "playing", simTick: 5 }),
+                "state + tick land together",
+            );
+            assertEqual(session.simTick, 5, "the daemon's tick is held");
+
+            // A step while paused/playing: SAME state token, new tick — the C++ twin
+            // (PlaybarModel.apply_play_state) reports this as a move, and so must this sink, or a
+            // stepped session would render a frozen `t+` with the poll insisting nothing changed.
+            assert(
+                session.applyFact({ event: "play-state", origin: 9, state: "playing", simTick: 6 }),
+                "a tick-only move is a move",
+            );
+            assertEqual(session.simTick, 6, "the tick advanced");
+            assertEqual(session.playState, "playing", "the state stayed");
+
+            // A fact with NO tick (an older Shell's relay) is believed about the state and silent
+            // about the tick — the last known value stands, never a fabricated 0.
+            assert(
+                session.applyFact({ event: "play-state", origin: 9, state: "paused" }),
+                "a tick-less fact still moves the state",
+            );
+            assertEqual(session.simTick, 6, "the last known tick survives a tick-less fact");
+
+            // Malformed ticks are tolerated and ignored, never thrown and never adopted.
+            assert(
+                !session.applyFact({
+                    event: "play-state",
+                    origin: 9,
+                    state: "paused",
+                    simTick: -3,
+                }),
+                "a negative tick + unchanged state is no move",
+            );
+            assert(
+                !session.applyFact({
+                    event: "play-state",
+                    origin: 9,
+                    state: "paused",
+                    simTick: 1.5,
+                }),
+                "a fractional tick + unchanged state is no move",
+            );
+            assertEqual(session.simTick, 6, "malformed ticks are never adopted");
+
+            // Our own echo moves NOTHING, the tick included.
+            session.clientId = 4;
+            assert(
+                !session.applyFact({ event: "play-state", origin: 4, state: "playing", simTick: 99 }),
+                "an echo is dropped whole",
+            );
+            assertEqual(session.simTick, 6, "an echo cannot move the tick");
+
+            // Reset clears the tick with the state — a restarted daemon holds no session.
+            session.reset();
+            assertEqual(session.simTick, 0, "reset returns the tick to the baseline");
+        },
+    },
+    {
         name: "the stub editor.ui baseline is the 'nothing focused' context",
         run: () => {
             const resolved = resolveContext({

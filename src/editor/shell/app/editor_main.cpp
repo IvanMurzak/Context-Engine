@@ -858,11 +858,24 @@ int main(int argc, char** argv)
             if (session_feed != nullptr)
             {
                 snapshot.play_state = shell::panels::session_play_state(*session_feed);
-                snapshot.generation = static_cast<std::uint64_t>(
-                    shell::panels::session_facts_applied(*session_feed));
+                // The composed d1 generation — applied facts + control generation, so locally
+                // driven transitions move it too (builtin_panels.h § session_state_generation
+                // owns the reasoning).
+                snapshot.generation = shell::panels::session_state_generation(*session_feed);
+                snapshot.sim_tick = shell::panels::session_sim_tick(*session_feed);
             }
             return snapshot;
         });
+    // The WRITE half (d1): `session.control` relays to the feed's PlaybarModel — the e08b chain
+    // (`editor.play|pause|stop|step` through the Shell's own client, echo-suppressed) — so the
+    // strip, the palette and the dock panel drive ONE implementation. With no feed the bridge's own
+    // unbound degrade answers "nothing to drive".
+    if (session_feed != nullptr)
+    {
+        session_bridge.bind_control(
+            [session_feed](const std::string& verb) -> shell::SessionControlOutcome
+            { return shell::panels::session_control(*session_feed, verb); });
+    }
     if (!session_bridge.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the session bridge surface\n");

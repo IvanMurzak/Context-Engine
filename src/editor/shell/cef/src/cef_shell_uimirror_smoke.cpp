@@ -177,6 +177,8 @@ struct WindowSurfaces
         config.bind_path(std::filesystem::path{});
         ok = config.install(router) && ok;
         ok = session_bridge.install(router) && ok;
+        // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
+        ok = router.has_method(shell::kSessionControlMethod) && ok;
         package_grants =
             std::make_unique<shell::PackageGrantHost>(package_scan, std::filesystem::path{});
         ok = package_grants->install(router) && ok;

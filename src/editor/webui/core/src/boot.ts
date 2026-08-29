@@ -40,6 +40,7 @@ import {
     type CommandOutcome,
     type CommandRegistry,
     type EditorCommandActions,
+    type PlayCommandActions,
     type SessionCommandActions,
 } from "./commands.js";
 import { EditorStateClient, LayoutPersistence } from "./editorstate.js";
@@ -67,12 +68,14 @@ import {
     type WindowSeed,
 } from "./window.js";
 import {
+    EDITOR_PLAYBAR_ID,
     findChromeStripElements,
     startChromeStrips,
     subscribeChromeFacts,
     type ChromeMount,
     type ChromeStrips,
 } from "./chrome.js";
+import { makePlayActions, mountPlaybar, type PlaybarHolder } from "./playbar.js";
 import { DragClient, makeDropZoneHitTest, pumpCrossWindowDrag } from "./drag.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "./uibus.js";
 import { wireUiMirror, type UiMirrorWiring } from "./uimirror.js";
@@ -101,7 +104,13 @@ import {
 } from "./theme.js";
 import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
 import { BannerClient, mountBanners, type BannerData } from "./banners.js";
-import { SessionFeed, describeSessionRead } from "./session.js";
+import {
+    SessionControlClient,
+    SessionFeed,
+    defaultSessionScheduler,
+    describeSessionRead,
+    type SessionReadReport,
+} from "./session.js";
 import {
     DaemonSessionState,
     resolveContext,
@@ -413,7 +422,24 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // palette is handed, and what the `data-editor-session` report below is computed from — so a
         // regression that re-froze the session source could not show a live value in the report while
         // serving a frozen one to the palette.
-        const whenContext = await startSession(bridge);
+        //
+        // d1: the play-bar strip is FED from this same feed — the holder is filled by startPlaybar
+        // below, and every session read from then on re-renders the strip. One sink, one poll, two
+        // projections (the when-contexts and the strip), so they can never disagree.
+        const playbarHolder: PlaybarHolder = { current: undefined };
+        const { whenContext, session } = await startSession(
+            bridge,
+            (report: SessionReadReport): void => {
+                playbarHolder.current?.applySession(report.playState, report.simTick);
+            },
+        );
+
+        // --- the play-bar strip (editor-window-chrome d1, target design 02 §7) --------------------
+        // Mounted on the EDITOR path only — the welcome branch returned above, and a2 already hides
+        // the slot there (no session to control). The returned actions are the `play.*` command
+        // handlers startPanels threads into the registry: strip buttons, palette and the d3 menu
+        // all dispatch ONE implementation over `session.control`.
+        const playActions = startPlaybar(bridge, session, playbarHolder, liveRegistry);
 
         // --- the app layer (e05d1) ----------------------------------------------------------------
         // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo
@@ -427,6 +453,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             whenContext,
             chromeStrips,
             liveRegistry,
+            playActions,
         );
 
         // --- the keymap override feed (e07c) ------------------------------------------------------
@@ -496,6 +523,10 @@ async function startPanels(
     // titlebar's palette dispatch (which mounted BEFORE the registry existed) — one holder, so the
     // two consumers can never see different registries.
     liveRegistry: { current: CommandRegistry | undefined },
+    // d1: the real `play.*` command handlers (startPlaybar builds them over `session.control`),
+    // threaded into buildCommandRegistry so the palette's transports write the same path the strip
+    // buttons do.
+    playActions: PlayCommandActions,
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -676,6 +707,7 @@ async function startPanels(
                     windowClient,
                     theme,
                     whenContext,
+                    playActions,
                 );
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
@@ -719,7 +751,12 @@ async function startPanels(
  * can honestly know — and the editor comes up filtering on it. The outcome is mirrored onto
  * `<html data-editor-session>` so a `--dump-dom` repro and DevTools can read WHY.
  */
-async function startSession(bridge: ShellBridge): Promise<() => WhenContext> {
+async function startSession(
+    bridge: ShellBridge,
+    // d1: the strip's update channel — handed to the feed so every completed read (the boot read
+    // and every poll tick) re-renders the play bar from the same sink the when-contexts read.
+    onRead?: (report: SessionReadReport) => void,
+): Promise<{ whenContext: () => WhenContext; session: DaemonSessionState }> {
     const session = new DaemonSessionState();
     // The ONE construction site of the editor's when-context. `editorUi` is still the baseline (the
     // real bus is e08c's; wiring it across windows is e10's), so ONLY the session half moved here.
@@ -731,7 +768,7 @@ async function startSession(bridge: ShellBridge): Promise<() => WhenContext> {
         }
     };
     try {
-        const feed = new SessionFeed(bridge, session);
+        const feed = new SessionFeed(bridge, session, defaultSessionScheduler(), onRead);
         const first = await feed.refresh();
         // Reported from the PROVIDER, not from the read: what a `when` clause would actually see.
         report(`${describeSessionRead(first)}; when playState "${String(whenContext().playState)}"`);
@@ -745,7 +782,42 @@ async function startSession(bridge: ShellBridge): Promise<() => WhenContext> {
             `session feed unavailable: ${error instanceof Error ? error.message : String(error)}`,
         );
     }
-    return whenContext;
+    return { whenContext, session };
+}
+
+/**
+ * Mount the play-bar strip into the a2 slot and build the `play.*` command actions (d1).
+ *
+ * NEVER fatal, like every boot feed: a document without the slot (an older served page, a bare
+ * harness) mounts nothing — reported by the ABSENCE of `data-editor-playbar` — and the returned
+ * actions still work, because the commands write over `session.control` regardless of whether the
+ * strip painted (the palette must not lose its transport because a strip did).
+ */
+function startPlaybar(
+    bridge: ShellBridge,
+    session: DaemonSessionState,
+    holder: PlaybarHolder,
+    liveRegistry: { current: CommandRegistry | undefined },
+): PlayCommandActions {
+    const actions = makePlayActions(new SessionControlClient(bridge), session, holder);
+    try {
+        const slot =
+            typeof document === "undefined" ? null : document.getElementById(EDITOR_PLAYBAR_ID);
+        if (slot !== null) {
+            holder.current = mountPlaybar(slot, {
+                // The same late-bound dispatch the titlebar's palette button uses (a2): before the
+                // command layer is up the press is an honest no-op, never a throw.
+                executeCommand: (commandId: string): void => {
+                    void liveRegistry.current?.execute(commandId);
+                },
+            });
+            // Seed from the sink's current truth (the boot read already landed in startSession).
+            holder.current.applySession(session.playState, session.simTick);
+        }
+    } catch {
+        // Reported by the absence of `data-editor-playbar`; the editor is up and usable.
+    }
+    return actions;
 }
 
 /**
@@ -1208,6 +1280,7 @@ function startCommandLayer(
     windowClient: WindowClient,
     theme: ThemeEngine | undefined,
     whenContext: () => WhenContext,
+    playActions: PlayCommandActions,
 ): CommandRegistry | undefined {
     if (typeof document === "undefined") {
         return undefined;
@@ -1243,6 +1316,9 @@ function startCommandLayer(
             // And `dispatched:false` is the honest outcome for all three of nothing-to-undo, a loud
             // drop, and a refused replay — in every one the file was left exactly as it was.
             sessionActions: makeSessionActions(dispatchPanelCommand),
+            // d1: the four `play.*` transports, writing over `session.control` (startPlaybar built
+            // them) — registered BEFORE the panel source, so incumbent-wins protects the ids.
+            playActions,
             roster,
             // A panel-manifest command dispatches to its panel over the real `panel.command` bridge.
             panelDispatch: dispatchPanelCommand,

@@ -9,7 +9,7 @@
 // synchronous spy, since the shared harness (harness.ts) runs each case with no await. The live CEF
 // palette smoke covers the async execute end to end.
 
-import { assert, assertEqual, type TestCase } from "./harness.js";
+import { assert, assertEqual, noopPlayActions, type TestCase } from "./harness.js";
 import { buildCommandRegistry, CommandRegistry } from "../commands.js";
 import type {
     Command,
@@ -76,6 +76,7 @@ function fullRegistry(editorRecord?: string[]): CommandRegistry {
         contractDispatch: (method) => ({ ok: true, note: method }),
         editorActions: noopEditorActions(editorRecord),
         sessionActions: noopSessionActions(),
+        playActions: noopPlayActions(),
         roster: rosterWithPanelCommand(),
         panelDispatch: noopPanelDispatch,
     });

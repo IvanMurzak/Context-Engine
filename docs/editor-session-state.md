@@ -204,6 +204,7 @@ The panels no longer own selection or play state; they are subscribers and write
 | Scene tree panel | `editor.select` via `scenetree::SelectionGateway` | `selection-changed` | `src/editor/gui/panels/scenetree/` |
 | Playbar | `editor.play\|pause\|stop\|step` via `playbar::PlayControlGateway` | `play-state` | `src/editor/gui/playbar/` |
 | editor-core `when` contexts | — (read-only) | `play-state`, via the Shell's `session.state` relay | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) + `session.ts` (the feed) + `boot.ts` (`startSession`) |
+| editor-core play-bar strip (editor-window-chrome d1) | `session.control {verb}`, relayed by the Shell through the SAME `SessionFeed` writer | `play-state` (+ `simTick`), via the same `session.state` relay | `src/editor/webui/core/src/playbar.ts` + `commands.ts` (`play.*`) + `session_bridge.{h,cpp}` (the relay's write half) |
 
 All three rows are wired. The editor-core row was **half-delivered by e08b** — `DaemonSessionState`
 landed complete, but `boot.ts` still resolved its when-context from a frozen `edit` stub, so the
@@ -216,9 +217,21 @@ Shell (no daemon socket, no attach token), and the e05c bridge accepts no persis
 is no push channel to the renderer at all. So the Shell RELAYS its own `SessionFeed`'s last-known
 state over the privileged bridge method **`session.state`**
 (`src/editor/shell/session_bridge.{h,cpp}`), answering with the daemon's own `play-state` fact shape
-plus `attached` / `generation`; editor-core hands that reply VERBATIM to `applyFact` and re-reads it
+plus `attached` / `generation` / `simTick` (the tick is additive, editor-window-chrome d1 — the
+strip's `t+` timer renders it); editor-core hands that reply VERBATIM to `applyFact` and re-reads it
 on a cheap generation-compare poll, exactly as `themes.get` / `keybindings.get` are read. Echo
 suppression is not repeated there: it already happened Shell-side, in `SessionFeed`.
+
+Since editor-window-chrome d1 the same bridge also carries the WRITE half, **`session.control
+{verb: play|pause|stop|step}`**: the Shell relays each verb to the SAME `SessionFeed` writer the
+docked playbar drives (`SessionFeed::control` -> `PlaybarModel` -> `editor.play|pause|stop|step`),
+so the strip's buttons, the `play.*` palette commands and the dock panel are one implementation with
+one echo-suppression story, and the reply (`{changed, state, simTick, errorCode}`) is the daemon's
+own transport answer relayed through `PlaybarModel::adopt`. Because the daemon's echo of the Shell's
+OWN write is dropped by `SessionFeed`, `session.state`'s `generation` **sums the applied-fact count
+and the playbar model's control generation** (`editor_main.cpp`) — a locally driven transition must
+move the generation, or every `session.state` poller in the process would freeze across exactly the
+transitions the strip drives.
 
 ⚠ **Known staleness (CE #356).** Play state is published as a FACT and there is no `play-state` GET
 verb, so after a daemon RESTART the Shell's — and therefore editor-core's — last-known state can be
@@ -258,9 +271,12 @@ runtime-session adapter that produces play frames lives on in `context_gui_playb
   on a mock channel): the fact dispatch, echo suppression, and the write seams.
 * `editor-shell-test_session_bridge` — the e08d relay: the wire shape editor-core parses, the honest
   unbound / throwing-provider degradations, and the binding over a real `BridgeRouter`.
-* `webui-ts-unit` (`core/src/test/session.test.ts` + `boot.test.ts`) — the e08d browser half: the
-  feed's reply -> sink path, and the BOOT WIRING (the live when-context resolves from the daemon's
-  play state; the case fails if that source is reverted to a stub).
+* `webui-ts-unit` (`core/src/test/session.test.ts` + `boot.test.ts` + `playbar.test.ts`) — the e08d
+  browser half: the feed's reply -> sink path, and the BOOT WIRING (the live when-context resolves
+  from the daemon's play state; the case fails if that source is reverted to a stub). Since d1 also
+  the strip: the `session.control` client, the honest 3->5 `data-play-state` mapping with
+  `compiling`/`error` pinned unreachable, and the full-boot press round trip
+  (strip -> registry -> `session.control` -> reply adopted -> strip re-rendered).
 * `editor-session-panels-t2` (`src/tests/integration/`) — the e08b T2 drill: the REAL Shell panel
   composition against a REAL daemon, with the real `context` binary as the second client. Both
   directions and the no-echo-loop property, which no scripted wire can check.

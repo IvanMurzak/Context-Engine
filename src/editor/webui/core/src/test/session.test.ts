@@ -17,26 +17,39 @@
 import { assert, assertEqual, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
 import {
+    SESSION_CONTROL_METHOD,
+    SESSION_CONTROL_VERB_PAUSE,
+    SESSION_CONTROL_VERB_PLAY,
+    SESSION_CONTROL_VERB_STEP,
+    SESSION_CONTROL_VERB_STOP,
     SESSION_STATE_METHOD,
+    SessionControlClient,
     SessionFeed,
     describeSessionRead,
     type SessionScheduler,
 } from "../session.js";
 import { DaemonSessionState } from "../when.js";
 
-/** Records every method the bundle asked for, and answers from a scripted table. */
+/** Records every method the bundle asked for (params included), and answers from a scripted table. */
 interface Recorder {
     readonly query: BridgeQueryFunction;
     readonly methods: string[];
+    readonly params: unknown[];
 }
 
 type Answer = { result: unknown } | { error: { code: number; message: string; reason: string } };
 
 function recordingQuery(answers: Record<string, Answer>): Recorder {
     const methods: string[] = [];
+    const params: unknown[] = [];
     const query: BridgeQueryFunction = (request: BridgeQuery): number => {
-        const parsed = JSON.parse(request.request) as { id: number; method: string };
+        const parsed = JSON.parse(request.request) as {
+            id: number;
+            method: string;
+            params?: unknown;
+        };
         methods.push(parsed.method);
+        params.push(parsed.params);
         const answer = answers[parsed.method];
         const envelope =
             answer === undefined
@@ -63,7 +76,7 @@ function recordingQuery(answers: Record<string, Answer>): Recorder {
         request.onSuccess(JSON.stringify(envelope));
         return methods.length;
     };
-    return { query, methods };
+    return { query, methods, params };
 }
 
 /** The Shell's reply shape — the daemon's own `play-state` fact plus the two relay facts. */
@@ -189,6 +202,135 @@ export const sessionTests: readonly TestCase[] = [
             assert(!report.changed, "nothing was applied");
             assertEqual(state.playState, "edit", "the sink is untouched");
             assert(report.diagnostic !== "", "and the oddity is reported rather than swallowed");
+        },
+    },
+
+    // ------------------------------------------------------------------ d1: simTick + the strip feed
+    {
+        name: "session d1: the reply's simTick reaches the sink and the read report",
+        run: async () => {
+            const recorder = recordingQuery({
+                [SESSION_STATE_METHOD]: {
+                    result: {
+                        event: "play-state",
+                        state: "playing",
+                        origin: 0,
+                        attached: true,
+                        generation: 2,
+                        simTick: 41,
+                    },
+                },
+            });
+            const state = new DaemonSessionState();
+            const feed = new SessionFeed(new ShellBridge(recorder.query), state, undefined);
+            const report = await feed.refresh();
+            assert(report.changed, "the read moved the sink");
+            assertEqual(state.simTick, 41, "the sink holds the daemon's simTick");
+            assertEqual(report.simTick, 41, "…and the report relays it (the strip's `t+` source)");
+        },
+    },
+    {
+        name: "session d1: onRead is fed EVERY completed read, and a throwing callback is contained",
+        run: async () => {
+            const recorder = recordingQuery({ [SESSION_STATE_METHOD]: reply("paused", true, 1) });
+            const state = new DaemonSessionState();
+            const seen: string[] = [];
+            const feed = new SessionFeed(new ShellBridge(recorder.query), state, undefined, (r) => {
+                seen.push(`${r.playState}@${String(r.simTick)}`);
+                throw new Error("a strip that cannot paint");
+            });
+            const first = await feed.refresh();
+            assert(first.served, "the throwing callback did not cost the read its result");
+            assertEqual(seen, ["paused@0"], "the callback saw the post-apply state");
+
+            // A REFUSED read is reported to the callback too — the strip must be able to render
+            // "unavailable" honestly, not freeze on its last painted state.
+            const refused = new SessionFeed(
+                new ShellBridge(recordingQuery({}).query),
+                state,
+                undefined,
+                (r) => {
+                    seen.push(`served=${String(r.served)}`);
+                },
+            );
+            await refused.refresh();
+            assertEqual(seen.length, 2, "the refusal reached the callback");
+            assertEqual(seen[1], "served=false", "…and says the relay was not served");
+        },
+    },
+    {
+        name: "session.control d1: a served write reports the daemon's answer, verb on the wire",
+        run: async () => {
+            const recorder = recordingQuery({
+                [SESSION_CONTROL_METHOD]: {
+                    result: { changed: true, state: "playing", simTick: 4, errorCode: "" },
+                },
+            });
+            const client = new SessionControlClient(new ShellBridge(recorder.query));
+            const report = await client.send(SESSION_CONTROL_VERB_PLAY);
+            assertEqual(recorder.methods, [SESSION_CONTROL_METHOD], "the strip's one write method");
+            assertEqual(recorder.params, [{ verb: "play" }], "the verb rides the params");
+            assert(report.served, "served");
+            assert(report.changed, "the daemon's `changed` is relayed");
+            assertEqual(report.stateToken, "playing", "the daemon's token is relayed verbatim");
+            assertEqual(report.simTick, 4, "the daemon's simTick is relayed");
+            assertEqual(report.errorCode, "", "no refusal");
+        },
+    },
+    {
+        name: "session.control d1: refusals, odd replies and unknown tokens degrade honestly",
+        run: async () => {
+            // An older Shell that does not route the method: served:false with the reason, no throw.
+            const unserved = new SessionControlClient(
+                new ShellBridge(recordingQuery({}).query),
+            );
+            const missing = await unserved.send(SESSION_CONTROL_VERB_STOP);
+            assert(!missing.served, "an unrouted method is a report, not a throw");
+            assert(missing.diagnostic.includes("bridge.unknown_method"), "…naming the reason");
+
+            // A daemon refusal's reserved code rides through; nothing pretends a state change.
+            const refusing = new SessionControlClient(
+                new ShellBridge(
+                    recordingQuery({
+                        [SESSION_CONTROL_METHOD]: {
+                            result: {
+                                changed: false,
+                                state: "edit",
+                                simTick: 0,
+                                errorCode: "play.not_running",
+                            },
+                        },
+                    }).query,
+                ),
+            );
+            const refusal = await refusing.send(SESSION_CONTROL_VERB_PAUSE);
+            assert(refusal.served && !refusal.changed, "served, nothing moved");
+            assertEqual(refusal.errorCode, "play.not_running", "the daemon's code, verbatim");
+
+            // A state token this build cannot name is still relayed VERBATIM: the sink (when.ts
+            // `applyFact`) is the ONE parser of the vocabulary, and it keeps the last known state
+            // on a token it cannot name (pinned in playbar.test.ts and when.test.ts).
+            const foreign = new SessionControlClient(
+                new ShellBridge(
+                    recordingQuery({
+                        [SESSION_CONTROL_METHOD]: {
+                            result: { changed: true, state: "rewinding", simTick: 9, errorCode: "" },
+                        },
+                    }).query,
+                ),
+            );
+            const unknown = await foreign.send(SESSION_CONTROL_VERB_STEP);
+            assertEqual(unknown.stateToken, "rewinding", "the raw token, for the sink to judge");
+
+            // A non-record reply is tolerated with a diagnostic.
+            const odd = new SessionControlClient(
+                new ShellBridge(
+                    recordingQuery({ [SESSION_CONTROL_METHOD]: { result: "nope" } }).query,
+                ),
+            );
+            const oddReport = await odd.send(SESSION_CONTROL_VERB_PLAY);
+            assert(oddReport.served && !oddReport.changed, "served, nothing applied");
+            assert(oddReport.diagnostic !== "", "the oddity is reported");
         },
     },
 ];
