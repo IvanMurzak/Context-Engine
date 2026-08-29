@@ -1,0 +1,19 @@
+.pipeline/workflows/implement-task/steps/land.md
+  s_e41fb4e3d28067::t_0b455931d2aa68 29-38,43-46,58-90,132-134
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e2641455d5b939d575aa9d1755df3eaa8b1157f7",
+  "prompts": {},
+  "sessions": {
+    "s_e41fb4e3d28067": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a85e025-6cd0-47d4-9438-1cffcaf6f151",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
