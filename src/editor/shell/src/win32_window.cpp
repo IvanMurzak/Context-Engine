@@ -386,6 +386,10 @@ private:
     bool nc_hover_ = false;
     bool nc_pressed_ = false;
     bool tracking_mouse_leave_ = false;
+    // b1: whether a TrackMouseEvent(TME_LEAVE | TME_NONCLIENT) request is outstanding. Separate
+    // from tracking_mouse_leave_ because the two requests are independent per-type trackers, and
+    // WM_NCMOUSELEAVE is never posted without one (the client-only TME_LEAVE does not cover it).
+    bool tracking_nc_mouse_leave_ = false;
 };
 
 LRESULT CALLBACK Win32WindowBackend::wnd_proc(HWND hwnd, UINT message, WPARAM wparam, LPARAM lparam)
@@ -433,6 +437,20 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
             // (client messages resumed), and released there.
             if (event.pointer.action == PointerAction::up && event.pointer.button == MouseButton::left)
             {
+                nc_pressed_ = false;
+            }
+            // ...and a client MOVE with the left button reported UP while a forwarded NC press is
+            // still outstanding means the release landed OFF this window entirely (the consumed NC
+            // press never took capture, so that release was delivered to nobody). Close the
+            // browser's phantom press with the up it never received, ordered before the move.
+            if (nc_pressed_ && event.pointer.action == PointerAction::move &&
+                !event.pointer.modifiers.left_button_down)
+            {
+                ShellEvent up = event;
+                up.pointer.action = PointerAction::up;
+                up.pointer.button = MouseButton::left;
+                up.pointer.click_count = 1;
+                pending_.push_back(up);
                 nc_pressed_ = false;
             }
             if (event.pointer.action == PointerAction::wheel)
@@ -556,11 +574,48 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
         }
         const std::int32_t hit =
             message == WM_NCMOUSELEAVE ? kHtNowhere : static_cast<std::int32_t>(wparam);
+        if (message == WM_NCMOUSEMOVE && nc_pressed_ &&
+            (::GetKeyState(VK_LBUTTON) & 0x8000) == 0)
+        {
+            // The forwarded press's RELEASE landed off this window: the consumed NC press never
+            // took capture, so a release over another window (or the desktop) is delivered to
+            // nobody, and the browser is left holding exactly the phantom pressed button the
+            // decision table exists to prevent — every later forwarded move would re-assert
+            // `left_button_down` from the stale flag. Close it through the same pure table a
+            // delivered WM_NCLBUTTONUP takes ("release wherever it lands"), then route this move
+            // with the reconciled state.
+            const Win32NcMouseDecision closed =
+                translate_win32_nc_mouse(kWmNcLButtonUp, hit, position, current_modifier_state(),
+                                         nc_hover_, nc_pressed_);
+            nc_hover_ = closed.hover;
+            nc_pressed_ = closed.pressed;
+            if (closed.event.has_value())
+            {
+                pending_.push_back(*closed.event);
+            }
+        }
         const Win32NcMouseDecision decision =
             translate_win32_nc_mouse(static_cast<std::uint32_t>(message), hit, position,
                                      current_modifier_state(), nc_hover_, nc_pressed_);
         nc_hover_ = decision.hover;
         nc_pressed_ = decision.pressed;
+        if (message == WM_NCMOUSELEAVE)
+        {
+            tracking_nc_mouse_leave_ = false; // the request is consumed each time it fires
+        }
+        else if (nc_hover_ && !tracking_nc_mouse_leave_)
+        {
+            // WM_NCMOUSELEAVE — the message the stuck-hover synthesis keys on — is only ever
+            // POSTED after an explicit TrackMouseEvent request carrying TME_NONCLIENT (the
+            // kWmMouseLeave re-arm above tracks the CLIENT area only). Without this arm, a pointer
+            // flying OFF the window from a hovered caption control never produces the leave, and
+            // the web-drawn button stays hover-lit forever (ROADMAP risk 3).
+            TRACKMOUSEEVENT track{};
+            track.cbSize = sizeof(track);
+            track.dwFlags = TME_LEAVE | TME_NONCLIENT;
+            track.hwndTrack = hwnd;
+            tracking_nc_mouse_leave_ = ::TrackMouseEvent(&track) != FALSE;
+        }
         if (decision.event.has_value())
         {
             if (decision.event->pointer.action != PointerAction::leave)
