@@ -1,0 +1,229 @@
+src/editor/webui/core/src/banners.ts
+  s_7b2854368302f3::t_acc3a4347615e6 37-41
+  s_7b2854368302f3::t_b11850ba41e7e7 160-171
+src/editor/shell/tests/test_menu_facts.cpp
+  s_7b2854368302f3::t_483f5f815b7f85 1-150
+src/editor/shell/src/banners.cpp
+  s_7b2854368302f3::t_135b023c2de6d8 458-480
+  s_7b2854368302f3::t_f0d5ee14644408 311-326
+src/editor/shell/src/menu_model.cpp
+  s_7b2854368302f3::t_5310e3a97c5066 1-214
+src/editor/webui/core/src/uibus.ts
+  s_7b2854368302f3::t_5c216d694950f8 97-118,133
+docs/shell.md
+  s_7b2854368302f3::t_6026635c287526 340-353
+src/editor/webui/core/src/chrome.ts
+  s_7b2854368302f3::t_bb72d46cfb4426 85-86
+  s_7b2854368302f3::t_1adff9e08b3f2d 261-269
+  s_7b2854368302f3::t_98ce08ee3d8dd5 487
+  s_7b2854368302f3::t_d8c78182a75255 355-362,366-375,377-383
+src/editor/shell/tests/test_window_bridge.cpp
+  s_7b2854368302f3::t_4ac9ad32ba6671 352,364,367,376-380,382-394
+  s_7b2854368302f3::t_f2f8d8d65f8f38 338-340
+  s_7b2854368302f3::t_c9a2518964a8e4 404-462
+  s_7b2854368302f3::t_9c1eb4d5cbab20 630
+  s_7b2854368302f3::t_91ce6a110941bd 589-595
+src/editor/shell/include/context/editor/shell/window_bridge.h
+  s_7b2854368302f3::t_c38dcf8584884c 343-344
+  s_7b2854368302f3::t_61baa54f6af696 305-309,314-317
+  s_7b2854368302f3::t_74ae701ad0e787 383-385,388-395
+  s_7b2854368302f3::t_ea8fdc370ca61d 495,503-504
+  s_7b2854368302f3::t_752cb6e1631a36 450-454
+  s_7b2854368302f3::t_7fd8818f3bbe01 89-93,97-110
+  s_85d9ac5d33d9be::t_e36fd5b50c22b2 111,396
+src/editor/webui/core/src/window.ts
+  s_7b2854368302f3::t_c963051558d2cf 434-436,438,443
+  s_7b2854368302f3::t_cb25d7e5d22917 419-433,437,439-442,444
+  s_7b2854368302f3::t_1c509473576cba 47-49,53-62
+  s_7b2854368302f3::t_3d05952808f02c 213-220
+  s_85d9ac5d33d9be::t_29bd927f9c2b4b 63,212
+src/editor/shell/include/context/editor/shell/banners.h
+  s_7b2854368302f3::t_d28ccf2f8c6698 73-81
+  s_7b2854368302f3::t_22fca5b4bf95d0 227-229
+  s_7b2854368302f3::t_176f96c8fdfccf 281
+  s_7b2854368302f3::t_f5fcbfc8dae9c2 293
+  s_7b2854368302f3::t_977e500cd7b4c3 104-107
+  s_7b2854368302f3::t_abef7fbc08c594 258-260
+  s_7b2854368302f3::t_4500d9351e526e 273
+src/editor/webui/core/src/session.ts
+  s_7b2854368302f3::t_e6417899dfe6ee 54-63
+  s_7b2854368302f3::t_7a7f82353081dc 53,185-204
+  s_7b2854368302f3::t_9c2c7cfe370a61 215,222-251
+  s_85d9ac5d33d9be::t_59164036c7f54d 252-253
+src/editor/shell/CMakeLists.txt
+  s_7b2854368302f3::t_64f5bb9aca5b6a 278-283
+  s_7b2854368302f3::t_cb5c79e2409a11 77-78
+src/editor/webui/core/src/test/main.ts
+  s_7b2854368302f3::t_6126d203093271 32
+  s_7b2854368302f3::t_d1bef6f7e8b932 74
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_32403e6c54ebaf 719-723
+  s_7b2854368302f3::t_e73d5fbc93e7e5 932-1051
+  s_7b2854368302f3::t_88e8a27d51ef53 1543-1545
+  s_7b2854368302f3::t_cd6c374311ddb3 1382-1387
+  s_7b2854368302f3::t_6fc3fc613d5554 501-516,531,533-538
+  s_7b2854368302f3::t_efc0f6a9a2957f 1335-1339
+  s_7b2854368302f3::t_ccbe2db232db44 1584-1587
+  s_7b2854368302f3::t_0de802d917c7d5 122
+  s_7b2854368302f3::t_374a2b10db47cf 618-621
+  s_7b2854368302f3::t_95e6c8206caa1e 64,71-79
+  s_7b2854368302f3::t_91421ba1209e32 802
+  s_7b2854368302f3::t_cac0d4c36b3fe0 819
+src/editor/webui/core/src/test/uibus.test.ts
+  s_7b2854368302f3::t_5fee4825545010 184-187,189-190
+  s_7b2854368302f3::t_52595ec1dc040a 161
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_7b2854368302f3::t_d774c60e9aa14f 305-317
+  s_2b64e2b4bfc410::t_3c68d5fa0e7ccd 303-304
+src/editor/shell/src/cocoa_window.mm
+  s_7b2854368302f3::t_d6e054fca561d6 828,1274-1301
+  s_7b2854368302f3::t_4e84966a1a350d 802-804
+  s_7b2854368302f3::t_8114a25c5d43a5 196-225
+  s_7b2854368302f3::t_d533b4bd33656a 602-611
+  s_7b2854368302f3::t_3e570a93185cd3 741-752,757-758,764-801,805-827
+  s_7b2854368302f3::t_a7f237a9ccfa55 570-577
+  s_7b2854368302f3::t_acfc2202fe2455 308-443
+  s_7b2854368302f3::t_447c336053abc6 40-41,50,52,54
+  s_2b64e2b4bfc410::t_b85ea0e1a1dfa3 829
+src/editor/shell/include/context/editor/shell/menu_facts.h
+  s_7b2854368302f3::t_f5867dc6ff1d00 1-102
+src/editor/shell/src/session_bridge.cpp
+  s_7b2854368302f3::t_672e540ff94ff3 128-154
+  s_7b2854368302f3::t_aaee2af30e2153 5,8
+  s_7b2854368302f3::t_6a442d82ddf975 180-208
+  s_7b2854368302f3::t_d2e017c0b7d35c 36-40
+src/editor/webui/core/src/menu.ts
+  s_7b2854368302f3::t_879b17976367f5 549-550,552
+  s_7b2854368302f3::t_296e6f35e1c411 537-540
+  s_7b2854368302f3::t_3a1639a5dbf1b0 993-994
+  s_7b2854368302f3::t_53dd3c61c63f48 1103-1106
+  s_7b2854368302f3::t_96944873a1a238 1160
+  s_7b2854368302f3::t_16fb67885d80dc 1-536,541-548,551,553-992,995-1102,1107-1159,1161-1333
+src/editor/shell/include/context/editor/shell/session_bridge.h
+  s_7b2854368302f3::t_c6afc12bcc2ed3 114-132
+  s_7b2854368302f3::t_c22055488b64a5 175-188
+  s_7b2854368302f3::t_9f0e6a35210a8f 198-202
+  s_7b2854368302f3::t_50c0870e0cd4a8 226-230
+  s_7b2854368302f3::t_bc9fdea7d99cb9 57
+  s_7b2854368302f3::t_e6e556de57b2d8 245-249
+  s_7b2854368302f3::t_729a01fe71f782 262-264,268,271
+src/editor/shell/tests/test_session_bridge.cpp
+  s_7b2854368302f3::t_ce23ac001f43b5 28,32-33
+  s_7b2854368302f3::t_6fc0d56ea401d8 331-427,443
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_7b2854368302f3::t_d352ce65c742a8 313-320
+src/editor/shell/src/menu_facts.cpp
+  s_7b2854368302f3::t_b580b2593a58d2 1-48
+src/editor/shell/cef/src/cef_shell_restore_smoke.cpp
+  s_7b2854368302f3::t_4caaf3a20e63bc 413-420
+src/editor/webui/core/src/test/menu.test.ts
+  s_7b2854368302f3::t_50a31794398f04 1-63,65-150,152-700,705-1005
+  s_7b2854368302f3::t_5cefb6c78d84b5 701-704
+  s_7b2854368302f3::t_3f7e0d105601e2 151
+  s_7b2854368302f3::t_a61c0bafb7aebd 64
+src/editor/webui/core/src/commands.ts
+  s_7b2854368302f3::t_c6320d4f96af77 642-649
+  s_7b2854368302f3::t_28f16aefbb264c 676-680
+src/editor/shell/tests/test_banners.cpp
+  s_7b2854368302f3::t_89705359d734ff 672-675
+  s_7b2854368302f3::t_76c607a7ef7cd9 718
+  s_7b2854368302f3::t_40bde50c196886 478-517
+  s_7b2854368302f3::t_c4b17b03b0c754 631-637
+src/editor/shell/panels/tests/test_session_feed.cpp
+  s_7b2854368302f3::t_7a4f15ba863a34 368-372
+  s_7b2854368302f3::t_e2cba1b94ca02f 330-338
+  s_7b2854368302f3::t_30c881239afd73 35
+  s_7b2854368302f3::t_556b81a43b95a4 48
+src/editor/shell/app/editor_main.cpp
+  s_7b2854368302f3::t_e69392268a707c 619-625
+  s_7b2854368302f3::t_07329ba7b31404 922-946
+  s_7b2854368302f3::t_5af971d7ce524e 299-302,304,306
+  s_7b2854368302f3::t_3ff227ecbdd914 892-897
+  s_7b2854368302f3::t_4697f2c9a0f754 19
+  s_7b2854368302f3::t_9241230085a4af 25-26
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_7b2854368302f3::t_4e3ffd3d5336e6 480-482
+  s_7b2854368302f3::t_37b9eefd02b2c2 748-757
+  s_7b2854368302f3::t_500e115da5ce81 815-822
+  s_7b2854368302f3::t_160f8a0407127f 508-510
+src/editor/webui/app/app.css
+  s_7b2854368302f3::t_aa749dc5db8514 223-393
+  s_7b2854368302f3::t_75b858538826db 182-187,190
+src/editor/shell/include/context/editor/shell/cocoa_menu.h
+  s_7b2854368302f3::t_58e394adcc1e10 1-64
+src/editor/shell/src/window_bridge.cpp
+  s_7b2854368302f3::t_6dd19927316b04 7
+  s_7b2854368302f3::t_1705c9198b0995 341,343-358,360-381
+  s_7b2854368302f3::t_0c9384b82bac52 159-163
+  s_7b2854368302f3::t_16339030080de6 627-640,646-659
+  s_2b64e2b4bfc410::t_ce26fdf5c56a12 660
+src/editor/shell/smoke/shell_cocoa_smoke_main.cpp
+  s_7b2854368302f3::t_804ac723f3bb55 59,61
+  s_7b2854368302f3::t_fe92868791331c 1021-1120
+tools/check_webui_assets.py
+  s_7b2854368302f3::t_901b1115c2da38 352-356
+  s_7b2854368302f3::t_0969fccb06a102 230-233
+  s_7b2854368302f3::t_0dbb77617648c0 289-292
+  s_7b2854368302f3::t_5b0869dabea14a 327-332
+docs/editor-ui-bus.md
+  s_7b2854368302f3::t_0c250f3fed8510 51-52
+  s_7b2854368302f3::t_8b21f6ac3e9e61 30,33,36-38,42-44
+  s_7b2854368302f3::t_4f0f55a874f2e4 126-132
+src/editor/shell/include/context/editor/shell/menu_model.h
+  s_7b2854368302f3::t_a9041a7d72cb32 1-114
+src/editor/shell/src/cocoa_window.cpp
+  s_7b2854368302f3::t_10f2b6e2cd706c 19
+  s_7b2854368302f3::t_f25408795fea83 52-74
+src/editor/shell/tests/test_menu_model.cpp
+  s_7b2854368302f3::t_32a62fe7de4c25 1-249
+src/editor/shell/cef/src/cef_shell_drag_smoke.cpp
+  s_7b2854368302f3::t_0ad1f208cfa199 185-188,214-215
+src/editor/shell/cef/src/cef_shell_iframe_smoke.cpp
+  s_7b2854368302f3::t_7e7fa65e06ae72 569-571,576-578
+src/editor/shell/cef/src/cef_shell_inspector_fanout_smoke.cpp
+  s_7b2854368302f3::t_e979adbde293d5 343-346,352-353
+src/editor/shell/cef/src/cef_shell_multiwindow_smoke.cpp
+  s_7b2854368302f3::t_244b9ee4d21548 205-208,216-217
+src/editor/shell/cef/src/cef_shell_palette_smoke.cpp
+  s_7b2854368302f3::t_03773fbfaaec64 394-396,403-405
+src/editor/shell/cef/src/cef_shell_settings_smoke.cpp
+  s_7b2854368302f3::t_7a5c23a663c944 361-363,370-372
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_7b2854368302f3::t_38f80419a1d48d 197-200,257-258
+src/editor/shell/cef/src/cef_shell_uimirror_smoke.cpp
+  s_7b2854368302f3::t_d7deeeff3d15da 182-185,214-215
+tools/tests/test_check_webui_assets.py
+  s_7b2854368302f3::t_a5ffa34613cb9d 569-570,594-597,705-706,740-741,748-752,813,838
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "7a91b1b1c38828ab967732657cd173bc8a30305d",
+  "prompts": {},
+  "sessions": {
+    "s_2b64e2b4bfc410": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00f09d59-c437-4bad-8764-2e7ced0ebc74",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_85d9ac5d33d9be": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "2d3f13fe-302d-47f0-9d10-273cbb49779c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
