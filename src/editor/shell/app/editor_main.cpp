@@ -16,11 +16,14 @@
 #include "context/editor/shell/browser.h"
 #include "context/editor/shell/chrome_facts.h" // a1: a maximized flip -> an editor.ui chrome fact
 #include "context/editor/shell/cocoa_chrome.h" // c1: the macOS hybrid mode + measured inset query
+#include "context/editor/shell/cocoa_menu.h"   // d3: the native NSMenu install (honest false off macOS)
 #include "context/editor/shell/cross_window_drag.h"
 #include "context/editor/shell/daemon_lifecycle.h"
 #include "context/editor/shell/editor_state_bridge.h"
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/keybindings_bridge.h"
+#include "context/editor/shell/menu_facts.h" // d3: a native menu activation -> an editor.ui fact
+#include "context/editor/shell/menu_model.h" // d3: the published menu model's fail-closed parse
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/package_sessions.h" // e13c-1: per-package BASELINE daemon sessions
@@ -293,10 +296,14 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
             window->backend().set_maximized(next);
             return next;
         });
+    // d3: the focus handler is TARGET-aware now (the Window menu's window list — window_bridge.h
+    // § kWindowFocusMethod). The bridge resolves an absent wire id to `self_id`, so the a1
+    // self-focus callers (the titlebar controls) behave exactly as before; a menu entry names a
+    // peer, and an id no live window answers is the honest false.
     wb.bind_focus(
-        [&manager, self_id]() -> bool
+        [&manager](shell::WindowId target) -> bool
         {
-            shell::EditorWindow* window = manager.window(self_id);
+            shell::EditorWindow* window = manager.window(target);
             if (window == nullptr)
                 return false;
             window->backend().request_activation();
@@ -609,6 +616,13 @@ int main(int argc, char** argv)
     manager.on_chrome_maximized(
         [&chrome_relay](shell::WindowId id, bool maximized)
         { (void)chrome_relay.publish_maximized(id, maximized); });
+    // d3: the menu-activation relay — a native NSMenu item activation becomes an `editor.ui.menu`
+    // fact in the primary window's mirror queue, which editor-core drains and executes through the
+    // ONE e07b registry (menu_facts.h: no second dispatch system). Same lifetime rationale as the
+    // chrome relay above: the Cocoa menu's activation callback captures it by reference, and menu
+    // activations only ever fire from the owner loop's pump.
+    shell::MenuActivationRelay menu_relay;
+    menu_relay.bind_store(&mirror_store);
     shell::panels::BuiltinPanels builtin = shell::panels::install_builtin_panels(panel_host);
     // A refused write (an L-30 drop, or a write path that said no) now reaches the human: the relay
     // turns it into an `editor.ui` fact in EVERY live window, where editor-core's notification host
@@ -875,6 +889,12 @@ int main(int argc, char** argv)
         session_bridge.bind_control(
             [session_feed](const std::string& verb) -> shell::SessionControlOutcome
             { return shell::panels::session_control(*session_feed, verb); });
+        // d3: the selection write — `selection.clear`'s relay to the feed's `editor.select` writer
+        // (the same proven chain, echo suppression included). With no feed the bridge's own unbound
+        // degrade answers the honest `applied:false`.
+        session_bridge.bind_select(
+            [session_feed](const std::vector<std::string>& ids) -> shell::SessionSelectOutcome
+            { return shell::panels::session_select(*session_feed, ids); });
     }
     if (!session_bridge.install(bridge))
     {
@@ -899,6 +919,31 @@ int main(int argc, char** argv)
     // bind the method routes but answers an empty batch forever — which is how a loud write notice
     // would reach the browser side and be silently discarded one hop short of the human.
     window_bridge.bind_ui_mirror_store(&mirror_store);
+    // d3: the menu publish — bound on WINDOW 0 ONLY, because the model describes the app's one menu
+    // bar and only the primary window's editor-core publishes it (secondary windows render the
+    // compact chrome, no menu — 02 §9). The handler parses the model (fail-closed, menu_model.h)
+    // and offers it to the Cocoa backend; on Windows/Linux `cocoa_install_menu` answers its honest
+    // false and the publish degrades to `accepted:false` — the web menubar in the titlebar strip IS
+    // the rendering there. An activated native item routes through the relay above and back to
+    // editor-core's ONE registry over the existing ui.mirror poll.
+    window_bridge.bind_menu(
+        [&manager, &menu_relay](const contract::Json& model_json) -> bool
+        {
+            const std::optional<shell::MenuModel> model = shell::parse_menu_model(model_json);
+            if (!model.has_value())
+            {
+                return false; // unreachable through the bridge (it validates first) — belt-and-braces
+            }
+            shell::EditorWindow* window = manager.window(shell::kPrimaryWindowId);
+            if (window == nullptr)
+            {
+                return false;
+            }
+            return shell::cocoa_install_menu(
+                window->backend(), *model,
+                [&menu_relay](const std::string& command_id)
+                { (void)menu_relay.publish_activation(shell::kPrimaryWindowId, command_id); });
+        });
     if (!window_bridge.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the window bridge surface\n");

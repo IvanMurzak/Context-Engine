@@ -227,6 +227,10 @@ BANNER_CONSTANTS = (
     ("daemon.linkState", "banners.h", "kDaemonLinkStateMethod", "DAEMON_LINK_STATE_METHOD"),
     ("daemon ownership none", "banners.h", "kDaemonOwnershipNone", "DAEMON_OWNERSHIP_NONE"),
     ("daemon ownership owned", "banners.h", "kDaemonOwnershipOwned", "DAEMON_OWNERSHIP_OWNED"),
+    # editor-window-chrome d3: the Help > Documentation click-through — the same opener seam as
+    # update.openDownloads, pointed at the docs page. Same drift hazard: a rename leaves the menu
+    # item asking for a method the Shell no longer routes, and Documentation quietly does nothing.
+    ("help.openDocs", "banners.h", "kHelpOpenDocsMethod", "HELP_OPEN_DOCS_METHOD"),
 )
 
 # The M9 e07c keybindings surface (design 05 §6 / 03 §6), whose method name lives in
@@ -282,6 +286,10 @@ SESSION_CONSTANTS = (
      "SESSION_CONTROL_VERB_STOP"),
     ("session control verb step", "session_bridge.h", "kSessionControlVerbStep",
      "SESSION_CONTROL_VERB_STEP"),
+    # editor-window-chrome d3: the SELECTION write (`selection.clear`'s relay). The session.control
+    # failure mode exactly: a drift refuses every activation of a menu item that looks perfectly
+    # wired, with both builds green.
+    ("session.select", "session_bridge.h", "kSessionSelectMethod", "SESSION_SELECT_METHOD"),
 )
 
 # The M9 e10b WINDOW-MANAGEMENT surface (design 03 §1 / §7, 04 §2), whose vocabulary lives in
@@ -316,6 +324,12 @@ WINDOW_CONSTANTS = (
      "WINDOW_APPEARANCE_DARK"),
     ("window appearance light", "window_bridge.h", "kWindowAppearanceLight",
      "WINDOW_APPEARANCE_LIGHT"),
+    # editor-window-chrome d3 (menu structure 03 / target 02 §4): the menu publish boot sends the
+    # ONE declarative model over so the Cocoa backend can build the native NSMenu bar. The family's
+    # usual failure mode with a platform-shaped twist: a drift refuses a call boot makes at BOOT —
+    # tripping every live smoke's `refused() == 0` — while the ONLY user-visible symptom would be
+    # macOS quietly losing its menu bar (the web menubar keeps working everywhere anyone looks).
+    ("menu.publish", "window_bridge.h", "kMenuPublishMethod", "MENU_PUBLISH_METHOD"),
 )
 
 # The editor-window-chrome a1 CHROME CONTRACT (target design 02 §1): the `chrome.state` boot read
@@ -335,6 +349,11 @@ CHROME_CONSTANTS = (
     ("chrome window secondary", "window_bridge.h", "kChromeWindowSecondary",
      "CHROME_WINDOW_SECONDARY"),
     ("editor.ui chrome topic", "chrome_facts.h", "kUiTopicChrome", "UI_TOPIC_CHROME"),
+    # editor-window-chrome d3: the menu-activation fact topic (menu_facts.h <-> uibus.ts). The
+    # chrome topic's failure mode exactly: nothing refuses — a drift makes `receiveMirrored` refuse
+    # every activation as an unknown mirrored envelope, and the native menu silently stops doing
+    # anything, restored by a typo with both builds green.
+    ("editor.ui menu topic", "menu_facts.h", "kUiTopicMenu", "UI_TOPIC_MENU"),
 )
 
 # The M9 e10c CROSS-WINDOW DRAG surface (design 04 §2), whose C++ vocabulary lives on the same

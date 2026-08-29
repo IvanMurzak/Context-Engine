@@ -16,6 +16,7 @@
 #if !defined(__APPLE__)
 
 #include "context/editor/shell/cocoa_chrome.h"
+#include "context/editor/shell/cocoa_menu.h"
 
 #include <memory>
 #include <string>
@@ -44,6 +45,29 @@ bool cocoa_hybrid_chrome(const IWindowBackend& /*backend*/, CocoaChromeState& /*
 void cocoa_bind_caption_regions(IWindowBackend& /*backend*/, const RegionMap* /*regions*/) {}
 
 bool cocoa_caption_stats(const IWindowBackend& /*backend*/, CocoaCaptionStats& /*out*/)
+{
+    return false;
+}
+
+// The d3 native-menu seam (cocoa_menu.h), same linkable-symbol rule as everything above: off macOS
+// no backend can be the Cocoa one, so the install and the programmatic perform REFUSE and the stats
+// query answers false — behaviour tests/test_menu_facts.cpp asserts as a VALUE on every leg. That
+// refusal is load-bearing for the composition root: `menu.publish`'s handler calls this
+// unconditionally, and the honest false is what turns a publish on Windows/Linux into the
+// `accepted:false` degrade (the web menubar is the rendering there; nothing native exists to feed).
+
+bool cocoa_install_menu(IWindowBackend& /*backend*/, const MenuModel& /*model*/,
+                        MenuActivationCallback /*on_activate*/)
+{
+    return false;
+}
+
+bool cocoa_menu_stats(const IWindowBackend& /*backend*/, CocoaMenuStats& /*out*/)
+{
+    return false;
+}
+
+bool cocoa_menu_perform(IWindowBackend& /*backend*/, const std::string& /*command_id*/)
 {
     return false;
 }

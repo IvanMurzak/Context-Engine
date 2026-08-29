@@ -335,7 +335,9 @@ void window_controls_unbound_degrade_to_accepted_false_and_still_count()
     const Json toggled = bridge.toggle_maximize();
     CHECK(toggled.at("accepted").as_bool() == false);
     CHECK(toggled.at("maximized").as_bool() == false);
-    CHECK(bridge.focus().at("accepted").as_bool() == false);
+    std::string focus_error;
+    CHECK(bridge.focus(Json::object(), focus_error).at("accepted").as_bool() == false);
+    CHECK(focus_error.empty());
     CHECK(bridge.minimizes() == 1);
     CHECK(bridge.maximize_toggles() == 1);
     CHECK(bridge.focus_requests() == 1);
@@ -347,6 +349,7 @@ void window_controls_reach_their_handlers()
     WindowBridge bridge(kPrimaryWindowId, store);
     int minimized = 0;
     int focused = 0;
+    WindowId focus_target = kInvalidWindowId;
     bridge.bind_minimize(
         [&minimized]() -> bool
         {
@@ -358,9 +361,10 @@ void window_controls_reach_their_handlers()
     // both members.
     bridge.bind_toggle_maximize([]() -> std::optional<bool> { return true; });
     bridge.bind_focus(
-        [&focused]() -> bool
+        [&focused, &focus_target](WindowId target) -> bool
         {
             ++focused;
+            focus_target = target;
             return true;
         });
 
@@ -369,8 +373,32 @@ void window_controls_reach_their_handlers()
     const Json toggled = bridge.toggle_maximize();
     CHECK(toggled.at("accepted").as_bool());
     CHECK(toggled.at("maximized").as_bool());
-    CHECK(bridge.focus().at("accepted").as_bool());
+    std::string focus_error;
+    // d3: an ABSENT windowId resolves to SELF — the a1 behaviour, unchanged for every existing
+    // caller (the titlebar's focus button sends no params).
+    CHECK(bridge.focus(Json::object(), focus_error).at("accepted").as_bool());
+    CHECK(focus_error.empty());
     CHECK(focused == 1);
+    CHECK(focus_target == kPrimaryWindowId);
+    // d3: a PRESENT windowId targets the named peer (the Window menu's window-list entries).
+    Json peer = Json::object();
+    peer.set("windowId", Json(static_cast<std::uint64_t>(4)));
+    CHECK(bridge.focus(peer, focus_error).at("accepted").as_bool());
+    CHECK(focus_error.empty());
+    CHECK(focus_target == 4);
+    // d3: a present-but-non-numeric id is REFUSED, never silently retargeted at self.
+    Json malformed = Json::object();
+    malformed.set("windowId", Json(std::string("four")));
+    (void)bridge.focus(malformed, focus_error);
+    CHECK(focus_error == kErrWindowBadParams);
+    CHECK(focused == 2); // the malformed ask never reached the handler
+    // d3: a FRACTIONAL id is refused too — it must not silently truncate onto a window nobody named.
+    focus_error.clear();
+    Json fractional = Json::object();
+    fractional.set("windowId", Json(2.5));
+    (void)bridge.focus(fractional, focus_error);
+    CHECK(focus_error == kErrWindowBadParams);
+    CHECK(focused == 2); // the fractional ask never reached the handler either
 
     // A handler that answers "no window" (a retired session's registry lookup) is the SAME honest
     // degrade as unbound — accepted:false, not an error.
@@ -378,6 +406,65 @@ void window_controls_reach_their_handlers()
     const Json refused_toggle = bridge.toggle_maximize();
     CHECK(refused_toggle.at("accepted").as_bool() == false);
     CHECK(refused_toggle.at("maximized").as_bool() == false);
+}
+
+void menu_publish_is_total_and_reaches_its_handler()
+{
+    // d3 — the menu publish (window_bridge.h § menu_publish). The OUTER shape is fail-closed
+    // (anything but `{menus: [...]}` is kErrWindowBadParams — a malformed publish is a loud wiring
+    // bug, never a silently-empty menu bar); a well-formed one counts, tallies its command items,
+    // and reaches the bound handler verbatim.
+    WindowMoveStore store;
+    WindowBridge bridge(kPrimaryWindowId, store);
+
+    std::string error_code;
+    // Malformed shapes fail closed and are NOT counted.
+    (void)bridge.menu_publish(Json::object(), error_code);
+    CHECK(error_code == kErrWindowBadParams);
+    error_code.clear();
+    Json non_array = Json::object();
+    non_array.set("menus", Json(std::string("not an array")));
+    (void)bridge.menu_publish(non_array, error_code);
+    CHECK(error_code == kErrWindowBadParams);
+    error_code.clear();
+    CHECK(bridge.menu_publishes() == 0);
+
+    // A well-formed model: routed, counted (bound or not — the ten-smoke discipline), tallied.
+    Json items = Json::array();
+    Json about = Json::object();
+    about.set("type", Json(std::string("command")));
+    about.set("id", Json(std::string("help.about")));
+    about.set("label", Json(std::string("About")));
+    items.push_back(std::move(about));
+    Json help = Json::object();
+    help.set("label", Json(std::string("Help")));
+    help.set("items", std::move(items));
+    Json menus = Json::array();
+    menus.push_back(std::move(help));
+    Json model = Json::object();
+    model.set("menus", std::move(menus));
+
+    // Unbound: the honest accepted:false — every non-macOS composition root and every sibling smoke.
+    Json out = bridge.menu_publish(model, error_code);
+    CHECK(error_code.empty());
+    CHECK(out.at("accepted").as_bool() == false);
+    CHECK(bridge.menu_publishes() == 1);
+    CHECK(bridge.last_menu_commands() == 1);
+
+    // Bound: the model reaches the handler VERBATIM (the handler re-parses through menu_model.h),
+    // and its answer is relayed as `accepted`.
+    std::size_t handled = 0;
+    bridge.bind_menu(
+        [&handled](const Json& published) -> bool
+        {
+            ++handled;
+            return published.at("menus").size() == 1;
+        });
+    out = bridge.menu_publish(model, error_code);
+    CHECK(error_code.empty());
+    CHECK(out.at("accepted").as_bool());
+    CHECK(handled == 1);
+    CHECK(bridge.menu_publishes() == 2);
 }
 
 void appearance_report_is_total_and_reaches_its_handler()
@@ -506,6 +593,13 @@ void every_method_binds_and_serves_over_a_real_router()
     Json bad_appearance = dispatch(router, kWindowSetAppearanceMethod, Json::object(), refused);
     CHECK(!refused);
     CHECK(bad_appearance.at("data").at("reason").as_string() == std::string(kErrWindowBadParams));
+    // d3 — the menu publish routes (the ten-smoke rule's structural half, exactly like the a1
+    // block above): a well-formed model is never a refusal, unbound answers the honest false.
+    Json menu_model = Json::object();
+    menu_model.set("menus", Json::array());
+    out = dispatch(router, kMenuPublishMethod, menu_model, refused);
+    CHECK(!refused);
+    CHECK(out.at("accepted").as_bool() == false); // unbound: no native menu host in this build
 
     // A malformed tear-out is a HANDLER-level bridge error (an error RESPONSE editor-core's
     // ShellBridge.call rejects on), NOT a ROUTER refusal: the envelope was well-formed, so
@@ -540,6 +634,7 @@ int main()
     chrome_mode_tokens_cover_the_closed_enum();
     window_controls_unbound_degrade_to_accepted_false_and_still_count();
     window_controls_reach_their_handlers();
+    menu_publish_is_total_and_reaches_its_handler();
     appearance_report_is_total_and_reaches_its_handler();
     every_method_binds_and_serves_over_a_real_router();
     SHELL_TEST_MAIN_END();

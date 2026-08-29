@@ -54,6 +54,7 @@
 #include <cstdint>
 #include <functional>
 #include <string>
+#include <vector>
 
 namespace context::editor::shell
 {
@@ -110,6 +111,25 @@ inline constexpr const char* kSessionControlVerbStep = "step";
 // surfacing loudly, never a user-reachable state.
 inline constexpr const char* kSessionControlBadVerbCode = "session.bad_verb";
 
+// The SELECTION write (editor-window-chrome d3, menu structure 03): the ONE bridge method the
+// `selection.clear` menu/palette command dispatches — `session.select {ids: [...]}`, relayed to the
+// surviving `SessionFeed` selection writer (the proven e08b `editor.select` chain, `origin` echo
+// suppression included), exactly as `session.control` relays the transport verbs. Today's only
+// production caller sends `ids: []` (clear); the array shape is the daemon's own (`editor.select`
+// takes the whole selection, replace-mode), so the surface needs no second design when e11 picking
+// grows the Selection menu. Grep-stable, MIRRORED by the TS side (session.ts
+// `SESSION_SELECT_METHOD`) and cross-checked by the `webui-panel-contract` gate like its siblings.
+//
+// ⚠ THE SMOKES: registered by `install()` alongside `session.state` / `session.control`, so every
+// live CEF smoke that installs this bridge serves it with no per-smoke wiring — and each smoke
+// asserts the method routes (`has_method`), the window_bridge.h ten-smoke rule.
+inline constexpr const char* kSessionSelectMethod = "session.select";
+
+// The bridge-local error code for a `session.select` whose `ids` is missing, not an array, or
+// carries a non-string entry — fail-closed like the verb check above: editor-core only ever sends a
+// string array, so this is a wiring bug surfacing loudly, never silently applied as "clear".
+inline constexpr const char* kSessionSelectBadIdsCode = "session.bad_ids";
+
 // What the Shell knows about the live session right now.
 struct SessionStateSnapshot
 {
@@ -152,6 +172,20 @@ struct SessionControlOutcome
     std::uint64_t sim_tick = 0;
 };
 
+// One `session.select` outcome (editor-window-chrome d3), as the composition root's handler reports
+// it — the `SessionFeed::request_selection` shape, relayed rather than re-derived:
+//   * `applied`  — the daemon answered the write (its reply `ids` is the post-write selection —
+//                  including on a no-op clear of an already-empty selection).
+//   * `applied:false` deliberately covers all three of "no daemon link", "no handler bound" and "a
+//     refused write" — the feed itself reports only nullopt for every one (session_feed.cpp), and
+//     inventing a distinction here would be a second truth.
+//   * `ids`      — the daemon's post-write selection when applied; empty otherwise.
+struct SessionSelectOutcome
+{
+    bool applied = false;
+    std::vector<std::string> ids;
+};
+
 class SessionBridge
 {
 public:
@@ -161,6 +195,11 @@ public:
     // discipline as the Provider); the T1 suite binds a scripted one. The handler receives ONLY a
     // verb from the vocabulary above — the bridge validates before dispatching.
     using ControlHandler = std::function<SessionControlOutcome(const std::string& verb)>;
+    // The `session.select` relay (d3). The composition root binds a lambda over the Shell's
+    // `SessionFeed` selection writer (the `panels::session_select` seam); the T1 suite binds a
+    // scripted one. The handler receives an ALREADY-validated string array — the bridge fails a
+    // malformed `ids` closed before dispatching (kSessionSelectBadIdsCode).
+    using SelectHandler = std::function<SessionSelectOutcome(const std::vector<std::string>& ids)>;
 
     SessionBridge() = default;
 
@@ -184,6 +223,11 @@ public:
     // holds with no daemon anywhere in sight.
     void bind_control(ControlHandler handler);
 
+    // Point the SELECTION write at the live session (d3). An EMPTY handler (the default, and what
+    // the CEF smokes install) is not an error: `session.select` then answers the honest
+    // `applied:false` — nothing to write to — rather than refusing, the `bind_control` discipline.
+    void bind_select(SelectHandler handler);
+
     // The current snapshot. A provider that THROWS is contained here and degrades to the boot
     // baseline: a session read must never be able to take the renderer's boot down with it.
     [[nodiscard]] SessionStateSnapshot snapshot() const;
@@ -198,6 +242,11 @@ public:
     // path, exactly like `snapshot()`.
     [[nodiscard]] contract::Json control_json(const std::string& verb);
 
+    // One `session.select` write, resolved to the reply object `{applied, ids}`. The ids MUST
+    // already be validated (install() does); an unbound or THROWING handler degrades to the honest
+    // `applied:false` — same containment rationale as `control_json`.
+    [[nodiscard]] contract::Json select_json(const std::vector<std::string>& ids);
+
     // Bind `session.state` AND `session.control` on `router`. False when either binding was refused
     // (a name collision), which the caller must treat as a wiring bug rather than ignore.
     [[nodiscard]] bool install(BridgeRouter& router);
@@ -210,11 +259,16 @@ public:
     // one still answers "nothing to drive") — the same wiring evidence for the write half.
     [[nodiscard]] std::size_t controls() const { return controls_; }
 
+    // How many well-formed `session.select` writes were served (d3) — same discipline as above.
+    [[nodiscard]] std::size_t selects() const { return selects_; }
+
 private:
     Provider provider_;
     ControlHandler control_;
+    SelectHandler select_;
     std::size_t reads_ = 0;
     std::size_t controls_ = 0;
+    std::size_t selects_ = 0;
 };
 
 } // namespace context::editor::shell

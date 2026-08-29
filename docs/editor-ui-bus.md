@@ -27,26 +27,29 @@ so a consumer written against one reads the other:
 
 * **`seq`** — monotonic and totally ordered *within one bus* (one window), exactly as the daemon's is
   within one incarnation. A refused publish consumes none.
-* **`topic`** — the built-in **eight** are closed: `editor.ui.focus`, `.layout`, `.drag`,
+* **`topic`** — the built-in **nine** are closed: `editor.ui.focus`, `.layout`, `.drag`,
   `.viewport`, `.theme-changed`, `.palette`, — since M9 e09b-3 — `.write-notice` (a write the
   editor REFUSED: an L-30 concurrent-writer drop, or a write-path refusal; and, since M9 x10, an
-  Inspector gesture the editor ABANDONED, where no write was attempted at all), and — since
+  Inspector gesture the editor ABANDONED, where no write was attempted at all), — since
   editor-window-chrome a1 — `.chrome` (a window's maximized state flipped, observed by the Shell's
   placement poll; payload `{windowId, maximized}`; the titlebar's max/restore glyph is its
-  consumer). Design 05 §5 enumerates
+  consumer), and — since editor-window-chrome d3 — `.menu` (a native NSMenu item was activated;
+  payload `{windowId, commandId}`; editor-core executes the id through the ONE e07b registry, so
+  the native menu never grows a second dispatch system). Design 05 §5 enumerates
   the first six; the seventh is required by §8's canonical write flow, which ends *"drop LOUDLY +
   notification + `editor.ui` fact"*, and by design 10's non-negotiable *"Destructive/lossy moments …
   are LOUD (wait/bad hues), never silent"*; the eighth by the window-chrome target design's 02 §1
-  (*"changes are broadcast as a fact on the existing `editor.ui` mirror relay"*). The set is still
-  CLOSED — adding a member is a
+  (*"changes are broadcast as a fact on the existing `editor.ui` mirror relay"*); the ninth by the
+  menu structure design 03 (*"an activated item comes back as a fact on the EXISTING `editor.ui`
+  relay carrying the command id"*). The set is still CLOSED — adding a member is a
   deliberate act with an authority, not a door left open. A package may publish only topics it
   **declared in its manifest**,
   namespaced under its own package id (`acme.tilemap.brush-changed`); anything else is refused with a
   diagnostic. The `ui_events` **capability** — whether the package may ride the bus at all — is
   enforced end to end by **e13**; this module owns the declaration + namespacing half only.
 * **`origin`** — the window that published the fact — *or* the literal `"shell"` on
-  `editor.ui.write-notice` and `editor.ui.chrome`, the two topics published by the C++ Shell rather
-  than by a window (see
+  `editor.ui.write-notice`, `editor.ui.chrome` and `editor.ui.menu`, the three topics published by
+  the C++ Shell rather than by a window (see
   § Publishers today for why that distinction is load-bearing rather than cosmetic). What makes a
   mirrored envelope distinguishable from a local one, and therefore what makes echo suppression
   possible.
@@ -119,6 +122,13 @@ subscriber instead of a second hand-rolled fan-out.
 `"shell"` origin, but **unicast**: the Shell's `ChromeFactRelay` (`chrome_facts.h`) queues a
 `{windowId, maximized}` flip only for the window whose chrome changed — a maximized glyph is that
 window's own fact, where a refused write below is app-wide news.
+
+`editor.ui.menu` (editor-window-chrome d3) is the chrome fact's exact sibling: the Shell's
+`MenuActivationRelay` (`menu_facts.h`) queues a `{windowId, commandId}` envelope — a native NSMenu
+item was activated (a click on the macOS menu bar, or its key equivalent) — **unicast** to the
+window whose menu it is (the primary owns the app menu bar today). menu.ts's `subscribeMenuFacts`
+executes the command id through the ONE e07b registry, which is what keeps 03's "no second dispatch
+system" true across the native rendering.
 
 `editor.ui.write-notice` (e09b-3) was the **first topic whose publisher is the C++ Shell**, and the
 shape is worth knowing because it is the editor's one Shell-to-renderer push path:

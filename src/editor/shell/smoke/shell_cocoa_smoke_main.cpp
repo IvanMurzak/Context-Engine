@@ -56,7 +56,9 @@
 // all hard failures.
 
 #include "context/editor/shell/cocoa_chrome.h"
+#include "context/editor/shell/cocoa_menu.h"
 #include "context/editor/shell/dpi.h"
+#include "context/editor/shell/menu_model.h"
 #include "context/editor/shell/panels/builtin_panels.h"
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/smoke/smoke_window.h"
@@ -1014,6 +1016,106 @@ int main(int argc, char** argv)
                         "and sane - less than half that window");
         }
         // The unique_ptr closes the second window on scope exit; nothing below references it.
+    }
+
+    // ------------------------------------ 6e. the d3 NATIVE MENU (build + activation round trip)
+    //
+    // editor-window-chrome d3 (menu structure 03 / target 02 §4): on macOS the ONE declarative menu
+    // model renders as the native global NSMenu bar, and an activated item must come back carrying
+    // its command id — the return half of "no second dispatch system". This is the ONE CI context
+    // with a real NSApp to install a menu bar into (the live CEF smokes run headless on macOS), so
+    // the build + activation round trip is asserted HERE, against the real AppKit objects, through
+    // the same cocoa_menu.h seam editor_main binds `menu.publish` to. What a CI runner CANNOT do is
+    // click the system menu bar itself — `cocoa_menu_perform` invokes the installed item's own
+    // target/action pair, which is the same dispatch a real click drives; the human-pointer
+    // verification of the on-screen bar is named DEFERRED INTERACTIVE VERIFICATION in the PR body.
+    {
+        shell::MenuModel model;
+        shell::MenuDefinition file;
+        file.id = "file";
+        file.label = "File";
+        shell::MenuItem enabled_item;
+        enabled_item.kind = shell::MenuItem::Kind::command;
+        enabled_item.command_id = "smoke.menu.enabled";
+        enabled_item.label = "Enabled Item";
+        enabled_item.accelerator = "Ctrl+Z"; // parsed to a ⌘Z key equivalent (cocoa_menu.h)
+        file.items.push_back(enabled_item);
+        shell::MenuItem separator;
+        separator.kind = shell::MenuItem::Kind::separator;
+        file.items.push_back(separator);
+        shell::MenuItem disabled_item;
+        disabled_item.kind = shell::MenuItem::Kind::command;
+        disabled_item.command_id = "smoke.menu.disabled";
+        disabled_item.label = "Disabled Item";
+        disabled_item.enabled = false;
+        disabled_item.tooltip = "future work";
+        file.items.push_back(disabled_item);
+        shell::MenuItem submenu;
+        submenu.kind = shell::MenuItem::Kind::submenu;
+        submenu.label = "Open Recent";
+        shell::MenuItem recent;
+        recent.kind = shell::MenuItem::Kind::command;
+        recent.command_id = "smoke.menu.recent";
+        recent.label = "alpha";
+        submenu.items.push_back(recent);
+        file.items.push_back(submenu);
+        model.menus.push_back(file);
+
+        std::vector<std::string> activated;
+        COCOA_CHECK(shell::cocoa_install_menu(*backend, model,
+                                              [&activated](const std::string& id)
+                                              { activated.push_back(id); }),
+                    "the d3 menu model installed as the real NSApp main menu");
+        shell::CocoaMenuStats menu_stats;
+        COCOA_CHECK(shell::cocoa_menu_stats(*backend, menu_stats),
+                    "the menu stats are readable off the live cocoa backend");
+        COCOA_CHECK(menu_stats.installs == 1, "exactly one install so far");
+        COCOA_CHECK(menu_stats.items == 3,
+                    "the built bar holds the model's three COMMAND items (separators and submenu "
+                    "headers excluded)");
+
+        // The activation ROUND TRIP: performing the installed item invokes its own target/action —
+        // the same dispatch a real menu click drives — and the callback receives the command id
+        // VERBATIM, including for an item nested in a submenu.
+        COCOA_CHECK(shell::cocoa_menu_perform(*backend, "smoke.menu.enabled"),
+                    "the enabled item performed");
+        COCOA_CHECK(shell::cocoa_menu_perform(*backend, "smoke.menu.recent"),
+                    "the submenu item performed");
+        COCOA_CHECK(activated.size() == 2 && activated[0] == "smoke.menu.enabled" &&
+                        activated[1] == "smoke.menu.recent",
+                    "each activation carried its command id verbatim to the callback");
+
+        // DISABLED-ITEM HONESTY (the DoD line): a disabled item is truly inert — the programmatic
+        // path refuses exactly where a real click could not fire — and an id nothing installed
+        // refuses too.
+        COCOA_CHECK(!shell::cocoa_menu_perform(*backend, "smoke.menu.disabled"),
+                    "a DISABLED item refuses to perform - truly inert, not merely greyed");
+        COCOA_CHECK(!shell::cocoa_menu_perform(*backend, "smoke.menu.absent"),
+                    "an id nothing installed refuses to perform");
+        COCOA_CHECK(shell::cocoa_menu_stats(*backend, menu_stats) && menu_stats.activations == 2,
+                    "exactly the two performed activations were counted");
+
+        // A RE-PUBLISH REPLACES WHOLESALE (the mountChrome re-render rule): the second model's
+        // count stands alone, never added to the first's.
+        shell::MenuModel second;
+        shell::MenuDefinition help;
+        help.id = "help";
+        help.label = "Help";
+        shell::MenuItem about;
+        about.kind = shell::MenuItem::Kind::command;
+        about.command_id = "smoke.menu.about";
+        about.label = "About";
+        help.items.push_back(about);
+        second.menus.push_back(help);
+        COCOA_CHECK(shell::cocoa_install_menu(*backend, second,
+                                              [&activated](const std::string& id)
+                                              { activated.push_back(id); }),
+                    "a second publish re-installed the bar");
+        COCOA_CHECK(shell::cocoa_menu_stats(*backend, menu_stats) && menu_stats.installs == 2 &&
+                        menu_stats.items == 1,
+                    "the re-publish REPLACED the bar wholesale - one command item now");
+        COCOA_CHECK(!shell::cocoa_menu_perform(*backend, "smoke.menu.enabled"),
+                    "the first model's items are gone after the replace");
     }
 
     // ----------------------------------------------------- 7. teardown persists the session

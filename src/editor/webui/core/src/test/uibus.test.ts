@@ -158,7 +158,7 @@ export const uibusTests: readonly TestCase[] = [
 
     // ------------------------------------------------------------------ 2. topic namespacing
     {
-        name: "uibus: the built-in topic set is exactly the eight the design requires, and is closed",
+        name: "uibus: the built-in topic set is exactly the nine the design requires, and is closed",
         run: () => {
             assertEqual(
                 [...BUILTIN_UI_TOPICS],
@@ -181,8 +181,13 @@ export const uibusTests: readonly TestCase[] = [
                     // (chrome_facts.h): a window's maximized flip, observed by the placement poll
                     // and mirrored in so the a2 titlebar glyph flips without polling (02 §1).
                     "editor.ui.chrome",
+                    // editor-window-chrome d3. The NINTH, Shell-published like its two siblings
+                    // (menu_facts.h): a native NSMenu activation carrying its command id, which
+                    // menu.ts executes through the ONE registry (03: no second dispatch system).
+                    "editor.ui.menu",
                 ],
-                "05 §5's topic list, plus §8's write-notice fact and 02 §1's chrome fact",
+                "05 §5's topic list, plus §8's write-notice fact, 02 §1's chrome fact and 03's " +
+                    "menu-activation fact",
             );
             const bus = new EditorUiBus();
             for (const topic of BUILTIN_UI_TOPICS) {

@@ -475,6 +475,46 @@ void test_open_downloads()
     }
 }
 
+void test_open_docs()
+{
+    // d3 — the Help > Documentation click-through: the SAME opener seam, re-pointed (banners.h
+    // § kHelpOpenDocsMethod), with the same honest degrades.
+    { // no opener wired => an honest false, never a pretend success
+        ReleaseNotice notice;
+        CHECK(!notice.open_docs());
+        CHECK(notice.docs_opened() == 0);
+    }
+    {
+        std::string opened;
+        ReleaseNotice notice;
+        notice.bind_url_opener(
+            [&opened](const std::string& url)
+            {
+                opened = url;
+                return true;
+            });
+        CHECK(notice.open_docs());
+        CHECK(opened == kDocsPageUrl);
+        CHECK(opened.rfind("https://", 0) == 0);
+        CHECK(notice.docs_opened() == 1);
+        // The docs click-through is its OWN counter — it must not inflate the downloads one.
+        CHECK(notice.downloads_opened() == 0);
+    }
+    { // the test override, so a consumer can point the item elsewhere without a rebuild
+        std::string opened;
+        ReleaseNotice notice;
+        notice.set_docs_url("https://example.test/docs");
+        notice.bind_url_opener(
+            [&opened](const std::string& url)
+            {
+                opened = url;
+                return true;
+            });
+        CHECK(notice.open_docs());
+        CHECK(opened == "https://example.test/docs");
+    }
+}
+
 // ------------------------------------------------------------------------ the daemon-lost banner
 
 void test_daemon_link_probe_over_a_real_lifecycle()
@@ -588,6 +628,13 @@ void test_bridge_surface()
     CHECK(download.at("opened").as_bool());
     CHECK(opened == kDownloadsPageUrl);
 
+    // d3: the documentation click-through routes over the same surface and the same opener.
+    const Json docs = dispatch(router, kHelpOpenDocsMethod, refused);
+    CHECK(!refused);
+    CHECK(docs.at("opened").as_bool());
+    CHECK(opened == kDocsPageUrl);
+    CHECK(notice.docs_opened() == 1);
+
     const Json dismissed = dispatch(router, kUpdateDismissMethod, refused);
     CHECK(!refused);
     CHECK(dismissed.at("dismissed").as_bool());
@@ -622,6 +669,10 @@ void test_bridge_without_a_notice_is_honest()
     const Json error = dispatch(router, kUpdateOpenDownloadsMethod, refused);
     CHECK(refused);
     CHECK(shelltest::mentions(error.dump(), kErrUpdateNoOpener));
+    // d3: the documentation click-through degrades identically with no channel.
+    const Json docs_error = dispatch(router, kHelpOpenDocsMethod, refused);
+    CHECK(refused);
+    CHECK(shelltest::mentions(docs_error.dump(), kErrUpdateNoOpener));
     // A handler's own error is NOT an envelope refusal — the smokes' invariant stays intact.
     CHECK(router.refused() == 0);
 }
@@ -664,6 +715,7 @@ int main()
     test_update_states();
     test_dismiss_is_session_scoped();
     test_open_downloads();
+    test_open_docs();
     test_daemon_link_probe_over_a_real_lifecycle();
     test_daemon_link_state_json();
     test_bridge_surface();

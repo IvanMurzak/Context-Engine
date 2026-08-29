@@ -337,6 +337,20 @@ itself (`caption_press_action`) is pure, uses the arbiter's own last-match-wins 
 in `editor-shell-test_cocoa_chrome` on all three legs; the windowed proof rides
 `editor-shell-cocoa-window`'s c1 step on the macOS `editor-cef-smoke` job.
 
+**The macOS native menu (editor-window-chrome d3, menu structure 03).** editor-core publishes its
+ONE declarative menu model over `menu.publish` (`window_bridge.h` — installed on every window that
+installs `window.*`, so the ten-smoke rule holds structurally), the composition root parses it
+fail-closed (`menu_model.h`, all-legs tested) and asks the Cocoa backend to build the global
+`NSMenu` bar from it (`cocoa_menu.h` — real in `cocoa_window.mm`, an honest false everywhere else,
+which is exactly the `accepted:false` a Windows/Linux publish degrades to: the web menubar in the
+titlebar strip is the rendering there). An activated item — clicked, or reached through the key
+equivalent built from its published accelerator (`Ctrl` maps onto ⌘, the CmdOrCtrl reading) —
+returns as an `editor.ui.menu` fact (`menu_facts.h`, the chrome fact's unicast sibling) carrying
+the command id, which editor-core executes through the ONE e07b registry: no second dispatch
+system. The build + activation round trip is asserted in `editor-shell-cocoa-window`'s d3 step
+(programmatic `cocoa_menu_perform`, which refuses disabled items — they are truly inert); clicking
+the REAL on-screen menu bar is deferred interactive verification, named in the landing PR.
+
 ## 4. The compositor (03 §4)
 
 One frame: acquire → viewport layers → the full-window premultiplied CEF layer → the `PET_POPUP`

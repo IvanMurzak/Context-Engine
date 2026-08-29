@@ -566,10 +566,16 @@ int main(int argc, char** argv)
     // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
     SMOKE_CHECK(bridge.has_method(shell::kSessionControlMethod),
                 "the d1 session.control write surface routes");
+    // d3: install() also routes `session.select` (selection.clear's relay) — the ten-smoke rule.
+    SMOKE_CHECK(bridge.has_method(shell::kSessionSelectMethod),
+                "the d3 session.select write surface routes");
 
     shell::WindowMoveStore window_move_store;
     shell::WindowBridge window_move_bridge(shell::kPrimaryWindowId, window_move_store);
     SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
+    // d3: the window bridge's install() also routes `menu.publish` (the ten-smoke rule).
+    SMOKE_CHECK(bridge.has_method(shell::kMenuPublishMethod),
+                "the d3 menu.publish surface routes");
 
     // --- the package capability-grant read surface (e13c-4) -------------------------------------
     // editor-core's boot reads the operator's install-consent answers with `package.grants.list`

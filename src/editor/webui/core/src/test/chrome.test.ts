@@ -15,7 +15,14 @@
 // boot.test.ts discipline): a regression that unwired `startChromeStrips` from boot would stay green
 // in every mount-level case and red exactly there.
 
-import { assert, assertEqual, delay, waitFor, type TestCase } from "./harness.js";
+import {
+    AssertionError,
+    assert,
+    assertEqual,
+    delay,
+    waitFor,
+    type TestCase,
+} from "./harness.js";
 import { ShellBridge } from "../bridge.js";
 import { EDITOR_ROOT_ID, bootEditorCore } from "../boot.js";
 import { baseAnswers, mockShell } from "./boot.test.js";
@@ -46,6 +53,7 @@ import {
     TITLEBAR_BRAND_CLASS,
     TITLEBAR_CLASS,
     TITLEBAR_DRAG_CLASS,
+    TITLEBAR_MENU_CLASS,
     TITLEBAR_TITLE_CLASS,
     mountChrome,
     parseChromeFact,
@@ -63,6 +71,7 @@ import {
     REGION_KIND_CAPTION_MIN,
     type ShellRegion,
 } from "../editorstate.js";
+import { MENUBAR_ATTRIBUTE } from "../menu.js";
 import { PALETTE_TOGGLE_COMMAND_ID } from "../palette.js";
 import { EditorUiBus, UI_TOPIC_CHROME } from "../uibus.js";
 import {
@@ -665,6 +674,136 @@ export const chromeTests: readonly TestCase[] = [
             } finally {
                 fixture.dispose();
                 root.remove();
+            }
+        },
+    },
+    {
+        // ⚠ THIS CASE EXISTS BECAUSE THE LIVE SMOKE FOUND ITS ABSENCE (d3 — PR #488's ubuntu AND
+        // macOS `editor-cef-smoke` legs, deterministically). startChromeStrips AWAITS the initial
+        // publish while the d3 menubar slot is still EMPTY; startMenu fills it afterwards, and none
+        // of the publisher's triggers (window resize, DPI change, Dockview layout change) fires for
+        // that. Without boot's explicit republish the Shell keeps the pre-menubar caption rect: a
+        // menubar click is consumed as a caption DRAG (02 §6 arbitrates caption hits BEFORE client
+        // routing), and the next live resize republishes a caption NARROWER than the stale one —
+        // exactly the smoke's "the caption TRACKS the resized width" failure (640→800 grows the
+        // strip by 160px; the menubar column is wider than that). The mock Shell serves no
+        // `panel.list` (baseAnswers), so NO Dockview root and NO layout-seam publish can mask the
+        // gap: every region publish recorded below is the publisher's own.
+        //
+        // ⚠ PLANT: drop `await chromeStrips.publisher.publishNow()` from boot.ts § startMenu — RED
+        // here on three independent claims (the republish count, the DOM-truth match at ready, and
+        // the post-resize growth).
+        name: "chrome: the map follows the menubar mount, and a wider client widens the caption",
+        run: async () => {
+            const fixture = stripFixture();
+            const titlebar = fixture.elements.titlebar;
+            // The smoke's geometry — a 640px client resized live to 800px — pinned on the strip
+            // itself so the case does not depend on the harness viewport.
+            titlebar.style.width = "640px";
+            const root = document.createElement("main");
+            root.id = EDITOR_ROOT_ID;
+            document.body.append(root);
+            // Every `editor.regions.publish` boot issued, IN ORDER: the map the Shell holds after
+            // each publish is its LAST element (the Shell replaces the map wholesale).
+            const publishes: (readonly ShellRegion[])[] = [];
+            const shell = mockShell(
+                {
+                    ...baseAnswers(),
+                    "shell.hello": { nonce: "d3-caption-nonce" },
+                    "welcome.state": { mode: "project", projectName: "Sprocket Quest" },
+                    "chrome.state": {
+                        mode: "custom",
+                        controlsInset: { left: 0, right: 0 },
+                        maximized: false,
+                        focused: true,
+                        window: "primary",
+                    },
+                    "editor.regions.publish": {},
+                },
+                (method: string, params: unknown): void => {
+                    if (method === "editor.regions.publish") {
+                        const regions = (params as { regions?: ShellRegion[] } | undefined)
+                            ?.regions;
+                        publishes.push(regions ?? []);
+                    }
+                },
+            );
+            const captionOf = (regions: readonly ShellRegion[]): ShellRegion | undefined =>
+                regions.find(
+                    (region: ShellRegion): boolean => region.id === CHROME_REGION_CAPTION_ID,
+                );
+            const dpr = window.devicePixelRatio;
+            // The same edge-rounded PHYSICAL arithmetic chrome.ts § physicalRegion publishes.
+            const physicalWidth = (element: Element): number => {
+                const rect = element.getBoundingClientRect();
+                return Math.round(rect.right * dpr) - Math.round(rect.left * dpr);
+            };
+            try {
+                const report = await bootEditorCore(new ShellBridge(shell.query));
+                assert(report.ready, "the editor boots");
+                const slot = titlebar.querySelector(`.${TITLEBAR_MENU_CLASS}`);
+                assert(
+                    slot !== null && slot.childElementCount > 0,
+                    "the premise: boot mounted the d3 menubar into the titlebar's slot",
+                );
+                const drag = titlebar.querySelector(`.${TITLEBAR_DRAG_CLASS}`);
+                assert(drag !== null, "the caption drag element exists to measure");
+                const captions = publishes
+                    .map(captionOf)
+                    .filter((caption): caption is ShellRegion => caption !== undefined);
+                const first = captions[0];
+                const latest = captions[captions.length - 1];
+                if (first === undefined || latest === undefined) {
+                    throw new AssertionError("boot published the caption");
+                }
+                const widths = captions.map((caption) => String(caption.rect.width)).join(",");
+                assert(
+                    captions.length >= 2 && first.rect.width > latest.rect.width,
+                    "the menubar mount republished a NARROWER caption than the empty-slot " +
+                        `initial publish (published widths: ${widths})`,
+                );
+                assertEqual(
+                    latest.rect.width,
+                    physicalWidth(drag as HTMLElement),
+                    "the map the Shell holds at ready IS the live drag rect — no stale " +
+                        "pre-menubar measurement survives boot",
+                );
+                // The live resize (the smoke's 640→800), through the publisher's REAL window
+                // trigger: the strip widens by 160 CSS px and the debounced republish must follow.
+                const clientBefore = physicalWidth(titlebar);
+                const captionBefore = latest.rect.width;
+                const count = publishes.length;
+                titlebar.style.width = "800px";
+                window.dispatchEvent(new Event("resize"));
+                await waitFor("the resize republish", () => publishes.length > count);
+                const after = captionOf(publishes[publishes.length - 1] ?? []);
+                if (after === undefined) {
+                    throw new AssertionError("the republished map still carries the caption");
+                }
+                // The smoke's own claim: WIDER than the map the Shell held before the resize, and
+                // still inside the client — then the tracking claim itself: the menubar column is
+                // fixed and the caption is the strip's flexible middle, so it grew by EXACTLY what
+                // the client grew by.
+                assert(
+                    after.rect.width > captionBefore,
+                    "the republished caption is WIDER than the map held before the resize " +
+                        `(${String(captionBefore)} → ${String(after.rect.width)})`,
+                );
+                assert(
+                    after.rect.x + after.rect.width <=
+                        Math.round(titlebar.getBoundingClientRect().right * dpr),
+                    "…and stays inside the resized client width",
+                );
+                assertEqual(
+                    after.rect.width - captionBefore,
+                    physicalWidth(titlebar) - clientBefore,
+                    "…and grew by exactly the client's growth (the caption TRACKS the client)",
+                );
+            } finally {
+                fixture.dispose();
+                root.remove();
+                document.documentElement.removeAttribute(MENUBAR_ATTRIBUTE);
+                document.documentElement.removeAttribute("data-editor-menu");
             }
         },
     },

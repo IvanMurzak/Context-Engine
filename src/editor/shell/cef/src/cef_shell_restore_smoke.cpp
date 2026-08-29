@@ -410,6 +410,14 @@ SessionOutcome run_session(const std::filesystem::path& project,
                      cfg.label);
         return out;
     }
+    // d3: install() also routes `session.select` and `menu.publish` (the ten-smoke rule).
+    if (!bridge.has_method(shell::kSessionSelectMethod) ||
+        !bridge.has_method(shell::kMenuPublishMethod))
+    {
+        std::fprintf(stderr, "[%s] FAIL: a d3 surface (session.select / menu.publish) did not route\n",
+                     cfg.label);
+        return out;
+    }
 
     shell::WindowDesc desc;
     desc.title = "Context Editor (restore smoke)";

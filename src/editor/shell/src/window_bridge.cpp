@@ -4,6 +4,7 @@
 #include "context/editor/shell/window_bridge.h"
 
 #include "context/editor/shell/cross_window_drag.h" // the drag relay served by drag.probe/report-zone
+#include "context/editor/shell/menu_model.h" // the d3 menu publish's command-count observable
 #include "json_number_read.h" // the shared range-guarded numeric read (float-cast-overflow UB guard)
 
 #include <cstdint>
@@ -153,6 +154,11 @@ void WindowBridge::bind_chrome_state(ChromeStateProvider provider)
 void WindowBridge::bind_appearance(AppearanceHandler handler)
 {
     appearance_ = std::move(handler);
+}
+
+void WindowBridge::bind_menu(MenuPublishHandler handler)
+{
+    menu_ = std::move(handler);
 }
 
 void WindowBridge::bind_drag_store(CrossWindowDragStore* store)
@@ -332,10 +338,51 @@ contract::Json WindowBridge::toggle_maximize()
     return out;
 }
 
-contract::Json WindowBridge::focus()
+contract::Json WindowBridge::focus(const contract::Json& params, std::string& error_code)
 {
+    // d3: the OPTIONAL target (kWindowFocusMethod). Absent = this window (the a1 behaviour, and
+    // what every existing caller sends); present must be a number — a present-but-unreadable id is
+    // a wiring bug refused loudly, never silently retargeted at self. The range guard runs on the
+    // DOUBLE before any integral cast (json_number_read.h), the ui_mirror_report discipline.
+    WindowId target = self_id_;
+    if (params.is_object() && params.contains("windowId"))
+    {
+        const std::optional<double> id =
+            detail::number_in_range(params, "windowId", 0.0, 4294967295.0);
+        // A fractional id (2.5) must not silently TRUNCATE onto a window nobody named — refused
+        // exactly like a non-numeric one. The comparison is exact and defined: the guard above
+        // proved the double in-range, and an integral in-range double round-trips the cast
+        // losslessly.
+        if (!id.has_value() || *id != static_cast<double>(static_cast<WindowId>(*id)))
+        {
+            error_code = kErrWindowBadParams;
+            return contract::Json{};
+        }
+        target = static_cast<WindowId>(*id);
+    }
     ++focus_requests_;
-    const bool accepted = focus_ ? focus_() : false;
+    const bool accepted = focus_ ? focus_(target) : false;
+    contract::Json out = contract::Json::object();
+    out.set("accepted", contract::Json(accepted));
+    return out;
+}
+
+contract::Json WindowBridge::menu_publish(const contract::Json& params, std::string& error_code)
+{
+    // The OUTER fail-closed shape (window_bridge.h § menu_publish): editor-core only ever publishes
+    // `{menus: [...]}`, so anything else is a wiring bug surfacing loudly — the same posture
+    // `set_appearance` takes on its token.
+    if (!params.is_object() || !params.at("menus").is_array())
+    {
+        error_code = kErrWindowBadParams;
+        return contract::Json{};
+    }
+    // Counted on every well-formed publish, bound or not — the ten-smoke routing discipline — and
+    // the command tally beside it, so the live boot smoke can assert the model was non-trivial.
+    ++menu_publishes_;
+    const std::optional<MenuModel> model = parse_menu_model(params);
+    last_menu_commands_ = model.has_value() ? model->command_count() : 0;
+    const bool accepted = menu_ ? menu_(params) : false;
     contract::Json out = contract::Json::object();
     out.set("accepted", contract::Json(accepted));
     return out;
@@ -581,13 +628,39 @@ bool WindowBridge::install(BridgeRouter& router)
                                 [this](const BridgeRequest&) -> BridgeResult
                                 { return BridgeResult::ok(toggle_maximize()); }) &&
          ok;
-    ok = router.register_method(kWindowFocusMethod,
-                                [this](const BridgeRequest&) -> BridgeResult
-                                { return BridgeResult::ok(focus()); }) &&
+    // d3: `window.focus` is params-taking now (the OPTIONAL windowId — see kWindowFocusMethod),
+    // and so refusable on a malformed one, like tear-out/move-to.
+    ok = router.register_method(
+             kWindowFocusMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 contract::Json value = focus(request.params, error_code);
+                 if (!error_code.empty())
+                 {
+                     return BridgeResult::error(error_code, "focus request was malformed");
+                 }
+                 return BridgeResult::ok(std::move(value));
+             }) &&
          ok;
     ok = router.register_method(kChromeStateMethod,
                                 [this](const BridgeRequest&) -> BridgeResult
                                 { return BridgeResult::ok(chrome_state()); }) &&
+         ok;
+    // d3: the menu publish — params-taking (and so refusable on a malformed model), but never
+    // refused for being unbound (the non-macOS builds' honest `accepted:false`).
+    ok = router.register_method(
+             kMenuPublishMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 contract::Json value = menu_publish(request.params, error_code);
+                 if (!error_code.empty())
+                 {
+                     return BridgeResult::error(error_code, "menu publish was malformed");
+                 }
+                 return BridgeResult::ok(std::move(value));
+             }) &&
          ok;
     // b1 — the appearance report: params-taking (and so refusable on malformed params, like
     // tear-out/move-to), but never refused for being unbound.

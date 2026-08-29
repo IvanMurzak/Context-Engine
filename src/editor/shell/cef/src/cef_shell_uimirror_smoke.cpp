@@ -179,6 +179,10 @@ struct WindowSurfaces
         ok = session_bridge.install(router) && ok;
         // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
         ok = router.has_method(shell::kSessionControlMethod) && ok;
+        // d3: install() also routes `session.select` (selection.clear's relay) — the ten-smoke
+        // rule asserts the ROUTING here, per smoke (`menu.publish`'s check sits after the window
+        // bridge installs below, which is what routes it).
+        ok = router.has_method(shell::kSessionSelectMethod) && ok;
         package_grants =
             std::make_unique<shell::PackageGrantHost>(package_scan, std::filesystem::path{});
         ok = package_grants->install(router) && ok;
@@ -207,6 +211,8 @@ struct WindowSurfaces
         // e10d: this window's editor-core mirrors editor.ui facts through the SHARED store.
         window_bridge->bind_ui_mirror_store(&mirror_store);
         ok = window_bridge->install(router) && ok;
+        // d3: the window bridge's install() also routes `menu.publish` (the ten-smoke rule).
+        ok = router.has_method(shell::kMenuPublishMethod) && ok;
         return ok;
     }
 };
