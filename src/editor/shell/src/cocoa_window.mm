@@ -955,31 +955,50 @@ void CocoaWindowBackend::apply_placement(const WindowPlacement& placement)
 // downcast to the anonymous-namespace type is confined to this TU and needs no RTTI. A headless
 // backend (every mac CI smoke) and every other platform's backend answer the honest false/no-op.
 
-bool cocoa_hybrid_chrome(const IWindowBackend& backend, CocoaChromeState& out)
+namespace
+{
+
+// The one guard + downcast the three functions below share: non-null exactly when `backend` is the
+// live CocoaWindowBackend defined in this TU.
+const CocoaWindowBackend* as_cocoa(const IWindowBackend& backend)
 {
     if (std::strcmp(backend.name(), "cocoa") != 0)
     {
-        return false;
+        return nullptr;
     }
-    return static_cast<const CocoaWindowBackend&>(backend).hybrid_chrome(out);
+    return &static_cast<const CocoaWindowBackend&>(backend);
+}
+
+CocoaWindowBackend* as_cocoa(IWindowBackend& backend)
+{
+    // Safe const_cast: the referenced object arrived through a non-const reference.
+    return const_cast<CocoaWindowBackend*>(as_cocoa(static_cast<const IWindowBackend&>(backend)));
+}
+
+} // namespace
+
+bool cocoa_hybrid_chrome(const IWindowBackend& backend, CocoaChromeState& out)
+{
+    const CocoaWindowBackend* cocoa = as_cocoa(backend);
+    return cocoa != nullptr && cocoa->hybrid_chrome(out);
 }
 
 void cocoa_bind_caption_regions(IWindowBackend& backend, const RegionMap* regions)
 {
-    if (std::strcmp(backend.name(), "cocoa") != 0)
+    if (CocoaWindowBackend* cocoa = as_cocoa(backend))
     {
-        return;
+        cocoa->bind_caption_regions(regions);
     }
-    static_cast<CocoaWindowBackend&>(backend).bind_caption_regions(regions);
 }
 
 bool cocoa_caption_stats(const IWindowBackend& backend, CocoaCaptionStats& out)
 {
-    if (std::strcmp(backend.name(), "cocoa") != 0)
+    const CocoaWindowBackend* cocoa = as_cocoa(backend);
+    if (cocoa == nullptr)
     {
         return false;
     }
-    out = static_cast<const CocoaWindowBackend&>(backend).caption_stats();
+    out = cocoa->caption_stats();
     return true;
 }
 

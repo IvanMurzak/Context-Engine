@@ -909,9 +909,6 @@ int main(int argc, char** argv)
         render::Rect2D{render::Origin2D{0, 0},
                        render::Extent2D{drag_client.width, drag_client.height / 2u}},
         shell::RegionKind::caption}});
-    shell::CocoaCaptionStats drag_before;
-    COCOA_CHECK(shell::cocoa_caption_stats(*backend, drag_before),
-                "the caption stats are readable before the drag drill");
     shell::ShellEvent drag_press = zoom_press;
     drag_press.pointer.click_count = 1;
     drag_press.pointer.position =
@@ -919,10 +916,12 @@ int main(int argc, char** argv)
                       static_cast<std::int32_t>(drag_client.height / 4u)};
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
                 "a single caption press was accepted for injection");
+    // `caption_before` is still the drag baseline: the only drill since that read was the zoom
+    // drill, whose press carries `click_count 2` by construction and so can only bump `zooms`.
     const bool drag_consumed = pump_until(manager, clock_us, [&] {
         shell::CocoaCaptionStats stats;
         return shell::cocoa_caption_stats(*backend, stats) &&
-               stats.drags >= drag_before.drags + 1;
+               stats.drags >= caption_before.drags + 1;
     });
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
@@ -939,11 +938,13 @@ int main(int argc, char** argv)
     COCOA_CHECK(release_arbitrated,
                 "the release flowed through ordinary arbitration - only the press was consumed");
 
-    // --- the suppression claims (ROADMAP risk 3: no stuck hover) ---------------------------------
-    {
+    // "One of OUR presses reached the browser", counted from a baseline: a marked pointer-down at
+    // or past it. The load-bearing predicate for both claims below — suppression needs zero of
+    // them, forwarding waits for one — so it is defined exactly once.
+    const auto marked_downs_since = [&](std::size_t baseline) {
         int marked_downs = 0;
         const std::vector<shell::PointerEvent>& samples = browser->pointers();
-        for (std::size_t i = chrome_samples_baseline; i < samples.size(); ++i)
+        for (std::size_t i = baseline; i < samples.size(); ++i)
         {
             if (has_marker(samples[i].modifiers) &&
                 samples[i].action == shell::PointerAction::down)
@@ -951,12 +952,15 @@ int main(int argc, char** argv)
                 ++marked_downs;
             }
         }
-        COCOA_CHECK(marked_downs == 0,
-                    "neither consumed caption press reached the browser - no half-press, no stuck "
-                    "hover");
-        COCOA_CHECK(!editor->input().has_pointer_capture(),
-                    "no implicit pointer capture leaked from a consumed press");
-    }
+        return marked_downs;
+    };
+
+    // --- the suppression claims (ROADMAP risk 3: no stuck hover) ---------------------------------
+    COCOA_CHECK(marked_downs_since(chrome_samples_baseline) == 0,
+                "neither consumed caption press reached the browser - no half-press, no stuck "
+                "hover");
+    COCOA_CHECK(!editor->input().has_pointer_capture(),
+                "no implicit pointer capture leaked from a consumed press");
 
     // --- and a NON-caption press still reaches the browser afterwards ----------------------------
     const std::size_t forward_baseline = browser->pointers().size();
@@ -973,16 +977,7 @@ int main(int argc, char** argv)
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, forward_release),
                 "the non-caption release was accepted for injection");
     const bool forwarded = pump_until(manager, clock_us, [&] {
-        const std::vector<shell::PointerEvent>& samples = browser->pointers();
-        for (std::size_t i = forward_baseline; i < samples.size(); ++i)
-        {
-            if (has_marker(samples[i].modifiers) &&
-                samples[i].action == shell::PointerAction::down)
-            {
-                return true;
-            }
-        }
-        return false;
+        return marked_downs_since(forward_baseline) > 0;
     });
     COCOA_CHECK(forwarded,
                 "a press OUTSIDE the caption still reaches the browser - the always-forward rule "
