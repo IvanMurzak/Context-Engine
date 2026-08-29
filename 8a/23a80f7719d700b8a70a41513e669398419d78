@@ -2,6 +2,7 @@ src/editor/shell/src/shell.cpp
   s_7b2854368302f3::t_08ebddc0ee7181 293
   s_7b2854368302f3::t_994613f4664045 221-222,232
   s_7b2854368302f3::t_0a51caa347e13d 287-292,294-298
+  s_7b2854368302f3::t_1cca7dcf871b36 223-231
 src/editor/shell/tests/test_window_bridge.cpp
   s_7b2854368302f3::t_8bd49acb0a3757 383-440
   s_7b2854368302f3::t_da02d6a65d05f3 498-508
@@ -77,6 +78,7 @@ tools/check_webui_assets.py
 src/editor/shell/app/editor_main.cpp
   s_7b2854368302f3::t_1fb00374878d67 243,246-249,262-272
   s_7b2854368302f3::t_da8ec05d4f07ab 273
+  s_7b2854368302f3::t_f6637d240ea879 232-238
 src/editor/shell/cef/src/cef_shell_smoke.cpp
   s_7b2854368302f3::t_1f89d0af0a7092 730-737
   s_7b2854368302f3::t_fa5c40d48f843a 810-856,860-911
@@ -86,6 +88,8 @@ src/editor/webui/core/src/window.ts
   s_7b2854368302f3::t_c5ce23737403dc 50-61
   s_7b2854368302f3::t_428285af50609e 411
   s_7b2854368302f3::t_402df7351e96c1 430-435,437
+src/editor/shell/include/context/editor/shell/input.h
+  s_7b2854368302f3::t_d9e741370471e4 51-57
 ---
 {
   "schema_version": "authorship/3.0.0",
