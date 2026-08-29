@@ -240,8 +240,10 @@ export function mountPlaybar(slot: HTMLElement, options: MountPlaybarOptions): P
 
     // --- the render function ---------------------------------------------------------------------
     let rendered: PlayState = "edit";
+    let renderedTick = 0;
     const render = (state: PlayState, simTick: number): void => {
         rendered = state;
+        renderedTick = simTick;
         play.element.setAttribute(PLAY_STATE_ATTRIBUTE, flourishState(state));
         // Play doubles as resume; the accessible label names the ACTION the press will perform.
         const playLabel = state === "paused" ? LABEL_RESUME : LABEL_PLAY;
@@ -266,7 +268,17 @@ export function mountPlaybar(slot: HTMLElement, options: MountPlaybarOptions): P
     render("edit", 0);
 
     return {
-        applySession: render,
+        // The unchanged-state short-circuit is load-bearing, not an optimisation: boot's feed
+        // callback calls this after EVERY 500 ms poll read, and the status label is an
+        // `aria-live="polite"` region — `setText` replaces its text node, and a live region whose
+        // node is replaced re-announces even when the text is identical, so an unguarded re-render
+        // would have a screen reader saying "Playing" twice a second for the life of the window.
+        applySession: (state: PlayState, simTick: number): void => {
+            if (state === rendered && simTick === renderedTick) {
+                return;
+            }
+            render(state, simTick);
+        },
         get renderedState(): PlayState {
             return rendered;
         },
@@ -312,7 +324,9 @@ export function makePlayActions(
                 event: PLAY_STATE_EVENT,
                 origin: 0,
                 state: report.stateToken,
-                simTick: report.simTick,
+                // An unreadable reply tick is OMITTED, not re-spelled as 0 — the sink's tick-less
+                // fact rule then keeps the last known value (when.ts).
+                ...(report.simTick !== null ? { simTick: report.simTick } : {}),
             });
             strip.current?.applySession(session.playState, session.simTick);
         }
@@ -326,7 +340,7 @@ export function makePlayActions(
         }
         return {
             ok: true,
-            note: `${transition}: now ${report.stateToken} (t+${String(report.simTick)})`,
+            note: `${transition}: now ${report.stateToken} (t+${String(report.simTick ?? session.simTick)})`,
         };
     };
     return {

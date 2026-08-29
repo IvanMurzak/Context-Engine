@@ -206,8 +206,8 @@ public:
     // boots is the end-to-end proof the channel is wired (the `keybindings.get` `reads()` pattern).
     [[nodiscard]] std::size_t reads() const { return reads_; }
 
-    // How many `session.control` verbs were dispatched to the handler (valid-verb requests only) —
-    // the same wiring evidence for the write half.
+    // How many valid-verb `session.control` requests were served — bound or unbound (an unbound
+    // one still answers "nothing to drive") — the same wiring evidence for the write half.
     [[nodiscard]] std::size_t controls() const { return controls_; }
 
 private:

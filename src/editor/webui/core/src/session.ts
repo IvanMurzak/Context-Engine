@@ -26,7 +26,7 @@
 // rather than one per tick forever.
 
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
-import { DaemonSessionState, toPlayState, type PlayState } from "./when.js";
+import { DaemonSessionState, toPlayState, toSimTick, type PlayState } from "./when.js";
 
 /**
  * The Shell method that relays the daemon's session state.
@@ -152,8 +152,12 @@ export interface SessionControlReport {
     readonly playState: PlayState | null;
     /** The raw wire token behind `playState` — relayed to the sink verbatim, never re-spelled. */
     readonly stateToken: string;
-    /** The running session's simTick, as the daemon reports it. */
-    readonly simTick: number;
+    /**
+     * The running session's simTick, as the daemon reports it — `null` when the reply carried no
+     * readable tick (the `toSimTick` rule: the consumer keeps its last known value, never a
+     * fabricated 0).
+     */
+    readonly simTick: number | null;
     /** The reserved `play.*` catalog code on a daemon refusal; `""` otherwise. */
     readonly errorCode: string;
     /** `""` on a served write; the refusal reason otherwise. */
@@ -195,7 +199,7 @@ export class SessionControlClient implements SessionControlSender {
                 changed: false,
                 playState: null,
                 stateToken: "",
-                simTick: 0,
+                simTick: null,
                 errorCode: "",
                 diagnostic:
                     error instanceof BridgeError
@@ -211,22 +215,20 @@ export class SessionControlClient implements SessionControlSender {
                 changed: false,
                 playState: null,
                 stateToken: "",
-                simTick: 0,
+                simTick: null,
                 errorCode: "",
                 diagnostic: "the Shell answered session.control with a non-record",
             };
         }
         const stateToken = typeof reply["state"] === "string" ? reply["state"] : "";
-        const simTick = reply["simTick"];
         return {
             served: true,
             changed: reply["changed"] === true,
             playState: toPlayState(stateToken),
             stateToken,
-            simTick:
-                typeof simTick === "number" && Number.isInteger(simTick) && simTick >= 0
-                    ? simTick
-                    : 0,
+            // The SAME null-tolerant rule the fact path applies (when.ts toSimTick): an unreadable
+            // tick is reported as unknown, never re-spelled as a fabricated 0.
+            simTick: toSimTick(reply["simTick"]),
             errorCode: typeof reply["errorCode"] === "string" ? reply["errorCode"] : "",
             diagnostic: "",
         };

@@ -89,9 +89,12 @@ contract::Json SessionBridge::control_json(const std::string& verb)
         {
             // Contained, never propagated — the renderer's query path again. A throwing handler
             // costs the press its effect, reported honestly below, never the editor its boot.
+            // ONE snapshot() read: two would pay the provider twice and could tear the
+            // state/tick pair across a concurrent transition.
+            const SessionStateSnapshot state = snapshot();
             outcome = SessionControlOutcome{};
-            outcome.play_state = snapshot().play_state;
-            outcome.sim_tick = snapshot().sim_tick;
+            outcome.play_state = state.play_state;
+            outcome.sim_tick = state.sim_tick;
         }
     }
     else

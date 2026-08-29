@@ -239,8 +239,12 @@ export class DaemonSessionState implements SessionStateSource {
 /**
  * A wire `simTick` -> a non-negative integer, or `null` for anything else (absent, non-numeric,
  * negative, fractional) — tolerated, never thrown, like every wire read here.
+ *
+ * Exported since editor-window-chrome d1 for the same reason as `toPlayState` below: the
+ * `session.control` reply parser (session.ts) applies the SAME rule to the same wire member — a
+ * second hand-rolled reader is how the two drift.
  */
-function toSimTick(value: unknown): number | null {
+export function toSimTick(value: unknown): number | null {
     return typeof value === "number" && Number.isInteger(value) && value >= 0 ? value : null;
 }
 
