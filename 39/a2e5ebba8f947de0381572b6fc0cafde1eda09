@@ -1,0 +1,23 @@
+.pipeline/workflows/implement-task/steps/code-review.md
+  s_7b2854368302f3::t_8d248586a72728 48-57,79-81
+.pipeline/workflows/implement-task/steps/implement.md
+  s_7b2854368302f3::t_36d539a4982c34 46-58,70-72
+.pipeline/workflows/implement-task/steps/simplify.md
+  s_7b2854368302f3::t_3378dee1ff5909 16-21,23-24,50-59,79-81
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "39a2e5ebba8f947de0381572b6fc0cafde1eda09",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
