@@ -26,13 +26,24 @@ merge the PR into `main`.
   with `gh pr view <n> --json state,mergeCommit` before concluding failure, and
   never blindly re-run the merge.
 - This step is frozen (`self_improve: false` in the manifest): it is the gate
-  the rest of the run is judged against.
+  the rest of the run is judged against. Only the owner edits it.
+- **`.pipeline/**` residue is EXPECTED here, never a defect.** The self-improver
+  of earlier steps leaves uncommitted edits under `.pipeline/**` in this
+  worktree; they are captured to `main` separately, after the run, by diffing
+  the worktree against `main`. This worktree is the ONLY copy of those edits.
+  Every clean-tree check in this step therefore excludes that path
+  (`git status --porcelain -- . ':!.pipeline'`, the same scoping the sibling
+  steps use), and nothing in this step may discard, commit, push, or resolve
+  them away. Step 3 parks them in a stash around the rebase and restores them
+  afterwards — read its conflict rule before touching a stash.
 
 ## Inputs
 
 - The worktree with all of the run's commits:
-  `git log --oneline origin/main..HEAD` non-empty, `git status --porcelain`
-  empty. If either fails, stop and report.
+  `git log --oneline origin/main..HEAD` non-empty, and
+  `git status --porcelain -- . ':!.pipeline'` empty. If either fails, stop and
+  report. Uncommitted `.pipeline/**` edits are NOT a failed precondition (see
+  Context) — do not "fix" them by committing or reverting them.
 - `gh` authenticated: `gh auth status` exits 0.
 
 ## Steps
@@ -44,11 +55,39 @@ merge the PR into `main`.
    continue at step 6; push first (`git push origin "$WORKTREE_BRANCH"`, with
    `--force-with-lease` only if local history was rewritten) if new local
    commits exist.
-3. **Refresh the base.** `git fetch origin main`. If `origin/main` advanced past
-   the branch point, `git rebase origin/main` (the branch is unpublished, so
-   rebasing is safe). If the rebase hits a conflict: `git rebase --abort`, stop
-   and report — conflict resolution is not this frozen step's job. If the rebase
-   applied changes, re-run the full local gate (preamble §4) before continuing.
+3. **Refresh the base.** `git fetch origin main`. If `origin/main` did not
+   advance past the branch point (`git merge-base --is-ancestor origin/main
+   HEAD` exits 0), skip to step 4. Otherwise rebase, with the `.pipeline/**`
+   residue parked around it — `git rebase` refuses a dirty tree, and the residue
+   must survive the rebase intact:
+
+   a. **Park the residue.** If `git status --porcelain -- .pipeline` is
+      non-empty: `git stash push --include-untracked -m "land: pipeline residue"
+      -- .pipeline`, and remember that a stash exists. Never stash anything
+      outside `.pipeline/**` — a dirty tree elsewhere fails the Inputs check.
+   b. `git rebase origin/main` (the branch is unpublished, so rebasing is safe).
+      If the rebase hits a conflict: `git rebase --abort`, restore the residue
+      (sub-step d), then stop and report — conflict resolution is not this
+      frozen step's job.
+   c. If the rebase applied changes, re-run the full local gate (preamble §4)
+      before continuing.
+   d. **Restore the residue** (whenever a stash was made in sub-step a, on every
+      path out of this step — success, abort, or halt): `git stash pop`. If the
+      pop reports conflicts, they can only be inside `.pipeline/**` (the rebase
+      pulled in step-file edits captured from other runs). Resolve them by
+      keeping the STASHED side, then unstage:
+
+      ```bash
+      git checkout --theirs -- .pipeline && git reset -q -- .pipeline && git stash drop
+      ```
+
+      In a `stash pop` conflict, `--ours` is the rebased HEAD and `--theirs` is
+      the stash. **Never resolve with `--ours` — it throws the residue away**
+      (a run did exactly that, and the edits had to be dug out of the dropped
+      stash object). Never `git stash drop` before the residue is back in the
+      tree, and never resolve by committing: the residue stays uncommitted.
+      Confirm with `git status --porcelain -- .pipeline` non-empty again and
+      `git stash list` empty.
 4. **Push exactly once:** `git push -u origin "$WORKTREE_BRANCH"`.
 5. **Create the PR:** `gh pr create --base main --head "$WORKTREE_BRANCH"` with
    a conventional title and a body that explains what/why, says `Closes #N` when
@@ -90,3 +129,6 @@ merge the PR into `main`.
 - The merge happened strictly after a `pipeline ci-wait --pr <n>` exit 0
   produced in this step — a red, timed-out, or check-less gate never merges.
 - The branch was pushed only in this step.
+- The `.pipeline/**` residue that was present at entry is still present,
+  uncommitted, in the worktree (`git stash list` is empty) — this step neither
+  pushed nor discarded it.
