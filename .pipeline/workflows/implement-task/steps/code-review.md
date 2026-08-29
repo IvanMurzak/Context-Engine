@@ -37,12 +37,24 @@ Nothing is pushed.
    never the bare `high --fix`. The intended review target is this branch's full
    diff against `main` (all commits made by the earlier steps): confirm from the
    skill's own scope report that it reviewed `origin/main...HEAD` in the
-   worktree, and re-invoke with the path target if it did not.
+   worktree — `main...HEAD` is equally acceptable ONLY when
+   `git rev-parse main origin/main` prints the same sha twice (a stale local
+   `main` silently widens the review to commits that are already landed) — and
+   re-invoke with the path target if it did not. The skill FORKS a background
+   agent: do not proceed on its launch banner. Wait for its completion in one
+   bounded loop (`until` its task-output file is non-empty, `sleep 5`, ≤ 30 min)
+   and act only on its final report.
 3. After the skill completes, run `git status` and `git rev-parse
    --show-toplevel` to confirm any applied fixes landed inside the worktree —
    not in the main checkout. If a fix landed outside the worktree, move it in
-   (apply it in the worktree, revert it outside) before proceeding.
-4. If fixes were applied: re-run the local gate (preamble §4) to green — and,
+   (apply it in the worktree, revert it outside) before proceeding. Then read
+   `git diff` once for PLANT RESIDUE: a `--fix` pass that verified a finding by
+   planting a mutation can leave the plant behind (a flipped comparison, a
+   commented-out assertion, a `/* plant */` marker) — any such residue is
+   reverted before the gate runs, never committed as a "fix".
+4. If fixes were applied: re-run the local gate (preamble §4) to green — in the
+   FOREGROUND, never backgrounded or piped, so the exit status you read is the
+   gate's own (a backgrounded gate reports the launch, not the result) — and,
    when the branch diff touches Python under `tools/` or `bench/`, also
    `python -m pytest tools/tests bench/tests` from the worktree root, which
    `ctest` does not cover and CI's required `python tests` check runs. Read that
