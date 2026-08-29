@@ -73,6 +73,65 @@ body {
     overflow: hidden;
 }
 
+/* --- scrollbars: the window's own, not the platform's ------------------------------------------ *
+ *
+ * Every scrolling surface in the editor — a hydrated panel body, the palette list, the welcome
+ * screen's recent list, a settings tab, dockview's own overflow — is a Chromium scroller, and
+ * Chromium's default on Windows is the classic two-arrow bar with a square thumb: 17 CSS px of
+ * platform chrome inside a window that otherwise draws every pixel itself (2026-08-29, seen on the
+ * Settings panel). This block owns them: a thin track that stays invisible until there is a thumb
+ * to show, a pill-shaped thumb with the theme's line/muted tones, and NO arrow buttons.
+ *
+ * `::-webkit-scrollbar` rather than the standard `scrollbar-width` / `scrollbar-color` pair,
+ * deliberately: the standard properties cannot remove the buttons or round the thumb, and in this
+ * Chromium build setting either of them on an element switches that element's bars to the standard
+ * model and IGNORES its `::-webkit-scrollbar` rules — so the two must never be mixed. Universal
+ * (`*`) so that a package panel's own document is the ONLY scroller these rules do not reach (it is
+ * on its own origin behind the iframe boundary, styled by the tokens the editor hands it).
+ *
+ * The thumb's visible width is the track minus a transparent border on each side, clipped to the
+ * padding box: that is what gives the pill its inset from the content and its rounded ends without
+ * a second element. Colours read the theme tokens with the pre-theme placeholder as the fallback,
+ * like every rule in this file. */
+*::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+}
+
+*::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+    background-color: var(--ctx-colors-line, rgba(230, 237, 245, 0.18));
+    background-clip: padding-box;
+    border: 2px solid transparent;
+    border-radius: var(--ctx-shape-radius-pill, 999px);
+    min-height: 24px;
+}
+
+*::-webkit-scrollbar-thumb:hover {
+    background-color: var(--ctx-colors-muted2, rgba(230, 237, 245, 0.35));
+}
+
+*::-webkit-scrollbar-thumb:active {
+    background-color: var(--ctx-colors-muted, rgba(230, 237, 245, 0.5));
+}
+
+/* No arrows: the buttons are collapsed to nothing rather than merely hidden, so the track does not
+ * keep an empty 17px cap at each end where a button used to be. */
+*::-webkit-scrollbar-button {
+    display: none;
+    width: 0;
+    height: 0;
+}
+
+/* The square where a vertical and a horizontal bar meet: the surface behind it, never a
+ * platform-grey block. */
+*::-webkit-scrollbar-corner {
+    background: transparent;
+}
+
 /* --- the 350ms theme cross-fade (M9 e06b, design 06 §2) --------------------------------------- *
  *
  * ARMED ONLY WHILE A SWITCH IS IN FLIGHT. `theme.ts` sets `data-theme-transition="true"` on <html>
