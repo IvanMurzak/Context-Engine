@@ -243,10 +243,9 @@ playbar::PlayCommandResult SessionFeed::step(std::uint64_t ticks)
 
 std::optional<playbar::PlayAction> SessionFeed::control(const std::string& verb)
 {
-    // The verb -> model dispatch mirrors make_provider()'s command dispatch below, deliberately:
-    // both are projections of the SAME four PlaybarModel transports, so the strip's press and the
-    // dock panel's press are indistinguishable from the daemon's point of view (same wire method,
-    // same origin, same echo suppression).
+    // The ONE verb -> model dispatch: make_provider()'s command path below funnels through here
+    // too, so the strip's press and the dock panel's press are the same write — indistinguishable
+    // from the daemon's point of view (same wire method, same origin, same echo suppression).
     playbar::PlayAction action;
     if (verb == kSessionControlVerbPlay)
     {
@@ -281,28 +280,16 @@ PanelProvider SessionFeed::make_provider()
         // Each transport command is a WRITE to the daemon. `dispatched` reports whether the command
         // was RECOGNISED — a refused or no-op transition is an ordinary outcome the panel's own
         // status line surfaces, not a protocol fault (panel_host.h states the rule).
-        if (command_id == playbar::kPlayCommand)
-        {
-            (void)playbar_.play();
-        }
-        else if (command_id == playbar::kPauseCommand)
-        {
-            (void)playbar_.pause();
-        }
-        else if (command_id == playbar::kStopCommand)
-        {
-            (void)playbar_.stop();
-        }
-        else if (command_id == playbar::kStepCommand)
-        {
-            (void)playbar_.step(1);
-        }
-        else
-        {
-            return false;
-        }
-        host_.touch(playbar_panel_id_);
-        return true;
+        //
+        // Only the command-id -> verb MAP lives here: the write itself funnels through `control()`
+        // above, so the dock panel's press and the strip's press are one code path, not two
+        // dispatch ladders that can drift.
+        const char* verb = command_id == playbar::kPlayCommand    ? kSessionControlVerbPlay
+                           : command_id == playbar::kPauseCommand ? kSessionControlVerbPause
+                           : command_id == playbar::kStopCommand  ? kSessionControlVerbStop
+                           : command_id == playbar::kStepCommand  ? kSessionControlVerbStep
+                                                                  : nullptr;
+        return verb != nullptr && control(verb).has_value();
     };
     // No gesture, no state pair: a transport bar with nothing continuous and nothing to persist.
     return provider;

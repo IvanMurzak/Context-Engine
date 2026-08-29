@@ -858,16 +858,10 @@ int main(int argc, char** argv)
             if (session_feed != nullptr)
             {
                 snapshot.play_state = shell::panels::session_play_state(*session_feed);
-                // The generation SUMS the applied-fact count and the model's control generation
-                // (editor-window-chrome d1): a locally driven transition (`session.control`, the
-                // dock panel) never bumps `facts_applied` — the daemon's echo of our own write is
-                // dropped (session_feed.h) — so a generation built from it alone would freeze every
-                // `session.state` poller in this process across exactly the transitions the strip
-                // now drives. Both counters are monotone, so the sum is too.
-                snapshot.generation =
-                    static_cast<std::uint64_t>(
-                        shell::panels::session_facts_applied(*session_feed)) +
-                    shell::panels::session_control_generation(*session_feed);
+                // The composed d1 generation — applied facts + control generation, so locally
+                // driven transitions move it too (builtin_panels.h § session_state_generation
+                // owns the reasoning).
+                snapshot.generation = shell::panels::session_state_generation(*session_feed);
                 snapshot.sim_tick = shell::panels::session_sim_tick(*session_feed);
             }
             return snapshot;

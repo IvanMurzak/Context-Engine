@@ -289,9 +289,14 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
 //     play transition INCLUDING this Shell's own writes. `facts_applied` alone cannot see those
 //     (the daemon's echo of our own write is dropped — session_feed.h), so a `session.state`
 //     generation built only from it would freeze every poller in this process across a locally
-//     driven transition. The composition root sums the two.
+//     driven transition.
+//   * `session_state_generation` — the composed generation `session.state` relays: the SUM of
+//     `facts_applied` and the control generation (each monotone, so the sum is too). The one value
+//     a composition root should report; the parts stay exposed for the tests that pin each
+//     counter's own movement.
 [[nodiscard]] std::uint64_t session_sim_tick(const SessionFeed& feed);
 [[nodiscard]] std::uint64_t session_control_generation(const SessionFeed& feed);
+[[nodiscard]] std::uint64_t session_state_generation(const SessionFeed& feed);
 
 // The d1 WRITE seam: drive one `session.control` verb through the feed's `PlaybarModel` — the SAME
 // transport write the dock panel's invoke path uses (`SessionFeed::control`), reported in the shape

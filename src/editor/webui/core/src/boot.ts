@@ -427,17 +427,19 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // below, and every session read from then on re-renders the strip. One sink, one poll, two
         // projections (the when-contexts and the strip), so they can never disagree.
         const playbarHolder: PlaybarHolder = { current: undefined };
-        const session = await startSession(bridge, (report: SessionReadReport): void => {
-            playbarHolder.current?.applySession(report.playState, report.simTick);
-        });
-        const whenContext = session.whenContext;
+        const { whenContext, session } = await startSession(
+            bridge,
+            (report: SessionReadReport): void => {
+                playbarHolder.current?.applySession(report.playState, report.simTick);
+            },
+        );
 
         // --- the play-bar strip (editor-window-chrome d1, target design 02 §7) --------------------
         // Mounted on the EDITOR path only — the welcome branch returned above, and a2 already hides
         // the slot there (no session to control). The returned actions are the `play.*` command
         // handlers startPanels threads into the registry: strip buttons, palette and the d3 menu
         // all dispatch ONE implementation over `session.control`.
-        const playActions = startPlaybar(bridge, session.session, playbarHolder, liveRegistry);
+        const playActions = startPlaybar(bridge, session, playbarHolder, liveRegistry);
 
         // --- the app layer (e05d1) ----------------------------------------------------------------
         // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo

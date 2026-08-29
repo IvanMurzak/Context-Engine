@@ -256,12 +256,11 @@ function isRecord(value: unknown): value is Record<string, unknown> {
 /**
  * A wire `state` token -> PlayState. `null` for anything else, so an unknown token from a NEWER
  * daemon leaves the last known state alone rather than silently reading as `edit` — claiming "no live
- * session" on a token we simply do not understand would be a confident lie.
- *
- * Exported since editor-window-chrome d1: the `session.control` reply parser (session.ts) applies
- * the SAME rule to the same wire vocabulary — a second hand-rolled reader is how the two drift.
+ * session" on a token we simply do not understand would be a confident lie. `applyFact` above is the
+ * ONE parser of this vocabulary — the `session.control` reply (session.ts) relays its token here
+ * verbatim rather than pre-parsing it, so there is no second reader to drift.
  */
-export function toPlayState(token: unknown): PlayState | null {
+function toPlayState(token: unknown): PlayState | null {
     return token === "edit" || token === "playing" || token === "paused" ? token : null;
 }
 

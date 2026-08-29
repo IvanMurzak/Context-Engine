@@ -12,6 +12,10 @@
 // blind spot). Every later editor-core TS task (e07b/e07c/e07d) declares `T1-tested` DoD items that run
 // HERE.
 
+// Type-only, so the harness stays a pure runner shim at runtime (nothing of commands.ts lands in
+// the bundle through this line).
+import type { PlayCommandActions } from "../commands.js";
+
 /**
  * One unit test: a name plus a body that throws (via `assert*`) on failure.
  *
@@ -140,6 +144,20 @@ function describeError(error: unknown): string {
         return error.message;
     }
     return stringify(error);
+}
+
+/**
+ * The no-op `play.*` transport actions, for registry fixtures whose case drives no transport.
+ * ⚠ LIVES HERE for the same reason `waitFor` does: five files need the identical stub, and a
+ * per-file copy is a five-file edit the next `PlayCommandActions` member would silently miss.
+ */
+export function noopPlayActions(): PlayCommandActions {
+    return {
+        play: () => ({ ok: true, note: "play" }),
+        pause: () => ({ ok: true, note: "pause" }),
+        stop: () => ({ ok: true, note: "stop" }),
+        step: () => ({ ok: true, note: "step" }),
+    };
 }
 
 function stringify(value: unknown): string {

@@ -403,9 +403,7 @@ SessionOutcome run_session(const std::filesystem::path& project,
         std::fprintf(stderr, "[%s] FAIL: a bridge surface refused to install\n", cfg.label);
         return out;
     }
-    // editor-window-chrome d1: SessionBridge::install registers `session.control` (the play-bar
-    // strip's transport relay) beside `session.state`; asserted so the ten-smoke rule is mechanised
-    // rather than trusted. Unbound, it answers the honest "nothing to drive", never a refusal.
+    // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
     if (!bridge.has_method(shell::kSessionControlMethod))
     {
         std::fprintf(stderr, "[%s] FAIL: the d1 session.control write surface did not route\n",

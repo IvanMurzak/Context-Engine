@@ -20,7 +20,7 @@
 // browser locally in ~2s and can. The smokes' contribution is the complementary one: they prove the
 // `session.state` surface is SERVED (their strict `bridge.refused() == 0` invariant fails otherwise).
 
-import { assert, assertEqual, type TestCase } from "./harness.js";
+import { assert, assertEqual, waitFor, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
 import {
     CHROME_ATTRIBUTE,
@@ -335,22 +335,22 @@ export const bootTests: readonly TestCase[] = [
                 // registry (the same holder the palette uses) to `session.control` and back.
                 assert(stop !== null && !stop.disabled, "stop is enabled while playing");
                 stop?.click();
-                let settled = false;
-                for (let i = 0; i < 100 && !settled; i += 1) {
-                    await new Promise((resolve) => setTimeout(resolve, 5));
-                    settled =
+                await waitFor(
+                    "the reply to be adopted and the strip re-rendered edit/t+0",
+                    () =>
                         document.documentElement.getAttribute("data-editor-playbar") ===
-                        "state edit; simTick 0";
-                }
-                const commandsDetail =
-                    document.documentElement.getAttribute("data-editor-commands") ?? "(absent)";
-                assertEqual(
-                    controlVerbs,
-                    ["stop"],
-                    `the press dispatched session.control {stop} (commands: ${commandsDetail}; ` +
-                        `bootError: ${report.error})`,
+                        "state edit; simTick 0",
+                    5_000,
+                    () =>
+                        `verbs ${JSON.stringify(controlVerbs)}; playbar ${
+                            document.documentElement.getAttribute("data-editor-playbar") ??
+                            "(absent)"
+                        }; commands ${
+                            document.documentElement.getAttribute("data-editor-commands") ??
+                            "(absent)"
+                        }; bootError: ${report.error}`,
                 );
-                assert(settled, "the reply was adopted and the strip re-rendered edit/t+0");
+                assertEqual(controlVerbs, ["stop"], "the press dispatched session.control {stop}");
                 assertEqual(
                     playbar
                         .querySelector('[data-playbar-control="play"]')

@@ -79,28 +79,27 @@ contract::Json SessionBridge::snapshot_json() const
 contract::Json SessionBridge::control_json(const std::string& verb)
 {
     SessionControlOutcome outcome;
+    bool answered = false;
     if (control_)
     {
         try
         {
             outcome = control_(verb);
+            answered = true;
         }
         catch (...)
         {
             // Contained, never propagated — the renderer's query path again. A throwing handler
             // costs the press its effect, reported honestly below, never the editor its boot.
-            // ONE snapshot() read: two would pay the provider twice and could tear the
-            // state/tick pair across a concurrent transition.
-            const SessionStateSnapshot state = snapshot();
             outcome = SessionControlOutcome{};
-            outcome.play_state = state.play_state;
-            outcome.sim_tick = state.sim_tick;
         }
     }
-    else
+    if (!answered)
     {
-        // UNBOUND is the smokes' (and a feed-less Shell's) state: nothing to drive. The same honest
-        // shape a gateway-less PlaybarModel reports — ok:false with NO code, the current state.
+        // UNBOUND (the smokes' and a feed-less Shell's state) or a throwing handler: nothing to
+        // drive. The same honest shape a gateway-less PlaybarModel reports — ok:false with NO
+        // code, the current state. ONE snapshot() read: two would pay the provider twice and
+        // could tear the state/tick pair across a concurrent transition.
         const SessionStateSnapshot state = snapshot();
         outcome.play_state = state.play_state;
         outcome.sim_tick = state.sim_tick;

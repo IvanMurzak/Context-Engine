@@ -266,6 +266,18 @@ std::uint64_t session_control_generation(const SessionFeed& feed)
     return feed.playbar_model().control_generation();
 }
 
+std::uint64_t session_state_generation(const SessionFeed& feed)
+{
+    // The generation `session.state` relays SUMS the applied-fact count and the model's control
+    // generation: a locally driven transition (`session.control`, the dock panel) never bumps
+    // `facts_applied` — the daemon's echo of our own write is dropped (session_feed.h) — so a
+    // generation built from it alone would freeze every `session.state` poller in this process
+    // across exactly the transitions the strip drives. Both counters are monotone, so the sum is
+    // too.
+    return static_cast<std::uint64_t>(session_facts_applied(feed)) +
+           session_control_generation(feed);
+}
+
 SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb)
 {
     SessionControlOutcome outcome;
@@ -276,8 +288,8 @@ SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb
         // silently mapped an unknown verb to "no-op" would hide exactly the wiring bug the bridge's
         // own validation exists to surface.
         outcome.error_code = kSessionControlBadVerbCode;
-        outcome.play_state = playbar::state_token(feed.playbar_model().state());
-        outcome.sim_tick = feed.playbar_model().sim_tick();
+        outcome.play_state = session_play_state(feed);
+        outcome.sim_tick = session_sim_tick(feed);
         return outcome;
     }
     // PlayAction::ok is fed from the daemon's `changed` (playbar_model.h) — a refused command
@@ -286,7 +298,7 @@ SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb
     outcome.changed = action->ok;
     outcome.error_code = action->error_code;
     outcome.play_state = playbar::state_token(action->state);
-    outcome.sim_tick = feed.playbar_model().sim_tick();
+    outcome.sim_tick = session_sim_tick(feed);
     return outcome;
 }
 

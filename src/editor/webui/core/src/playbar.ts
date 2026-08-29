@@ -41,7 +41,13 @@
 // DOM ONLY, no `innerHTML`, exactly like banners.ts / chrome.ts: every node is built with
 // `createElement` + `textContent`, so nothing off the wire can inject markup into the trusted zone.
 
-import { createBadge, createButton, createChip, type KitButton } from "../../kit/src/index.js";
+import {
+    createBadge,
+    createButton,
+    createChip,
+    TONE_ATTRIBUTE,
+    type KitButton,
+} from "../../kit/src/index.js";
 // STEP has no strip button (the mockup's transport is play/pause/stop) — it stays palette/keymap
 // reachable through its command id (commands.ts STEP_COMMAND_ID).
 import {
@@ -94,44 +100,35 @@ export const PLAYBAR_ATTRIBUTE = "data-editor-playbar";
 export type FlourishState = "idle" | "running" | "compiling" | "error" | "paused";
 
 /**
- * The honest 3->5 mapping (02 §7, the 01 §4 vocabulary-mismatch note): the L-51 session vocabulary
- * has three states, the flourish five. `edit`->`idle`, `playing`->`running`, `paused`->`paused`;
- * nothing measures compilation or build errors yet, so nothing may claim those hues — when the
- * build pipeline publishes such facts, THIS function is where they join.
+ * The ONE presentation record per session state — flourish (the honest 3->5 mapping: 02 §7, the
+ * 01 §4 vocabulary-mismatch note; nothing measures compilation or build errors yet, so no entry may
+ * claim those hues — when the build pipeline publishes such facts, THIS table is where they join),
+ * dot tone (06 §2's reserved semantics, bound 1:1), and the human-readable label (the L-51
+ * provenance state, said plainly). One table rather than three parallel switches, so a fourth
+ * session state is one row, not three edits.
  */
+const PRESENTATION: Record<
+    PlayState,
+    { readonly flourish: FlourishState; readonly tone: "good" | "wait" | "idle"; readonly label: string }
+> = {
+    edit: { flourish: "idle", tone: "idle", label: "Edit" },
+    playing: { flourish: "running", tone: "good", label: "Playing" },
+    paused: { flourish: "paused", tone: "wait", label: "Paused" },
+};
+
+/** The flourish value for one session state — see the `PRESENTATION` table's honesty rule. */
 export function flourishState(state: PlayState): FlourishState {
-    switch (state) {
-        case "playing":
-            return "running";
-        case "paused":
-            return "paused";
-        case "edit":
-            return "idle";
-    }
+    return PRESENTATION[state].flourish;
 }
 
-/** The status label + dot tone per session state (06 §2's reserved semantics, bound 1:1). */
+/** The status dot tone per session state (06 §2's reserved semantics, bound 1:1). */
 export function statusTone(state: PlayState): "good" | "wait" | "idle" {
-    switch (state) {
-        case "playing":
-            return "good";
-        case "paused":
-            return "wait";
-        case "edit":
-            return "idle";
-    }
+    return PRESENTATION[state].tone;
 }
 
 /** The human-readable status label — the L-51 provenance state, said plainly. */
 export function statusLabel(state: PlayState): string {
-    switch (state) {
-        case "playing":
-            return "Playing";
-        case "paused":
-            return "Paused";
-        case "edit":
-            return "Edit";
-    }
+    return PRESENTATION[state].label;
 }
 
 // Plain text glyphs, the chrome.ts discipline (never icon fonts). The play glyph doubles as resume;
@@ -155,12 +152,10 @@ export interface MountPlaybarOptions {
     readonly executeCommand: (commandId: string) => void;
 }
 
-/** What `mountPlaybar` produced — the handle boot keeps and the DOM tier asserts on. */
+/** What `mountPlaybar` produced — the handle boot keeps and re-renders through. */
 export interface PlaybarMount {
     /** Re-render from the session sink's current truth. Idempotent; cheap on an unchanged state. */
     applySession(state: PlayState, simTick: number): void;
-    /** The state the strip currently renders (the DOM tier's observable). */
-    readonly renderedState: PlayState;
 }
 
 /**
@@ -172,12 +167,9 @@ export function mountPlaybar(slot: HTMLElement, options: MountPlaybarOptions): P
     const doc = slot.ownerDocument;
     slot.replaceChildren();
 
-    const el = (tag: string, className: string, text = ""): HTMLElement => {
+    const el = (tag: string, className: string): HTMLElement => {
         const node = doc.createElement(tag);
         node.className = className;
-        if (text !== "") {
-            node.textContent = text;
-        }
         return node;
     };
 
@@ -238,12 +230,13 @@ export function mountPlaybar(slot: HTMLElement, options: MountPlaybarOptions): P
     target.element.title = LABEL_TARGET;
     slot.append(target.element);
 
-    // --- the render function ---------------------------------------------------------------------
+    // --- the render functions --------------------------------------------------------------------
+    // Split per input so each half runs only when ITS value moved: the state half touches the
+    // `aria-live` badge, so re-running it on a tick-only move (the `editor.step` shape — state
+    // unchanged, tick advanced) would re-announce an identical label.
     let rendered: PlayState = "edit";
     let renderedTick = 0;
-    const render = (state: PlayState, simTick: number): void => {
-        rendered = state;
-        renderedTick = simTick;
+    const renderState = (state: PlayState): void => {
         play.element.setAttribute(PLAY_STATE_ATTRIBUTE, flourishState(state));
         // Play doubles as resume; the accessible label names the ACTION the press will perform.
         const playLabel = state === "paused" ? LABEL_RESUME : LABEL_PLAY;
@@ -255,32 +248,46 @@ export function mountPlaybar(slot: HTMLElement, options: MountPlaybarOptions): P
         pause.setDisabled(state !== "playing");
         stop.setDisabled(state === "edit");
         const tone = statusTone(state);
-        dot.setAttribute("data-tone", tone);
+        dot.setAttribute(TONE_ATTRIBUTE, tone);
         label.setLabel(statusLabel(state));
         label.setTone(tone);
+    };
+    const renderTick = (simTick: number): void => {
         timer.textContent = `t+${String(simTick)}`;
-        // The `<html>` report, updated with every render — the smoke/DevTools readout.
+    };
+    // The `<html>` report, updated with every applied change — the smoke/DevTools readout.
+    const report = (): void => {
         doc.documentElement.setAttribute(
             PLAYBAR_ATTRIBUTE,
-            `state ${state}; simTick ${String(simTick)}`,
+            `state ${rendered}; simTick ${String(renderedTick)}`,
         );
     };
-    render("edit", 0);
+    renderState(rendered);
+    renderTick(renderedTick);
+    report();
 
     return {
-        // The unchanged-state short-circuit is load-bearing, not an optimisation: boot's feed
-        // callback calls this after EVERY 500 ms poll read, and the status label is an
-        // `aria-live="polite"` region — `setText` replaces its text node, and a live region whose
-        // node is replaced re-announces even when the text is identical, so an unguarded re-render
-        // would have a screen reader saying "Playing" twice a second for the life of the window.
+        // The unchanged short-circuits are load-bearing, not an optimisation: boot's feed callback
+        // calls this after EVERY 500 ms poll read, and the status label is an `aria-live="polite"`
+        // region — `setText` replaces its text node, and a live region whose node is replaced
+        // re-announces even when the text is identical, so an unguarded re-render would have a
+        // screen reader saying "Playing" twice a second for the life of the window (and once per
+        // press on tick-only moves, which the per-half split above keeps away from the badge).
         applySession: (state: PlayState, simTick: number): void => {
-            if (state === rendered && simTick === renderedTick) {
+            const stateMoved = state !== rendered;
+            const tickMoved = simTick !== renderedTick;
+            if (!stateMoved && !tickMoved) {
                 return;
             }
-            render(state, simTick);
-        },
-        get renderedState(): PlayState {
-            return rendered;
+            rendered = state;
+            renderedTick = simTick;
+            if (stateMoved) {
+                renderState(state);
+            }
+            if (tickMoved) {
+                renderTick(simTick);
+            }
+            report();
         },
     };
 }
@@ -319,17 +326,17 @@ export function makePlayActions(
         if (!report.served) {
             return { ok: false, note: `session.control unavailable: ${report.diagnostic}` };
         }
-        if (report.playState !== null) {
-            session.applyFact({
-                event: PLAY_STATE_EVENT,
-                origin: 0,
-                state: report.stateToken,
-                // An unreadable reply tick is OMITTED, not re-spelled as 0 — the sink's tick-less
-                // fact rule then keeps the last known value (when.ts).
-                ...(report.simTick !== null ? { simTick: report.simTick } : {}),
-            });
-            strip.current?.applySession(session.playState, session.simTick);
-        }
+        // The sink is the ONE parser of the reply's token: an unreadable one applies nothing (the
+        // when.ts toPlayState rule), and the strip's short-circuit then repaints nothing.
+        session.applyFact({
+            event: PLAY_STATE_EVENT,
+            origin: 0,
+            state: report.stateToken,
+            // An unreadable reply tick is OMITTED, not re-spelled as 0 — the sink's tick-less
+            // fact rule then keeps the last known value (when.ts).
+            ...(report.simTick !== null ? { simTick: report.simTick } : {}),
+        });
+        strip.current?.applySession(session.playState, session.simTick);
         if (report.errorCode !== "") {
             return { ok: false, note: `${transition} refused: ${report.errorCode}` };
         }

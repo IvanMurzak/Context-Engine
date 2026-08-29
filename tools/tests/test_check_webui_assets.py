@@ -935,11 +935,17 @@ def test_a_renamed_themes_cpp_constant_is_a_config_error(tmp_path: Path) -> None
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, themes=renamed)
 
-@pytest.mark.parametrize(
-    "ts_name",
-    ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT", "SESSION_CONTROL_METHOD",
-     "SESSION_CONTROL_VERB_PLAY", "SESSION_CONTROL_VERB_PAUSE", "SESSION_CONTROL_VERB_STOP",
-     "SESSION_CONTROL_VERB_STEP"])
+# The bundle-side session vocabulary (e08d + the d1 control surface) — ONE list for both
+# parametrized session gates below, so a new verb is one edit, not the two-list drift this
+# file exists to prevent.
+SESSION_TS_NAMES = (
+    "SESSION_STATE_METHOD", "PLAY_STATE_EVENT", "SESSION_CONTROL_METHOD",
+    "SESSION_CONTROL_VERB_PLAY", "SESSION_CONTROL_VERB_PAUSE", "SESSION_CONTROL_VERB_STOP",
+    "SESSION_CONTROL_VERB_STEP",
+)
+
+
+@pytest.mark.parametrize("ts_name", SESSION_TS_NAMES)
 def test_session_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     """The e08d session relay: a drift here re-freezes editor-core's `playState` at its baseline.
 
@@ -953,11 +959,7 @@ def test_session_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
     assert _run_panel(tmp_path, bundle=drifted) == 1
 
 
-@pytest.mark.parametrize(
-    "ts_name",
-    ["SESSION_STATE_METHOD", "PLAY_STATE_EVENT", "SESSION_CONTROL_METHOD",
-     "SESSION_CONTROL_VERB_PLAY", "SESSION_CONTROL_VERB_PAUSE", "SESSION_CONTROL_VERB_STOP",
-     "SESSION_CONTROL_VERB_STEP"])
+@pytest.mark.parametrize("ts_name", SESSION_TS_NAMES)
 def test_bundle_missing_a_session_constant_fails(tmp_path: Path, ts_name: str) -> None:
     """An ABSENT session constant means editor-core is not on the relay the Shell serves at all."""
     stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if ts_name not in line)

@@ -89,7 +89,6 @@ function scriptedSender(reply: Partial<SessionControlReport>): ScriptedSender {
             return Promise.resolve({
                 served: true,
                 changed: false,
-                playState: null,
                 stateToken: "",
                 simTick: 0,
                 errorCode: "",
@@ -301,7 +300,6 @@ export const playbarTests: readonly TestCase[] = [
             try {
                 const sender = scriptedSender({
                     changed: true,
-                    playState: "playing",
                     stateToken: "playing",
                     simTick: 3,
                 });
@@ -322,7 +320,6 @@ export const playbarTests: readonly TestCase[] = [
                 // daemon's truth, so it is adopted too (an unchanged one is a no-op adopt).
                 const refusing = scriptedSender({
                     changed: false,
-                    playState: "playing",
                     stateToken: "playing",
                     simTick: 3,
                     errorCode: "play.not_running",
@@ -333,18 +330,10 @@ export const playbarTests: readonly TestCase[] = [
                 assert(refused.note.includes("play.not_running"), "…and names the daemon's code");
 
                 // An UNSERVED write (an older Shell): reported, sink untouched.
-                const dead: SessionControlSender = {
-                    send: (): Promise<SessionControlReport> =>
-                        Promise.resolve({
-                            served: false,
-                            changed: false,
-                            playState: null,
-                            stateToken: "",
-                            simTick: 0,
-                            errorCode: "",
-                            diagnostic: "bridge.unknown_method: nope",
-                        }),
-                };
+                const dead = scriptedSender({
+                    served: false,
+                    diagnostic: "bridge.unknown_method: nope",
+                });
                 const unserved = await makePlayActions(dead, session, holder).pause();
                 assert(!unserved.ok, "an unserved write is not ok");
                 assert(unserved.note.includes("unavailable"), "…and says the surface is missing");
@@ -354,7 +343,6 @@ export const playbarTests: readonly TestCase[] = [
                 // rendering the last known state rather than inventing one.
                 const foreign = scriptedSender({
                     changed: true,
-                    playState: null,
                     stateToken: "rewinding",
                     simTick: 9,
                 });

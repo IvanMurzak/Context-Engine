@@ -26,7 +26,7 @@
 // rather than one per tick forever.
 
 import { BridgeError, ShellBridge, isRecord } from "./bridge.js";
-import { DaemonSessionState, toPlayState, toSimTick, type PlayState } from "./when.js";
+import { DaemonSessionState, toSimTick, type PlayState } from "./when.js";
 
 /**
  * The Shell method that relays the daemon's session state.
@@ -146,11 +146,10 @@ export interface SessionControlReport {
     /** Did something actually move (the daemon's `changed`)? */
     readonly changed: boolean;
     /**
-     * The state AFTER, as the daemon reports it — `null` when the reply's token is one this build
-     * cannot name (the `toPlayState` rule: keep the last known state, never invent `edit`).
+     * The reply's raw state token — relayed to the sink VERBATIM, never re-spelled or pre-parsed:
+     * `DaemonSessionState.applyFact` (when.ts) is the one parser of this vocabulary, and a token it
+     * cannot name applies nothing (keep the last known state, never invent `edit`).
      */
-    readonly playState: PlayState | null;
-    /** The raw wire token behind `playState` — relayed to the sink verbatim, never re-spelled. */
     readonly stateToken: string;
     /**
      * The running session's simTick, as the daemon reports it — `null` when the reply carried no
@@ -194,37 +193,15 @@ export class SessionControlClient implements SessionControlSender {
         try {
             reply = await this.#bridge.call(SESSION_CONTROL_METHOD, { verb });
         } catch (error) {
-            return {
-                served: false,
-                changed: false,
-                playState: null,
-                stateToken: "",
-                simTick: null,
-                errorCode: "",
-                diagnostic:
-                    error instanceof BridgeError
-                        ? `${error.reason}: ${error.message}`
-                        : error instanceof Error
-                          ? error.message
-                          : String(error),
-            };
+            return controlFailure(false, bridgeDiagnostic(error));
         }
         if (!isRecord(reply)) {
-            return {
-                served: true,
-                changed: false,
-                playState: null,
-                stateToken: "",
-                simTick: null,
-                errorCode: "",
-                diagnostic: "the Shell answered session.control with a non-record",
-            };
+            return controlFailure(true, "the Shell answered session.control with a non-record");
         }
         const stateToken = typeof reply["state"] === "string" ? reply["state"] : "";
         return {
             served: true,
             changed: reply["changed"] === true,
-            playState: toPlayState(stateToken),
             stateToken,
             // The SAME null-tolerant rule the fact path applies (when.ts toSimTick): an unreadable
             // tick is reported as unknown, never re-spelled as a fabricated 0.
@@ -233,6 +210,20 @@ export class SessionControlClient implements SessionControlSender {
             diagnostic: "",
         };
     }
+}
+
+/** A failed `session.control` write, as a report — the one spelling of both failure shapes. */
+function controlFailure(served: boolean, diagnostic: string): SessionControlReport {
+    return { served, changed: false, stateToken: "", simTick: null, errorCode: "", diagnostic };
+}
+
+/** One spelling of "why did this bridge call fail" — shared by both catch paths in this module. */
+function bridgeDiagnostic(error: unknown): string {
+    return error instanceof BridgeError
+        ? `${error.reason}: ${error.message}`
+        : error instanceof Error
+          ? error.message
+          : String(error);
 }
 
 /**
@@ -301,12 +292,7 @@ export class SessionFeed {
                 playState: this.#state.playState,
                 simTick: this.#state.simTick,
                 changed: false,
-                diagnostic:
-                    error instanceof BridgeError
-                        ? `${error.reason}: ${error.message}`
-                        : error instanceof Error
-                          ? error.message
-                          : String(error),
+                diagnostic: bridgeDiagnostic(error),
             });
         }
         if (reply === null) {

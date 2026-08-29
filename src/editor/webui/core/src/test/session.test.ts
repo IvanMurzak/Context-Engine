@@ -30,19 +30,26 @@ import {
 } from "../session.js";
 import { DaemonSessionState } from "../when.js";
 
-/** Records every method the bundle asked for, and answers from a scripted table. */
+/** Records every method the bundle asked for (params included), and answers from a scripted table. */
 interface Recorder {
     readonly query: BridgeQueryFunction;
     readonly methods: string[];
+    readonly params: unknown[];
 }
 
 type Answer = { result: unknown } | { error: { code: number; message: string; reason: string } };
 
 function recordingQuery(answers: Record<string, Answer>): Recorder {
     const methods: string[] = [];
+    const params: unknown[] = [];
     const query: BridgeQueryFunction = (request: BridgeQuery): number => {
-        const parsed = JSON.parse(request.request) as { id: number; method: string };
+        const parsed = JSON.parse(request.request) as {
+            id: number;
+            method: string;
+            params?: unknown;
+        };
         methods.push(parsed.method);
+        params.push(parsed.params);
         const answer = answers[parsed.method];
         const envelope =
             answer === undefined
@@ -69,7 +76,7 @@ function recordingQuery(answers: Record<string, Answer>): Recorder {
         request.onSuccess(JSON.stringify(envelope));
         return methods.length;
     };
-    return { query, methods };
+    return { query, methods, params };
 }
 
 /** The Shell's reply shape — the daemon's own `play-state` fact plus the two relay facts. */
@@ -254,31 +261,18 @@ export const sessionTests: readonly TestCase[] = [
     {
         name: "session.control d1: a served write reports the daemon's answer, verb on the wire",
         run: async () => {
-            const sentParams: unknown[] = [];
-            const query: BridgeQueryFunction = (request: BridgeQuery): number => {
-                const parsed = JSON.parse(request.request) as {
-                    id: number;
-                    method: string;
-                    params: unknown;
-                };
-                assertEqual(parsed.method, SESSION_CONTROL_METHOD, "the strip's one write method");
-                sentParams.push(parsed.params);
-                request.onSuccess(
-                    JSON.stringify({
-                        jsonrpc: "2.0",
-                        id: parsed.id,
-                        result: { changed: true, state: "playing", simTick: 4, errorCode: "" },
-                    }),
-                );
-                return 1;
-            };
-            const client = new SessionControlClient(new ShellBridge(query));
+            const recorder = recordingQuery({
+                [SESSION_CONTROL_METHOD]: {
+                    result: { changed: true, state: "playing", simTick: 4, errorCode: "" },
+                },
+            });
+            const client = new SessionControlClient(new ShellBridge(recorder.query));
             const report = await client.send(SESSION_CONTROL_VERB_PLAY);
-            assertEqual(sentParams, [{ verb: "play" }], "the verb rides the params");
+            assertEqual(recorder.methods, [SESSION_CONTROL_METHOD], "the strip's one write method");
+            assertEqual(recorder.params, [{ verb: "play" }], "the verb rides the params");
             assert(report.served, "served");
             assert(report.changed, "the daemon's `changed` is relayed");
-            assertEqual(report.playState, "playing", "the resulting state parses");
-            assertEqual(report.stateToken, "playing", "…with the raw token preserved");
+            assertEqual(report.stateToken, "playing", "the daemon's token is relayed verbatim");
             assertEqual(report.simTick, 4, "the daemon's simTick is relayed");
             assertEqual(report.errorCode, "", "no refusal");
         },
@@ -313,8 +307,9 @@ export const sessionTests: readonly TestCase[] = [
             assert(refusal.served && !refusal.changed, "served, nothing moved");
             assertEqual(refusal.errorCode, "play.not_running", "the daemon's code, verbatim");
 
-            // A state token this build cannot name: `playState` is null (the toPlayState rule — the
-            // consumer keeps its last known state), while the raw token is still reported.
+            // A state token this build cannot name is still relayed VERBATIM: the sink (when.ts
+            // `applyFact`) is the ONE parser of the vocabulary, and it keeps the last known state
+            // on a token it cannot name (pinned in playbar.test.ts and when.test.ts).
             const foreign = new SessionControlClient(
                 new ShellBridge(
                     recordingQuery({
@@ -325,8 +320,7 @@ export const sessionTests: readonly TestCase[] = [
                 ),
             );
             const unknown = await foreign.send(SESSION_CONTROL_VERB_STEP);
-            assertEqual(unknown.playState, null, "an unknown token does not parse");
-            assertEqual(unknown.stateToken, "rewinding", "…but is reported raw");
+            assertEqual(unknown.stateToken, "rewinding", "the raw token, for the sink to judge");
 
             // A non-record reply is tolerated with a diagnostic.
             const odd = new SessionControlClient(
