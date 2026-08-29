@@ -91,10 +91,11 @@ inline constexpr const char* kChromeStateMethod = "chrome.state";
 
 // `chrome.state.mode` — what the titlebar strip renders (02 §1): `custom` = full strip including
 // window controls (Windows, once b1 makes the frame ours), `hybrid` = strip minus controls,
-// left-padded by `controlsInset` (macOS, once c1 does), `system` = a menu-bar-only strip with no
-// drag duty (Linux, permanently — D6: the WM owns the frame). INTERIM HONESTY IS BINDING
-// (tasks/README.md): the mode reports what the backend actually DOES, so every backend ships
-// `system` in a1 and b1/c1 flip win32/cocoa in the PRs that make it true — never ahead of them.
+// padded by `controlsInset` (macOS — LIVE since c1: cocoa_chrome.h's query reads the real window
+// style back at call time, so the flip can never outlive the behaviour), `system` = a menu-bar-only
+// strip with no drag duty (Linux, permanently — D6: the WM owns the frame). INTERIM HONESTY IS
+// BINDING (tasks/README.md): the mode reports what the backend actually DOES — win32 still ships
+// `system` until b1 lands its frameless NC path, never ahead of it.
 inline constexpr const char* kChromeModeCustom = "custom";
 inline constexpr const char* kChromeModeHybrid = "hybrid";
 inline constexpr const char* kChromeModeSystem = "system";
@@ -164,8 +165,8 @@ enum class ChromeMode
 struct ChromeState
 {
     ChromeMode mode = ChromeMode::system;
-    // Physical px the strip must reserve for OS-drawn window controls (macOS traffic lights, c1).
-    // Zero on every backend in a1.
+    // Physical px the strip must reserve for OS-drawn window controls — since c1, the cocoa
+    // backend's MEASURED traffic-light cluster (cocoa_chrome.h); zero on every other backend.
     std::uint32_t controls_inset_left = 0;
     std::uint32_t controls_inset_right = 0;
     bool maximized = false;

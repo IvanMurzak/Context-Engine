@@ -46,6 +46,7 @@ add_library(context_editor_shell STATIC
     src/win32_window.cpp  # the Windows OS calls (early-returns to an honest gap elsewhere)
     src/x11_window.cpp    # e12a: the Linux X11/XWayland OS calls (ditto, off Linux)
     src/cocoa_window.cpp  # e12b: the OFF-macOS half of the Cocoa backend (.mm is APPLE-only below)
+    src/cocoa_chrome.cpp  # editor-window-chrome c1: the PURE macOS hybrid-chrome decisions (all legs)
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
@@ -269,6 +270,9 @@ set(_context_shell_tests
                        #         never-a-window-id origin, and the honest unbound/throwing-provider paths
     test_chrome_facts  # editor-window-chrome a1: the maximized-flip chrome fact - envelope shape,
                        #         the UNICAST delivery, and the honest unbound-store path
+    test_cocoa_chrome  # editor-window-chrome c1: the caption-press consult (drag/zoom/none over the
+                       #         real RegionMap) + the measured traffic-light inset arithmetic + the
+                       #         off-platform/wrong-backend refusals of the cocoa_chrome.h surface
     test_smoke_window  # e12a-x11-legs + e12c-3: the --real-window seam - flag parse, the
                        # anti-degrade negatives, DIP conversion off 1.0, the THREE key-table sweeps
                        # (X11 keysyms, macOS virtual keys, and the cross-arm agreement), and the

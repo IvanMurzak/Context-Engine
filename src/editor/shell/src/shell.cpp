@@ -3,6 +3,8 @@
 
 #include "context/editor/shell/shell.h"
 
+#include "context/editor/shell/cocoa_chrome.h"
+
 #include <cstddef>
 #include <cstdio>
 #include <string>
@@ -88,6 +90,14 @@ EditorWindow::EditorWindow(std::unique_ptr<IWindowBackend> backend,
 {
     input_.set_dpi(backend_->dpi());
     last_placement_ = backend_->placement();
+    // c1 (editor-window-chrome, target design 02 §4): a macOS backend consults THIS window's live
+    // region map at NSEvent time, so a press on the published `caption` rect becomes the OS's
+    // window drag — the only moment performWindowDragWithEvent: still has the event in hand. Wired
+    // at construction, unconditionally, so EVERY composition (the app, the windowed smoke, a test)
+    // gets production wiring; a no-op for every non-Cocoa backend. Lifetime is sound by scope: the
+    // arbiter is a member of this same object and the backend reads the pointer only inside
+    // pump(), which never runs during destruction.
+    cocoa_bind_caption_regions(*backend_, &input_.regions());
 }
 
 PresentPath EditorWindow::attach_present(render::IRhi& rhi)
@@ -210,10 +220,12 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
         case InputTarget::native:
             // The native path (03 §6.3): camera controls / picking / gizmo gestures, and — since
             // editor-window-chrome a1 grew the region vocabulary — the four caption chrome regions.
-            // Their consumers are still to land: e11 drives the viewport verbs over the bridge, b1's
-            // Windows NC hit-test consumes the caption regions BEFORE client routing, and c1's macOS
-            // pump consumes caption presses. Until then the arbitration is real and the sample is
-            // accounted for, but dispatch stays honestly empty.
+            // Consumers land upstream of this arm, which is why it stays empty: c1's macOS pump
+            // consumes a caption PRESS at NSEvent time (cocoa_window.mm's caption consult — only
+            // there does performWindowDragWithEvent: still have the event), so what reaches here is
+            // the press's aftermath (its release, hovers over the strip), arbitrated and accounted
+            // for but dispatched to nobody. b1's Windows NC hit-test will likewise consume caption
+            // clicks BEFORE client routing, and e11 drives the viewport verbs over the bridge.
             break;
         case InputTarget::keymap:
         case InputTarget::swallowed:
