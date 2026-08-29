@@ -251,6 +251,86 @@ void test_a_second_button_does_not_retarget_a_live_drag()
     CHECK(arbiter.route_pointer(pointer_at(PointerAction::move, 450, 20), 5).region_id == "game");
 }
 
+// preview_pointer must be route_pointer's verdict — asked BEFORE the sample is routed, by an OS-side
+// consumer (the macOS caption consult) that has to decide at NSEvent time — and must leave the
+// arbiter exactly as it found it. Checked across every capture shape the arbiter has: none, the
+// implicit drag, a modal, an overlay; each preview is compared with the dispatch the SAME sample
+// then receives, and the capture state is compared before and after the preview.
+void test_preview_is_route_pointers_verdict_without_its_effects()
+{
+    InputArbiter arbiter;
+    arbiter.regions().publish(
+        {ShellRegion{"scene", shelltest::rect(0, 76, 800, 224), RegionKind::viewport},
+         ShellRegion{"dropdown", shelltest::rect(100, 100, 80, 120), RegionKind::native},
+         ShellRegion{"chrome.caption", shelltest::rect(0, 0, 800, 76), RegionKind::caption}});
+
+    const auto agrees = [&](const PointerEvent& event, std::uint64_t now) {
+        const std::size_t depth_before = arbiter.capture_depth();
+        const bool held_before = arbiter.has_pointer_capture();
+        const int dispatches_before = arbiter.pointer_dispatches();
+        const int swallowed_before = arbiter.swallowed();
+        const PointerPreview preview = arbiter.preview_pointer(event);
+        // No effects: nothing captured, released, or counted.
+        CHECK(arbiter.capture_depth() == depth_before);
+        CHECK(arbiter.has_pointer_capture() == held_before);
+        CHECK(arbiter.pointer_dispatches() == dispatches_before);
+        CHECK(arbiter.swallowed() == swallowed_before);
+        // The verdict: the dispatch the same sample now receives.
+        const PointerDispatch dispatch = arbiter.route_pointer(event, now);
+        CHECK(dispatch.target == preview.target);
+        CHECK(dispatch.region_id == preview.region_id);
+        return dispatch;
+    };
+
+    // No capture: plain arbitration — caption, viewport, browser.
+    CHECK(agrees(pointer_at(PointerAction::move, 400, 30), 1).target == InputTarget::native);
+    CHECK(agrees(pointer_at(PointerAction::move, 400, 200), 2).target == InputTarget::viewport);
+    CHECK(agrees(pointer_at(PointerAction::move, 900, 200), 3).target == InputTarget::browser);
+
+    // A press: the preview says what the press's own implicit capture will route it as.
+    CHECK(agrees(pointer_at(PointerAction::down, 400, 200, MouseButton::right), 4).target ==
+          InputTarget::viewport);
+    CHECK(arbiter.has_pointer_capture());
+    // Under that drag, a left press on the caption goes to the capture — preview and route agree,
+    // and the preview's region is the capture's, not the caption under the pointer.
+    const PointerPreview captured = arbiter.preview_pointer(
+        pointer_at(PointerAction::down, 400, 30, MouseButton::left));
+    CHECK(captured.target == InputTarget::viewport);
+    CHECK(captured.region_id == "scene");
+    CHECK(captured.region != nullptr && captured.region->id == "scene");
+    CHECK(agrees(pointer_at(PointerAction::down, 400, 30, MouseButton::left), 5).region_id ==
+          "scene");
+    // The release ends it (through route_pointer — a preview of the release must NOT end it).
+    CHECK(agrees(pointer_at(PointerAction::up, 400, 30, MouseButton::right), 6).target ==
+          InputTarget::viewport);
+    CHECK(!arbiter.has_pointer_capture());
+
+    // Modal: outside is swallowed, inside routes to the modal target.
+    Capture modal;
+    modal.region_id = "dropdown";
+    modal.target = InputTarget::native;
+    modal.modal = true;
+    arbiter.push_capture(modal);
+    CHECK(agrees(pointer_at(PointerAction::down, 400, 30, MouseButton::left), 7).target ==
+          InputTarget::swallowed);
+    CHECK(agrees(pointer_at(PointerAction::move, 120, 140), 8).target == InputTarget::native);
+    CHECK(arbiter.pop_capture("dropdown"));
+
+    // Overlay: a miss falls through to arbitration, so the caption keeps its press.
+    Capture overlay = modal;
+    overlay.modal = false;
+    arbiter.push_capture(overlay);
+    const PointerPreview through =
+        arbiter.preview_pointer(pointer_at(PointerAction::down, 400, 30, MouseButton::left));
+    CHECK(through.target == InputTarget::native);
+    CHECK(through.region_id == "chrome.caption");
+    CHECK(agrees(pointer_at(PointerAction::down, 400, 30, MouseButton::left), 9).region_id ==
+          "chrome.caption");
+    CHECK(agrees(pointer_at(PointerAction::up, 400, 30, MouseButton::left), 10).target ==
+          InputTarget::native);
+    CHECK(arbiter.pop_capture("dropdown"));
+}
+
 void test_modal_capture_swallows_a_miss_while_an_overlay_falls_through()
 {
     InputArbiter arbiter;
@@ -396,6 +476,7 @@ int main()
     test_a_second_button_does_not_retarget_a_live_drag();
     test_modal_capture_swallows_a_miss_while_an_overlay_falls_through();
     test_a_press_outside_a_modal_capture_is_swallowed_not_routed_underneath();
+    test_preview_is_route_pointers_verdict_without_its_effects();
     test_key_routing_follows_the_focus_class();
     test_dispatch_counters_make_a_round_trip_assertable();
     SHELL_TEST_MAIN_END();

@@ -3,12 +3,15 @@
 // WHAT THIS PROVES, on ALL THREE legs (the AppKit half is honestly untested off macOS — window.h's
 // discipline — and its windowed proof is `editor-shell-cocoa-window`'s c1 step):
 //
-//   1. THE CAPTION CONSULT IS THE ARBITER'S OWN VERDICT. `caption_press_action` decides over the
-//      REAL RegionMap with the same back-to-front last-match-wins hit-test route_pointer uses, so
-//      the pump and the arbiter can never disagree about who owns a press: a control published
-//      after the caption wins, a caption published above a viewport wins, and only a LEFT PRESS is
-//      ever the caption's — moves, releases, the right and middle buttons all flow to the browser
-//      untouched (the "for THAT press only" half of the suppression rule).
+//   1. THE CAPTION CONSULT IS THE ARBITER'S OWN VERDICT — regions AND capture. `caption_press_action`
+//      decides over the REAL InputArbiter: the same back-to-front last-match-wins hit-test
+//      route_pointer uses (a control published after the caption wins, a caption published above
+//      a viewport wins), and the same live capture state, asked through preview_pointer — a press
+//      on the caption while another button's implicit drag or a modal push_capture is live is
+//      YIELDED to the arbiter, never consumed as a window drag, and becomes the caption's again the
+//      moment that capture ends. Only a LEFT PRESS is ever the caption's — moves, releases, the
+//      right and middle buttons all flow to the browser untouched (the "for THAT press only" half
+//      of the suppression rule).
 //   2. DOUBLE-CLICK IS ZOOM. Cocoa counts clicks on the event (NsEvent::click_count), so the first
 //      press of a double-click drags and the second zooms — the platform convention 02 §4 pins.
 //   3. THE MEASURED INSET ARITHMETIC. Traffic-light frames (points, window coords) become the
@@ -52,20 +55,29 @@ namespace
     return pointer;
 }
 
-// The a2 titlebar's real publish shape: the caption drag surface FIRST, controls after (02 §6).
-[[nodiscard]] RegionMap titlebar_map()
+// The a2 titlebar's real publish shape: the caption drag surface FIRST, controls after (02 §6) —
+// published into a REAL arbiter, the object the consult reads, so every case here runs the same
+// hit-test and the same capture state route_pointer does. A viewport below the strip is what a
+// capture can be started on.
+[[nodiscard]] std::vector<ShellRegion> titlebar_regions()
 {
-    RegionMap map;
-    map.publish({region("chrome.caption", RegionKind::caption, 100, 0, 1000, 76),
-                 region("chrome.caption-min", RegionKind::caption_min, 900, 0, 60, 76),
-                 region("chrome.caption-max", RegionKind::caption_max, 960, 0, 60, 76),
-                 region("chrome.caption-close", RegionKind::caption_close, 1020, 0, 60, 76)});
-    return map;
+    return {region("scene", RegionKind::viewport, 0, 76, 1200, 724),
+            region("chrome.caption", RegionKind::caption, 100, 0, 1000, 76),
+            region("chrome.caption-min", RegionKind::caption_min, 900, 0, 60, 76),
+            region("chrome.caption-max", RegionKind::caption_max, 960, 0, 60, 76),
+            region("chrome.caption-close", RegionKind::caption_close, 1020, 0, 60, 76)};
+}
+
+[[nodiscard]] InputArbiter titlebar_arbiter()
+{
+    InputArbiter arbiter;
+    arbiter.regions().publish(titlebar_regions());
+    return arbiter;
 }
 
 void a_left_press_on_the_caption_drags_and_a_double_click_zooms()
 {
-    const RegionMap map = titlebar_map();
+    const InputArbiter map = titlebar_arbiter();
     CHECK(caption_press_action(press_at(400, 30), map) == CaptionPressAction::drag);
     CHECK(caption_press_action(press_at(400, 30, MouseButton::left, 2), map) ==
           CaptionPressAction::zoom);
@@ -75,9 +87,60 @@ void a_left_press_on_the_caption_drags_and_a_double_click_zooms()
           CaptionPressAction::zoom);
 }
 
+void a_live_capture_owns_the_press_so_the_consult_yields()
+{
+    // THE GAP c1 SHIPPED WITH, closed: the consult used to read only the region map, so a left
+    // press on the caption while another button's drag was live became a window drag — the drag's
+    // owner never saw that press, and its release later arrived to nobody. Now the consult asks
+    // the arbiter's own verdict, capture included.
+    InputArbiter arbiter = titlebar_arbiter();
+
+    // A right-button orbit starts on the viewport and wanders up onto the strip; the left press
+    // there belongs to the orbit's implicit capture (route_pointer would route it to "scene").
+    (void)arbiter.route_pointer(press_at(600, 400, MouseButton::right), 1);
+    CHECK(arbiter.has_pointer_capture());
+    CHECK(caption_press_action(press_at(400, 30), arbiter) == CaptionPressAction::yielded);
+    // ...and a double-click is no more the caption's than a single press while it is live.
+    CHECK(caption_press_action(press_at(400, 30, MouseButton::left, 2), arbiter) ==
+          CaptionPressAction::yielded);
+    // The consult is side-effect free: asking did not disturb the live capture.
+    CHECK(arbiter.has_pointer_capture());
+    // The moment the orbit's release ends the capture, the caption is the caption's again.
+    (void)arbiter.route_pointer(
+        press_at(400, 30, MouseButton::right, 1, PointerAction::up), 2);
+    CHECK(!arbiter.has_pointer_capture());
+    CHECK(caption_press_action(press_at(400, 30), arbiter) == CaptionPressAction::drag);
+
+    // A MODAL capture (an open dropdown): its backdrop swallows the press, so a window drag must
+    // not start from it either — dismissing the dropdown is what the press is for.
+    Capture modal;
+    modal.region_id = "scene";
+    modal.target = InputTarget::viewport;
+    modal.modal = true;
+    arbiter.push_capture(modal);
+    CHECK(caption_press_action(press_at(400, 30), arbiter) == CaptionPressAction::yielded);
+    CHECK(arbiter.preview_pointer(press_at(400, 30)).target == InputTarget::swallowed);
+    CHECK(arbiter.pop_capture("scene"));
+    CHECK(caption_press_action(press_at(400, 30), arbiter) == CaptionPressAction::drag);
+
+    // An OVERLAY (non-modal) capture whose region the press is outside of falls through to
+    // ordinary arbitration in route_pointer — so the caption keeps its press, exactly as there.
+    Capture overlay = modal;
+    overlay.modal = false;
+    arbiter.push_capture(overlay);
+    CHECK(caption_press_action(press_at(400, 30), arbiter) == CaptionPressAction::drag);
+    CHECK(arbiter.pop_capture("scene"));
+
+    // A press that is NOT on the caption is `none`, capture or no capture — `yielded` is reserved
+    // for the caption's own rect, so the smoke's counter means what it says.
+    (void)arbiter.route_pointer(press_at(600, 400, MouseButton::right), 3);
+    CHECK(caption_press_action(press_at(600, 400), arbiter) == CaptionPressAction::none);
+    CHECK(caption_press_action(press_at(50, 30), arbiter) == CaptionPressAction::none);
+}
+
 void only_a_left_press_is_ever_the_captions()
 {
-    const RegionMap map = titlebar_map();
+    const InputArbiter map = titlebar_arbiter();
     // A move keeps hovering the strip; a release belongs to whatever owns its press; the right
     // button is the context-menu gesture; middle is middle. All flow on untouched.
     CHECK(caption_press_action(press_at(400, 30, MouseButton::none, 1, PointerAction::move), map) ==
@@ -95,29 +158,29 @@ void only_a_left_press_is_ever_the_captions()
 
 void the_consult_is_the_arbiters_own_last_match_wins_verdict()
 {
-    const RegionMap map = titlebar_map();
+    const InputArbiter map = titlebar_arbiter();
     // A press on a CONTROL rect published after the caption is the control's, not the caption's —
     // the same precedence route_pointer resolves, with no carve-out token (input.h).
     CHECK(caption_press_action(press_at(930, 30), map) == CaptionPressAction::none);
     CHECK(caption_press_action(press_at(1050, 30), map) == CaptionPressAction::none);
-    // Outside every region: the browser's.
+    // Outside every region: the browser's; on the viewport below the strip: the viewport's.
     CHECK(caption_press_action(press_at(50, 30), map) == CaptionPressAction::none);
     CHECK(caption_press_action(press_at(400, 200), map) == CaptionPressAction::none);
     // A caption published ABOVE (after) a viewport region wins over it, same rule.
-    RegionMap layered;
-    layered.publish({region("scene", RegionKind::viewport, 0, 0, 1200, 800),
-                     region("chrome.caption", RegionKind::caption, 0, 0, 1200, 76)});
+    InputArbiter layered;
+    layered.regions().publish({region("scene", RegionKind::viewport, 0, 0, 1200, 800),
+                               region("chrome.caption", RegionKind::caption, 0, 0, 1200, 76)});
     CHECK(caption_press_action(press_at(400, 30), layered) == CaptionPressAction::drag);
     // And a press routed to the viewport (below the caption strip) is NOT the caption's.
     CHECK(caption_press_action(press_at(400, 400), layered) == CaptionPressAction::none);
     // Rect edges match the arbiter's half-open contains: the origin is inside, origin+extent out.
-    RegionMap edges;
-    edges.publish({region("chrome.caption", RegionKind::caption, 100, 10, 200, 40)});
+    InputArbiter edges;
+    edges.regions().publish({region("chrome.caption", RegionKind::caption, 100, 10, 200, 40)});
     CHECK(caption_press_action(press_at(100, 10), edges) == CaptionPressAction::drag);
     CHECK(caption_press_action(press_at(300, 10), edges) == CaptionPressAction::none);
     CHECK(caption_press_action(press_at(100, 50), edges) == CaptionPressAction::none);
     // An empty map — the `system`-mode publish, and every window before the first publish.
-    const RegionMap empty;
+    const InputArbiter empty;
     CHECK(caption_press_action(press_at(400, 30), empty) == CaptionPressAction::none);
 }
 
@@ -183,9 +246,9 @@ void the_surface_refuses_a_non_cocoa_backend_on_every_leg()
     CHECK(chrome.inset_left == 123u);
     CocoaCaptionStats stats;
     CHECK(!cocoa_caption_stats(headless, stats));
-    RegionMap map;
-    cocoa_bind_caption_regions(headless, &map); // a no-op, and must not crash
-    cocoa_bind_caption_regions(headless, nullptr);
+    InputArbiter arbiter;
+    cocoa_bind_caption_arbiter(headless, &arbiter); // a no-op, and must not crash
+    cocoa_bind_caption_arbiter(headless, nullptr);
     // Still fully functional as a window afterwards — the no-op really was one.
     std::vector<ShellEvent> drained;
     CHECK(headless.pump(drained));
@@ -196,6 +259,7 @@ void the_surface_refuses_a_non_cocoa_backend_on_every_leg()
 int main()
 {
     a_left_press_on_the_caption_drags_and_a_double_click_zooms();
+    a_live_capture_owns_the_press_so_the_consult_yields();
     only_a_left_press_is_ever_the_captions();
     the_consult_is_the_arbiters_own_last_match_wins_verdict();
     the_measured_cluster_becomes_the_physical_inset();

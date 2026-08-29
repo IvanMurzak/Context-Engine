@@ -49,21 +49,27 @@ struct CocoaChromeState
     std::uint32_t inset_right = 0;
 };
 
-// What a decoded pointer PRESS over the published region map asks the Cocoa pump to do.
+// What a decoded pointer PRESS over the arbiter's published region map asks the Cocoa pump to do.
 enum class CaptionPressAction
 {
-    none, // not the caption's press — decode and dispatch as always
-    drag, // single press on the caption drag surface: hand the NSEvent to performWindowDragWithEvent:
-    zoom, // double-click on the caption: `zoom:` (the platform convention, 02 §4)
+    none,    // not the caption's press — decode and dispatch as always
+    drag,    // single press on the caption drag surface: hand the NSEvent to performWindowDragWithEvent:
+    zoom,    // double-click on the caption: `zoom:` (the platform convention, 02 §4)
+    yielded, // ON the caption, but a live capture owns the press: leave it to the arbiter, which
+             // routes it to the capture target (another button's drag) or swallows it (a modal
+             // backdrop) — exactly as route_pointer will, because that verdict is what was asked
 };
 
-// Decide the caption consult for ONE decoded pointer event, PURE over the same region map the
-// InputArbiter hit-tests (back-to-front last-match-wins, so a control published after the caption
-// wins without a carve-out token — input.h). Only a LEFT press can be the caption's: moves keep
-// hovering the strip, releases belong to whatever owns the press, and the right button is the
-// context-menu gesture the browser must keep seeing.
+// Decide the caption consult for ONE decoded pointer event: the arbiter's OWN verdict, asked
+// side-effect free through InputArbiter::preview_pointer, so the pump and the arbiter can never
+// disagree about who owns a press. The region half is the same back-to-front last-match-wins
+// hit-test (a control published after the caption wins without a carve-out token — input.h); the
+// CAPTURE half is the same capture state route_pointer consults (a right-button orbit that wandered
+// onto the strip keeps its press; an open dropdown's backdrop swallows it). Only a LEFT press can be
+// the caption's: moves keep hovering the strip, releases belong to whatever owns the press, and the
+// right button is the context-menu gesture the browser must keep seeing.
 [[nodiscard]] CaptionPressAction caption_press_action(const PointerEvent& pointer,
-                                                      const RegionMap& regions);
+                                                      const InputArbiter& arbiter);
 
 // The traffic-light cluster's measured extent becoming the `controlsInset` physical pixels.
 //
@@ -78,12 +84,14 @@ enum class CaptionPressAction
 [[nodiscard]] CocoaChromeState ns_hybrid_controls_inset(double min_x_points, double max_x_points,
                                                         double width_points, DpiScale dpi);
 
-// What the pump consumed, for the windowed smoke's suppression assertions (the same observable
-// pattern WindowBridge's counters serve the live CEF smokes).
+// What the pump consumed — and what it declined — for the windowed smoke's suppression assertions
+// (the same observable pattern WindowBridge's counters serve the live CEF smokes). `yields` counts
+// caption presses the consult left to the arbiter because a capture owned them.
 struct CocoaCaptionStats
 {
     std::size_t drags = 0;
     std::size_t zooms = 0;
+    std::size_t yields = 0;
 };
 
 // --- the backend query/wiring surface (real on macOS, an honest refusal elsewhere) ---------------
@@ -96,12 +104,13 @@ struct CocoaCaptionStats
 // for every other backend (headless, win32, x11) and in every non-macOS build.
 [[nodiscard]] bool cocoa_hybrid_chrome(const IWindowBackend& backend, CocoaChromeState& out);
 
-// Give a Cocoa backend read access to a window's LIVE region map, so its pump can consult the
-// published `caption` rects at NSEvent time — the only moment `performWindowDragWithEvent:` still
-// has the event in hand (dispatch-time consumers are too late; the NSEvent is gone). The pointer
-// must outlive every pump() call (EditorWindow wires its own arbiter's map, whose lifetime this
-// holds for). No-op for every non-Cocoa backend and in every non-macOS build; nullptr unbinds.
-void cocoa_bind_caption_regions(IWindowBackend& backend, const RegionMap* regions);
+// Give a Cocoa backend read access to a window's LIVE input arbiter, so its pump can consult the
+// published `caption` rects AND the live capture state at NSEvent time — the only moment
+// `performWindowDragWithEvent:` still has the event in hand (dispatch-time consumers are too late;
+// the NSEvent is gone). The pointer must outlive every pump() call (EditorWindow wires its own
+// arbiter, whose lifetime this holds for). No-op for every non-Cocoa backend and in every non-macOS
+// build; nullptr unbinds.
+void cocoa_bind_caption_arbiter(IWindowBackend& backend, const InputArbiter* arbiter);
 
 // Read what the pump consumed so far. True only for the live Cocoa backend, like the query above.
 [[nodiscard]] bool cocoa_caption_stats(const IWindowBackend& backend, CocoaCaptionStats& out);

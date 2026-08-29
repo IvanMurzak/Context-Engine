@@ -10,7 +10,7 @@
 namespace context::editor::shell
 {
 
-CaptionPressAction caption_press_action(const PointerEvent& pointer, const RegionMap& regions)
+CaptionPressAction caption_press_action(const PointerEvent& pointer, const InputArbiter& arbiter)
 {
     // Only a LEFT PRESS can be the caption's (cocoa_chrome.h states why moves, releases and the
     // right button are excluded). Everything else falls through to ordinary dispatch untouched —
@@ -22,10 +22,23 @@ CaptionPressAction caption_press_action(const PointerEvent& pointer, const Regio
     // The SAME hit-test the InputArbiter routes by (back-to-front last-match-wins), so the pump and
     // the arbiter can never disagree about who owns a press: a control published after the caption
     // wins here exactly as it wins there, with no carve-out token (input.h § RegionKind).
-    const ShellRegion* hit = regions.hit_test(pointer.position);
+    const ShellRegion* hit = arbiter.regions().hit_test(pointer.position);
     if (hit == nullptr || hit->kind != RegionKind::caption)
     {
         return CaptionPressAction::none;
+    }
+    // THE CAPTURE HALF of the verdict. A press on the caption rect is the OS's only when the
+    // arbiter would route it to the caption: while a live capture owns the stream — another
+    // button's implicit drag (a right-button camera orbit that wandered onto the strip), or a
+    // modal push_capture (an open dropdown's backdrop) — route_pointer sends the press to the
+    // capture target or swallows it, and a window drag started here instead would steal the press
+    // from that owner without its release ever arriving. preview_pointer is route_pointer's own
+    // verdict, side-effect free, so the two cannot disagree; the press then flows on to the
+    // arbiter, which applies exactly that verdict.
+    const PointerPreview verdict = arbiter.preview_pointer(pointer);
+    if (verdict.target != InputTarget::native || verdict.region != hit)
+    {
+        return CaptionPressAction::yielded;
     }
     // Cocoa counts clicks for us (NsEvent::click_count): the second press of a double-click
     // arrives with click_count 2, so the first press starts a drag — exactly what a native
