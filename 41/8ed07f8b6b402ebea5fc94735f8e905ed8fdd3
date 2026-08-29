@@ -1,0 +1,49 @@
+src/render/present/src/present_blit.cpp
+  s_e41fb4e3d28067::t_c96913c01de86b 83-104
+  s_e41fb4e3d28067::t_2f1ca108b43a2b 170-184
+  s_e41fb4e3d28067::t_95eb6022b27e8f 272-276,279-290
+src/editor/shell/include/context/editor/shell/compositor.h
+  s_e41fb4e3d28067::t_bf4970dd4d2497 24-33
+src/render/present/tests/test_present_blit.cpp
+  s_e41fb4e3d28067::t_bdfa83280276f2 289-355
+  s_e41fb4e3d28067::t_36cbee76590a1f 475
+src/render/present/include/context/render/present/present_blit.h
+  s_e41fb4e3d28067::t_885947a81c8e05 134
+  s_e41fb4e3d28067::t_01dd6c9a3f4fa4 81-99
+src/editor/shell/tests/test_compositor.cpp
+  s_e41fb4e3d28067::t_cb405536c6373e 786-788
+  s_e41fb4e3d28067::t_15064fa58422ea 650,652-654,663-664
+  s_e41fb4e3d28067::t_6aca27a3545c39 522-523,525,530-649,651,655-662
+src/editor/shell/src/compositor.cpp
+  s_e41fb4e3d28067::t_daa1c5ad560df7 508-513,519-525
+  s_e41fb4e3d28067::t_d8f62d763d7be9 7-8,20-30
+  s_e41fb4e3d28067::t_c8c641cfafd6da 640-641,653
+  s_e41fb4e3d28067::t_cc94bf124cbe7f 574-579,581-590,596-605,607-620
+  s_08cc1266f4dd6d::t_fcb4e6b5bda6f1 31
+docs/present-path.md
+  s_e41fb4e3d28067::t_c24483dfe30ac7 122-131,133-136
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "418ed07f8b6b402ebea5fc94735f8e905ed8fdd3",
+  "prompts": {},
+  "sessions": {
+    "s_08cc1266f4dd6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cefc1ab-00b7-4be9-99fc-ad9db138c73c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e41fb4e3d28067": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a85e025-6cd0-47d4-9438-1cffcaf6f151",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
