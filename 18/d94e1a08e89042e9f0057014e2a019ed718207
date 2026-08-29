@@ -1,0 +1,107 @@
+src/editor/shell/src/shell.cpp
+  s_7b2854368302f3::t_08ebddc0ee7181 280
+  s_7b2854368302f3::t_994613f4664045 211-219
+  s_7b2854368302f3::t_0a51caa347e13d 274-279,281-285
+src/editor/shell/tests/test_window_bridge.cpp
+  s_7b2854368302f3::t_8bd49acb0a3757 383-440
+  s_7b2854368302f3::t_da02d6a65d05f3 498-508
+  s_7b2854368302f3::t_d9d03ac99965c6 543
+tools/tests/test_check_webui_assets.py
+  s_7b2854368302f3::t_05a224d5b984ab 574-577
+  s_7b2854368302f3::t_285d523afbdc62 708-711
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_9144ec242a71ad 62-68
+  s_7b2854368302f3::t_26086cb66374ac 323-324
+  s_7b2854368302f3::t_15afac9b2e0e2c 315-322,325,329-332
+  s_7b2854368302f3::t_d2462108b21a77 326-328
+  s_7b2854368302f3::t_cf5dc6e76a1fbd 99
+src/editor/shell/src/window.cpp
+  s_7b2854368302f3::t_fd79b4a771a723 312-385,387-537,539-581
+  s_7b2854368302f3::t_f73588d174db5f 538
+  s_7b2854368302f3::t_a6fc2af079d8e8 386
+  s_7b2854368302f3::t_36286c457c182d 112-119
+src/editor/shell/src/input.cpp
+  s_7b2854368302f3::t_cff7e476073e8b 45
+  s_7b2854368302f3::t_32f2ced556c19b 31-44,46-50
+src/editor/shell/src/window_bridge.cpp
+  s_7b2854368302f3::t_438d670fb5cb16 367-377,384-393
+  s_7b2854368302f3::t_b221745b3c72c5 592-606
+  s_7b2854368302f3::t_eeb221ded10370 378-383
+  s_7b2854368302f3::t_c58e122e656db7 153-157
+src/editor/shell/include/context/editor/shell/shell.h
+  s_7b2854368302f3::t_49ea56afa49cda 172-175
+src/editor/shell/tests/test_input.cpp
+  s_7b2854368302f3::t_58c6cb9f9e4954 122,124-132,139-140,142,145-157,160-165,168
+  s_7b2854368302f3::t_7919a22ecc5427 392
+src/editor/webui/core/src/test/boot.test.ts
+  s_7b2854368302f3::t_19cb1c91ba22d3 33
+  s_7b2854368302f3::t_9b7f628742e2e9 314-343
+src/editor/shell/include/context/editor/shell/window.h
+  s_7b2854368302f3::t_77fb9606e5d489 367-476
+  s_7b2854368302f3::t_a5834c03b2555b 283-321
+  s_7b2854368302f3::t_9b0c386d0b5046 230-234,243-244,246
+  s_7b2854368302f3::t_2c611172299464 204-213
+  s_7b2854368302f3::t_fe38e837d13cc8 150-169
+src/editor/webui/core/src/test/window.test.ts
+  s_7b2854368302f3::t_55a61331e31bfe 341-377
+src/editor/shell/src/win32_window.cpp
+  s_7b2854368302f3::t_b121cf9436b271 664-669
+  s_7b2854368302f3::t_693c788987beac 337-350,365-376,382-387
+  s_7b2854368302f3::t_022c6dbfc8f0de 84-114
+  s_7b2854368302f3::t_d237ffd2e0ba38 472-577
+  s_7b2854368302f3::t_169b2f8b6bd962 29-33
+  s_7b2854368302f3::t_8af440e6dd5321 431-437
+  s_7b2854368302f3::t_8495a2d92acbee 709-712
+src/editor/shell/tests/test_window.cpp
+  s_7b2854368302f3::t_3846b9a0fe8cdd 312-320
+  s_7b2854368302f3::t_086455fc7eb6c6 1686
+  s_7b2854368302f3::t_44c6085d7bbd12 231-235,239-311,321-374,379-512
+  s_7b2854368302f3::t_b25cadc5817409 1671-1680
+  s_7b2854368302f3::t_761e4bc3c46c9d 375-378
+  s_7b2854368302f3::t_7a058f9e834c35 513,613-641
+  s_7b2854368302f3::t_453790c4da54dc 514
+src/editor/shell/CMakeLists.txt
+  s_7b2854368302f3::t_5666c9096811fe 155-158
+src/editor/shell/tests/test_shell.cpp
+  s_7b2854368302f3::t_b6b92565de2880 212-276
+  s_7b2854368302f3::t_eb13b6f0fc20b0 609-610
+src/editor/shell/include/context/editor/shell/window_bridge.h
+  s_7b2854368302f3::t_5081cfa48a1cf5 286-288
+  s_7b2854368302f3::t_89ab5e576a5e6c 312-313
+  s_7b2854368302f3::t_ee4677cd09febb 92-103
+  s_7b2854368302f3::t_d45c6b00769e38 408-412
+  s_7b2854368302f3::t_efef7279c2b7a5 355-363
+  s_7b2854368302f3::t_fc8f934280baec 447,455-456
+tools/check_webui_assets.py
+  s_7b2854368302f3::t_30f5162961a571 295-305
+src/editor/shell/app/editor_main.cpp
+  s_7b2854368302f3::t_1fb00374878d67 231-235,240,243-246,252-262
+  s_7b2854368302f3::t_da8ec05d4f07ab 263
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_7b2854368302f3::t_1f89d0af0a7092 730-737
+  s_7b2854368302f3::t_fa5c40d48f843a 810-856,860-911
+  s_7b2854368302f3::t_0dd1955d8bcef0 857-859
+src/editor/webui/core/src/window.ts
+  s_7b2854368302f3::t_03d7ff821004fb 401-410,412-414
+  s_7b2854368302f3::t_c5ce23737403dc 50-61
+  s_7b2854368302f3::t_428285af50609e 411
+  s_7b2854368302f3::t_402df7351e96c1 430-435,437
+src/editor/shell/include/context/editor/shell/input.h
+  s_7b2854368302f3::t_faa57fc71047b0 50-55
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "18d94e1a08e89042e9f0057014e2a019ed718207",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
