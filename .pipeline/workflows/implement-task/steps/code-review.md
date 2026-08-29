@@ -54,16 +54,21 @@ Nothing is pushed.
    prove pre-existence mechanically instead: the test file, the tool it
    exercises, and the governing `conftest.py` are all absent from
    `git diff --name-only origin/main...HEAD`. CI's ubuntu `python tests` job is
-   the authoritative gate for those. Any
-   `ctest` run covering the `webui-*` family needs the browser env prefixed PER
-   COMMAND (env does not persist between Bash calls):
+   the authoritative gate for those. The webui TS
+   tier (`webui-ts-*`) is OPT-IN: if the fixes touched any webui TS source,
+   rebuild its bundle FIRST —
+   `cmake --build --preset dev --target context_editor_webui_test` — that target
+   is not in ALL, so a plain dev build leaves the bundle stale and
+   `webui-ts-unit` scores a false green (or a false red) over the OLD code. An
+   `unknown target` error there means the tier was never configured in — with
+   `CONTEXT_WEBUI_BROWSER_TESTS` at its default OFF, `webui-ts-unit` is not
+   registered at all and the suite is green by omission; reconfigure with
+   `cmake -S src --preset dev -DCONTEXT_WEBUI_BROWSER_TESTS=ON`. Then prefix the
+   browser env on any `ctest` that can reach it, PER COMMAND (env does not
+   persist between Bash calls):
    `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
    — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
-   fails "no Chromium-family browser found" alone in a green suite. And if the
-   fixes touched any webui TS source, rebuild the browser-test bundle FIRST —
-   `cmake --build --preset dev --target context_editor_webui_test` — that target
-   is deliberately not in ALL, so a plain dev build leaves the bundle stale and
-   `webui-ts-unit` then scores a false green (or a false red) over the OLD code.
+   fails "no Chromium-family browser found" alone in a green suite.
    A review fix
    that reddens the build or tests must be repaired — or reverted, with the
    reasoning included in your report — never left red.
