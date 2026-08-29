@@ -1,0 +1,163 @@
+src/editor/webui/core/src/index.ts
+  s_7b2854368302f3::t_974d1137ae0353 30-32
+src/editor/shell/src/session_bridge.cpp
+  s_7b2854368302f3::t_013fb07b5f531b 11-23,29-32,77
+  s_7b2854368302f3::t_f143dc665ba474 73-74,79-115,121-126,129-144
+  s_7b2854368302f3::t_2d0ffc1cf09be3 75
+  s_7b2854368302f3::t_5f94e2f5e442ba 127-128
+  s_afe96152c02a7b::t_8dc755c710c69f 33,76,78
+src/editor/shell/panels/include/context/editor/shell/panels/session_feed.h
+  s_7b2854368302f3::t_7f981999590a4c 120-128
+src/editor/webui/core/src/when.ts
+  s_7b2854368302f3::t_5f537e046f3c19 164,172-182,192-194,212-220,224-226,235,239-244
+  s_7b2854368302f3::t_80ae86e69c2f3b 256-258,260
+  s_7b2854368302f3::t_75d8d9b13f7680 221
+  s_7b2854368302f3::t_18695d365dda16 245-246
+src/editor/shell/panels/src/session_feed.cpp
+  s_7b2854368302f3::t_96e1a74f4900b5 8
+  s_7b2854368302f3::t_600c38e8308271 244-274
+src/editor/shell/include/context/editor/shell/session_bridge.h
+  s_7b2854368302f3::t_9fa3c94320a01a 159-163
+  s_7b2854368302f3::t_529bd00896e4f2 83-112,121-125,127-134,147-152
+  s_7b2854368302f3::t_78d26a61a3db28 135-146
+  s_7b2854368302f3::t_e4c421c8e5269b 182-184
+  s_7b2854368302f3::t_5c8b345344e23e 180-181,185-186
+  s_7b2854368302f3::t_3c2af7c4817221 192,196-202,209-212,215,217
+  s_7b2854368302f3::t_d7da789e98ce8a 195
+src/editor/webui/core/src/test/chrome.test.ts
+  s_7b2854368302f3::t_1eabb4a1d394ac 703-709
+src/editor/shell/app/editor_main.cpp
+  s_7b2854368302f3::t_1724fab6175538 832-842,846-855
+src/editor/shell/panels/tests/test_session_feed.cpp
+  s_7b2854368302f3::t_88fedd1d8ae0ae 427-507
+  s_7b2854368302f3::t_6827214dcfea37 33-38,44-46
+  s_7b2854368302f3::t_4916bb0e8aa9ad 508
+src/editor/webui/app/app.css
+  s_7b2854368302f3::t_cdba4c6271baad 220-226,229-232,243-297
+  s_7b2854368302f3::t_1d2d849b493e62 298
+docs/editor-session-state.md
+  s_7b2854368302f3::t_9a10c411eea5b7 220-221,225-234
+  s_7b2854368302f3::t_be96eaac24a910 274-279
+  s_7b2854368302f3::t_2f972d2f9d03dc 207
+  s_7b2854368302f3::t_84c53804d81328 235
+src/editor/webui/core/src/test/commands.test.ts
+  s_7b2854368302f3::t_f3877b287b2109 602,608,615,619,625
+  s_7b2854368302f3::t_cd19e27ed690c8 525-564
+  s_7b2854368302f3::t_efe3fa94f3a0d2 27-29,33-34,42
+  s_7b2854368302f3::t_afb0ff7c5eda14 110-130
+  s_7b2854368302f3::t_687d13d6f394b5 690,701
+src/editor/webui/core/src/commands.ts
+  s_7b2854368302f3::t_dcf2a1f6e5dbe4 667
+  s_7b2854368302f3::t_78fddda0079a8b 647-648
+  s_7b2854368302f3::t_05f7366c48af42 503-591
+  s_7b2854368302f3::t_5ef77c9ea52e91 641
+src/editor/webui/core/src/test/playbar.test.ts
+  s_7b2854368302f3::t_29533947afb485 1-369
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_7b2854368302f3::t_c72abe8f9b40e9 259-283,286-292
+  s_7b2854368302f3::t_d7d634ee080aa1 284-285
+src/editor/shell/cef/src/cef_shell_restore_smoke.cpp
+  s_7b2854368302f3::t_e9654abe9946c2 406-414
+src/editor/webui/core/src/session.ts
+  s_7b2854368302f3::t_1c65fd28d1a067 142-163,172-180,182-235
+  s_7b2854368302f3::t_ff7755304bf889 247,256-260,265
+  s_7b2854368302f3::t_24c83581510075 43-68
+  s_7b2854368302f3::t_ece10aaff03fb9 42,164-171
+  s_7b2854368302f3::t_aa48ffa2bcc447 88-89
+  s_7b2854368302f3::t_c1e15d9f67cc34 296,300,308,311,315,318,327,331,334-344
+  s_7b2854368302f3::t_5e24a98ab2ef50 181
+  s_7b2854368302f3::t_4549202ae86636 29
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_ac2af3a8f994e8 1288-1289
+  s_7b2854368302f3::t_a9e4ee5b2679b4 43
+  s_7b2854368302f3::t_334f6f41e9f8d4 100-106
+  s_7b2854368302f3::t_47c40ee295bf35 495-498
+  s_7b2854368302f3::t_391ea46c91a4c8 1252
+  s_7b2854368302f3::t_29dd497c4cd5d1 65,72
+  s_7b2854368302f3::t_ada0e24e1c1b03 679
+  s_7b2854368302f3::t_57964d1c705d66 396-411,425
+  s_7b2854368302f3::t_46555916206289 723-728,740,754-789
+  s_7b2854368302f3::t_5d2a78d9d50feb 1290
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_7b2854368302f3::t_f938506941f6ed 39-42
+  s_7b2854368302f3::t_19428746801775 282-302
+src/editor/webui/core/src/playbar.ts
+  s_7b2854368302f3::t_deffcfa6ab81fa 105
+  s_7b2854368302f3::t_3aa68c205afbbc 1-44,47-58,60-104,106-297,299-338
+  s_7b2854368302f3::t_e2d9f416c9edd0 45-46
+  s_7b2854368302f3::t_ea29054905cc98 59
+  s_7b2854368302f3::t_eae9bac311e570 298
+src/editor/webui/core/src/test/boot.test.ts
+  s_7b2854368302f3::t_851ce56c3aa070 264-340,349-368,370
+  s_7b2854368302f3::t_36af61440156c2 346-347
+  s_7b2854368302f3::t_6099d32f9dbcbb 32
+  s_7b2854368302f3::t_a6dfcbf8251975 341-345,348
+  s_7b2854368302f3::t_d5f1df79c15a4f 369,371
+src/editor/shell/tests/test_session_bridge.cpp
+  s_7b2854368302f3::t_5122b174dd3074 82-86
+  s_7b2854368302f3::t_7e3e317074058c 51-71
+  s_7b2854368302f3::t_248ed9275caa7e 206-327,339-342
+  s_7b2854368302f3::t_58244f8d6588d4 102,111
+tools/check_webui_assets.py
+  s_7b2854368302f3::t_e229fc25583437 272-284
+src/editor/shell/cef/src/cef_shell_drag_smoke.cpp
+  s_7b2854368302f3::t_00639589545e46 183-186
+src/editor/shell/cef/src/cef_shell_iframe_smoke.cpp
+  s_7b2854368302f3::t_590e9ec59169cc 564-571
+src/editor/shell/cef/src/cef_shell_inspector_fanout_smoke.cpp
+  s_7b2854368302f3::t_98525eb1844c57 341-344
+src/editor/shell/cef/src/cef_shell_multiwindow_smoke.cpp
+  s_7b2854368302f3::t_b5ceefa1640119 203-206
+src/editor/shell/cef/src/cef_shell_palette_smoke.cpp
+  s_7b2854368302f3::t_b9e70dc29fe251 389-396
+src/editor/shell/cef/src/cef_shell_settings_smoke.cpp
+  s_7b2854368302f3::t_d1eb38785bfe0f 356-363
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_7b2854368302f3::t_b9bfc049b3f5c7 475-482
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_7b2854368302f3::t_3fc1e8e24b9976 185-188
+src/editor/shell/cef/src/cef_shell_uimirror_smoke.cpp
+  s_7b2854368302f3::t_f20ecdde260085 180-183
+src/editor/webui/core/src/test/keymap.test.ts
+  s_7b2854368302f3::t_84aa353747c8b0 344-349
+src/editor/webui/core/src/test/main.ts
+  s_7b2854368302f3::t_9cba82b088be8c 28,68
+src/editor/webui/core/src/test/palette.test.ts
+  s_7b2854368302f3::t_af9e3d4a195b81 79-84
+src/editor/webui/core/src/test/panelverbs.test.ts
+  s_7b2854368302f3::t_0da5448e600d50 205-210
+src/editor/webui/core/src/test/reachability.test.ts
+  s_7b2854368302f3::t_b3ce04e8886ce8 106-111
+src/editor/webui/core/src/test/session.test.ts
+  s_7b2854368302f3::t_8bc19b20e31314 20-24,26,200-341
+src/editor/webui/core/src/test/when.test.ts
+  s_7b2854368302f3::t_5f329653f8a228 348-410
+src/editor/webui/core/src/test/window_a11y.test.ts
+  s_7b2854368302f3::t_0f36bdb4858374 53-58
+tools/tests/test_check_webui_assets.py
+  s_7b2854368302f3::t_ae2a8afd26046b 563-568,687-694,930-934,948-952
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "330f4280a4c8533211f5d8e6fcf6d43adc2a4a66",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_afe96152c02a7b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "86888702-2519-48ef-af17-0b34b7c8277a",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
