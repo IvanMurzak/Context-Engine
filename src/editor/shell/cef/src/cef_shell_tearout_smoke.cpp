@@ -20,6 +20,15 @@
 //      proven because the relay's `pending_rehomes(0)` drops to zero without the smoke touching it.
 //      This is the SAME relay window-close rehome uses, so "never silently lost" is exercised here.
 //
+// SINCE editor-window-chrome f1 THIS IS ALSO THE SECONDARY-WINDOW CHROME PROOF (02 §9 / D4): under
+// the custom chrome this smoke serves, the torn-out window's `chrome.state` answers
+// `window:"secondary"` off its own bridge, its compact strip publishes its OWN caption + control
+// regions (a generation bump on WINDOW 1's map), the pure b1 hit-test answers the frame codes over
+// those live rects — frameless holds for every window the factory creates — the `ctx-smoke-chrome`
+// seam routes the three control verbs through window 1's own bridge, and a `window.close` from the
+// secondary closes exactly it. The DOM half (compact strip contents, no play-bar/statusbar DOM) is
+// the webui tier's (chrome.test.ts § f1), per the same split every chrome task used.
+//
 // Headless throughout (windowless browsers, the C-F2 CPU present path), so it is safe on the
 // Session-0 self-hosted Windows runner, exactly like its sibling smokes. The Windows hard exit after
 // the verdict mirrors them.
@@ -50,6 +59,7 @@
 #include "context/editor/shell/themes_bridge.h"
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/welcome.h"
+#include "context/editor/shell/window.h" // f1: hit_test_frame + kHt* over the secondary's live map
 #include "context/editor/shell/window_bridge.h"
 #include "context/editor/shell/window_registry.h"
 
@@ -226,6 +236,19 @@ struct WindowSurfaces
                     store.forget(self);
                 return {d.ok(), self, shell::to_string(d.outcome), d.error};
             });
+        // f1 (02 §9): serve CUSTOM chrome to EVERY window — the smoke-tier counterpart of the DOM
+        // tier's injected states, exactly as the boot smoke binds it (cef_shell_smoke.cpp § a2).
+        // Under `custom` each window's titlebar renders its controls cluster and publishes its
+        // caption + control regions, so the SECONDARY-window assertions below have live rects to
+        // read. The `window` field is NOT served here — the bridge derives it from its own
+        // `self_id`, which is precisely the fact the f1 assertions pin.
+        window_bridge->bind_chrome_state(
+            []() -> shell::ChromeState
+            {
+                shell::ChromeState state;
+                state.mode = shell::ChromeMode::custom;
+                return state;
+            });
         ok = window_bridge->install(router) && ok;
         return ok;
     }
@@ -233,7 +256,11 @@ struct WindowSurfaces
 
 std::string boot_url()
 {
-    return std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" + kSmokeThemeId;
+    // `ctx-smoke-chrome` (f1): every window's editor-core drives the three window-control verbs
+    // once at boot — the a1 seam the boot smoke uses — so the SECONDARY window's control routing
+    // is assertable from its bridge counters below (a headless CEF run cannot click the buttons).
+    return std::string(shell::kAppEntryUrl) + "?" + shell::kThemePinFlag + "=" + kSmokeThemeId +
+           "&ctx-smoke-chrome=1";
 }
 
 shell::cef::CefShellOptions make_cef_options(const smoke::BrowserGeometry& geometry,
@@ -453,6 +480,22 @@ int main(int argc, char** argv)
         return false;
     };
 
+    // The ONE bounded wait every DoD predicate below rides (the seed consumed, the primary's
+    // initial region publish, the rehome drained — they differ ONLY in the predicate): pump the
+    // manager against a 15 s wall clock until `done()` answers true or the pump refuses. Each
+    // caller's SMOKE_CHECK re-asserts its predicate right after, so a timeout fails on the claim
+    // itself rather than in here.
+    const auto pump_until = [&](const auto& done)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
+        while (std::chrono::steady_clock::now() < deadline && !done())
+        {
+            if (!manager.pump_once(now_us()))
+                break;
+            std::this_thread::sleep_for(std::chrono::milliseconds(5));
+        }
+    };
+
     SMOKE_CHECK(boot_window(shell::kPrimaryWindowId, primary_surfaces, 30),
                 "window 0 composited a live CEF frame and completed its bridge handshake");
     if (manager.window(shell::kPrimaryWindowId) != primary)
@@ -497,18 +540,102 @@ int main(int argc, char** argv)
         // relay's boot seed is consumed ONLY by a live `window.seed`, so `has_boot_seed` going false —
         // and the new window's `seeds_served()` climbing — is the end-to-end evidence that the moved
         // state reached the new window's editor-core, which then restores it over `panel.state.set`.
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (std::chrono::steady_clock::now() < deadline && move_store.has_boot_seed(new_id))
-        {
-            if (!manager.pump_once(now_us()))
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
+        pump_until([&] { return !move_store.has_boot_seed(new_id); });
         SMOKE_CHECK(!move_store.has_boot_seed(new_id),
                     "the torn-out window's LIVE editor-core read its seed (window.seed consumed it)");
         SMOKE_CHECK(created_surfaces->window_bridge != nullptr &&
                         created_surfaces->window_bridge->seeds_served() >= 1,
                     "the new window served its boot seed to the live renderer");
+
+        // --- f1: SECONDARY-WINDOW chrome (editor-window-chrome f1, target design 02 §9 / D4) -----
+        //
+        // The seed wait above doubles as the ordering guarantee for everything here: boot fetches
+        // `chrome.state`, drives the `ctx-smoke-chrome` verbs and AWAITS the strips' initial region
+        // publish BEFORE it reads `window.seed` (boot.ts), so a consumed seed means the torn-out
+        // window's chrome is fully up. What the DOM tier cannot prove and this can: the role, the
+        // regions and the verbs travel WINDOW 1'S OWN bridge + input arbiter, never the primary's.
+        if (created_surfaces->window_bridge != nullptr)
+        {
+            // The role is the BRIDGE's own self_id derivation — the same handler the live renderer
+            // fetched (chrome_reads climbed), so this pins the value editor-core actually saw.
+            SMOKE_CHECK(created_surfaces->window_bridge->chrome_reads() >= 1,
+                        "the torn-out window's editor-core fetched chrome.state at its own boot");
+            const Json secondary_chrome =
+                dispatch(*created_bridge, shell::kChromeStateMethod, Json::object());
+            SMOKE_CHECK(secondary_chrome.at("window").as_string() == "secondary",
+                        "chrome.state.window is \"secondary\" in the torn-out window (02 §9)");
+            SMOKE_CHECK(secondary_chrome.at("mode").as_string() == "custom",
+                        "…with the same chrome MODE every window of this app gets");
+            const Json primary_chrome =
+                dispatch(primary_bridge, shell::kChromeStateMethod, Json::object());
+            SMOKE_CHECK(primary_chrome.at("window").as_string() == "primary",
+                        "window 0 stays the primary — the role is per-window, not per-app");
+
+            // The compact strip's controls dispatch over WINDOW 1's own bridge: the a1 seam drove
+            // each verb once in that window's boot, and the counters move even unbound (routing is
+            // the claim, exactly as the boot smoke asserts for window 0).
+            SMOKE_CHECK(created_surfaces->window_bridge->minimizes() == 1,
+                        "window.minimize routed once in the SECONDARY window (the seam drove it)");
+            SMOKE_CHECK(created_surfaces->window_bridge->maximize_toggles() == 1,
+                        "window.toggle-maximize routed once in the SECONDARY window");
+            SMOKE_CHECK(created_surfaces->window_bridge->focus_requests() == 1,
+                        "window.focus routed once in the SECONDARY window");
+        }
+        if (shell::EditorWindow* second = manager.window(new_id))
+        {
+            // THE PER-WINDOW REGION PROOF (02 §9): the torn-out window's compact strip measured and
+            // published ITS OWN caption + control rects over ITS OWN channel — the generation bump
+            // is on WINDOW 1's map, which only its own `editor.regions.publish` route can move (a
+            // hard-coded window 0 in the factory's region sink would leave it at zero forever).
+            const shell::RegionMap& map = second->input().regions();
+            SMOKE_CHECK(map.generation() >= 1,
+                        "the SECONDARY window published its own regions (generation bump observed)");
+            const shell::ShellRegion* caption = map.find("chrome.caption");
+            const shell::ShellRegion* min_region = map.find("chrome.caption-min");
+            const shell::ShellRegion* max_region = map.find("chrome.caption-max");
+            const shell::ShellRegion* close_region = map.find("chrome.caption-close");
+            SMOKE_CHECK(caption != nullptr,
+                        "the compact strip's caption drag surface arrived in window 1's map");
+            SMOKE_CHECK(min_region != nullptr && max_region != nullptr && close_region != nullptr,
+                        "…with the mode-correct controls (custom keeps the full cluster)");
+            SMOKE_CHECK(map.size() == 4,
+                        "the compact strip publishes exactly the chrome vocabulary, wholesale");
+            SMOKE_CHECK(!map.regions().empty() && map.regions().front().id == "chrome.caption",
+                        "caption first — the last-match-wins arbitration order holds here too");
+            // The b1 frame takeover, for a FACTORY window on this leg: the pure hit-test the real
+            // WndProc calls answers, over window 1's LIVE rects, the NC codes that make the OS own
+            // the drag and light Snap Layouts — the same two-halves proof the boot smoke pins for
+            // window 0 (the real-HWND leg stays the deferred interactive verification b1 named).
+            const render::Extent2D client = second->backend().client_size();
+            const shell::DpiScale dpi = second->backend().dpi();
+            if (caption != nullptr && min_region != nullptr && max_region != nullptr &&
+                close_region != nullptr)
+            {
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*caption), client, dpi, false,
+                                                  map) == shell::kHtCaption,
+                            "the factory window's caption answers HTCAPTION — frameless holds for "
+                            "every window the factory creates, not just window 0");
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*min_region), client, dpi,
+                                                  false, map) == shell::kHtMinButton,
+                            "…its minimize control answers HTMINBUTTON");
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*max_region), client, dpi,
+                                                  false, map) == shell::kHtMaxButton,
+                            "…its maximize control answers HTMAXBUTTON (Snap Layouts)");
+                SMOKE_CHECK(shell::hit_test_frame(smoke::region_mid(*close_region), client, dpi,
+                                                  false, map) == shell::kHtClose,
+                            "…and its close control answers HTCLOSE");
+            }
+        }
+        // …and the channels never crossed: window 0's OWN strip regions are still on window 0's
+        // map (the mis-routing hazard editor_main.cpp's region sink names — a secondary publish
+        // handed to the primary's arbiter would double up here and vanish above). Unlike the
+        // secondary's assertions, window 0's publish has no seed wait to ride: `boot_window` proved
+        // only the handshake, which PRECEDES the strips in boot.ts — so give the primary's initial
+        // publish the same bounded pump the seed got before reading its map.
+        pump_until([&] { return primary->input().regions().generation() != 0; });
+        SMOKE_CHECK(primary->input().regions().find("chrome.caption") != nullptr &&
+                        primary->input().regions().size() == 4,
+                    "window 0 keeps its own four chrome regions — per-window channels never crossed");
     }
 
     // --- DoD 2: a create FAILURE is LOUD, not silent (03 §7) --------------------------------------
@@ -548,18 +675,24 @@ int main(int argc, char** argv)
     SMOKE_CHECK(move_store.pending_rehomes(shell::kPrimaryWindowId) >= 1,
                 "the panel is queued for window 0 until its live poll drains it");
 
+    pump_until([&] { return move_store.pending_rehomes(shell::kPrimaryWindowId) == 0; });
+    SMOKE_CHECK(move_store.pending_rehomes(shell::kPrimaryWindowId) == 0,
+                "window 0's LIVE editor-core drained the rehome on its window.rehomed poll "
+                "(the panel reached window 0, never silently lost)");
+
+    // --- f1: the compact strip's ✕, end to end — window.close dispatched FROM the secondary ------
+    //
+    // The third control verb the compact cluster carries (the DOM tier proves the button dispatches
+    // it; this proves the dispatch WORKS from a secondary window): `window.close` on window 1's own
+    // router destroys exactly that window — the primary-vs-secondary policy the handler already
+    // carries — through the same mid-run destroy path the multiwindow smoke hardened (CE #319).
+    if (created_bridge != nullptr && manager.window_count() == 2)
     {
-        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(15);
-        while (std::chrono::steady_clock::now() < deadline &&
-               move_store.pending_rehomes(shell::kPrimaryWindowId) > 0)
-        {
-            if (!manager.pump_once(now_us()))
-                break;
-            std::this_thread::sleep_for(std::chrono::milliseconds(5));
-        }
-        SMOKE_CHECK(move_store.pending_rehomes(shell::kPrimaryWindowId) == 0,
-                    "window 0's LIVE editor-core drained the rehome on its window.rehomed poll "
-                    "(the panel reached window 0, never silently lost)");
+        const Json close_result = dispatch(*created_bridge, shell::kWindowCloseMethod,
+                                           Json::object());
+        SMOKE_CHECK(close_result.at("closed").as_bool(),
+                    "window.close from the SECONDARY window closed it");
+        SMOKE_CHECK(manager.window_count() == 1, "…and only it — the primary survives");
     }
 
     // --- teardown, in the ONE order that is safe (CE #319) ---------------------------------------
@@ -574,6 +707,7 @@ int main(int argc, char** argv)
         return finish(1);
     }
     std::printf("[editor-cef-smoke-shell-tearout] PASS: tear-out -> live second window read its seed; "
-                "create-fail was loud; rehome relay drained live\n");
+                "create-fail was loud; rehome relay drained live; secondary chrome (role, own "
+                "regions, control verbs, close) held on the torn-out window\n");
     return finish(0);
 }

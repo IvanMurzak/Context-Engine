@@ -983,6 +983,39 @@ int main(int argc, char** argv)
                 "a press OUTSIDE the caption still reaches the browser - the always-forward rule "
                 "holds for every other event");
 
+    // ------------------------------------ 6d. the f1 FACTORY-WINDOW hybrid chrome (02 §9)
+    //
+    // editor-window-chrome f1: c1's style mask must hold for EVERY window the factory creates, not
+    // just window 0. The app's window factory (editor_main.cpp) builds a second window through the
+    // SAME make_window_backend path window 0 took — same WindowDesc shape, filled from a
+    // WindowSpec — so creating one here and re-reading its REAL style is the macOS-leg proof:
+    // `cocoa_hybrid_chrome` reads FullSizeContentView + the transparent titlebar back off the
+    // NSWindow at call time, and the inset comes from that window's OWN measured traffic-light
+    // frames. A create path that armed the mask only for the first window would answer false (or
+    // a zero inset) here; the live CEF tear-out smoke runs headless on macOS, so this is the one
+    // CI context that can pin it.
+    {
+        shell::WindowDesc second_desc;
+        second_desc.title = "Context Editor (cocoa smoke, factory window)";
+        second_desc.logical_size = kWindowSize;
+        smoke::WindowSetup second_setup =
+            smoke::make_smoke_window(second_desc, smoke::WindowMode::real);
+        COCOA_CHECK(second_setup.backend != nullptr,
+                    "a second real window came up through the same creation seam the factory uses");
+        if (second_setup.backend != nullptr)
+        {
+            shell::CocoaChromeState second_chrome;
+            COCOA_CHECK(shell::cocoa_hybrid_chrome(*second_setup.backend, second_chrome),
+                        "the factory-path window reports HYBRID chrome too - the c1 style mask "
+                        "holds for every window the create path mints, not just window 0");
+            COCOA_CHECK(second_chrome.inset_left > 0u,
+                        "its inset is measured from its OWN traffic-light frames and positive");
+            COCOA_CHECK(second_chrome.inset_left < second_setup.backend->client_size().width / 2u,
+                        "and sane - less than half that window");
+        }
+        // The unique_ptr closes the second window on scope exit; nothing below references it.
+    }
+
     // ----------------------------------------------------- 7. teardown persists the session
     manager.shutdown();
     COCOA_CHECK(manager.state_store().write_count() >= 1,
@@ -999,7 +1032,8 @@ int main(int argc, char** argv)
     }
     std::printf("[editor-shell-cocoa] PASS: real NSWindow, %s present, %zu live panels rendered, "
                 "granted resize observed, AppKit-carried pointer + key round trip, hybrid chrome "
-                "(measured inset %u px) + caption drag/zoom consult, session persisted\n",
+                "(measured inset %u px) + caption drag/zoom consult + factory-window style mask, "
+                "session persisted\n",
                 blitter_name.c_str(), panels::hostable_panel_ids().size(),
                 static_cast<unsigned>(chrome.inset_left));
     return 0;

@@ -33,6 +33,17 @@
 // controls → HT*BUTTON) and c1's macOS caption-press drag; until those land the Shell's dispatch
 // arms stay honestly empty, and no live backend reports a mode that publishes anything.
 //
+//   4. SECONDARY WINDOWS GET THE COMPACT FRAME (editor-window-chrome f1, 02 §9 / D4). A torn-out
+//      window's `chrome.state.window` is `"secondary"` (the Shell derives it from the window id the
+//      boot seed already distinguishes), and the strips gate on it HERE, in the one mount: the
+//      titlebar renders ONLY the panel title (set from the boot seed's roster entry once the panel
+//      opens — boot.ts's seeded path) plus the mode-correct controls — the cluster in `custom`, the
+//      inset padding in `hybrid` — with no brand and no palette button; and the play-bar +
+//      statusbar elements are REMOVED from the document outright (no menu, no play bar, no
+//      statusbar — D4), so "no such DOM exists there" is a structural fact, never a hidden node.
+//      The compact strip still publishes its caption + control regions over THIS window's own
+//      channel — a secondary window owns its own frame exactly like the primary.
+//
 // DOM ONLY, no `innerHTML`, exactly like banners.ts: every node is built with `createElement` +
 // `textContent`, so a project name off the wire can never inject markup into the trusted zone.
 
@@ -51,6 +62,7 @@ import { UI_TOPIC_CHROME, type EditorUiBus, type EditorUiSubscription } from "./
 import {
     CHROME_MODE_CUSTOM,
     CHROME_MODE_HYBRID,
+    CHROME_WINDOW_SECONDARY,
     type ChromeState,
     type ToggleMaximizeResult,
 } from "./window.js";
@@ -78,6 +90,8 @@ export const STATUSBAR_CLASS = "ctx-statusbar";
 
 /** The mode the strip rendered, on the titlebar element — the DOM tier's gating observable. */
 export const CHROME_MODE_ATTRIBUTE = "data-chrome-mode";
+/** The window ROLE the strip rendered (`primary` / `secondary`) — the f1 gating observable (02 §9). */
+export const CHROME_WINDOW_ATTRIBUTE = "data-chrome-window";
 /** The glyph state, on the titlebar element — flips with the `editor.ui.chrome` maximized fact. */
 export const CHROME_MAXIMIZED_ATTRIBUTE = "data-maximized";
 /** Which control a cluster button is (`minimize` / `maximize` / `close`), for tests and smokes. */
@@ -222,6 +236,12 @@ export interface ChromeMount {
      */
     setMaximized(maximized: boolean): void;
     /**
+     * Rename the strip's title. The f1 seeded-boot seam (02 §9): a torn-out window mounts before
+     * its boot seed's panel opens, so boot.ts sets the PANEL title here once the roster names it.
+     * `""` restores the product-name fallback — the strip never renders an empty title.
+     */
+    setTitle(text: string): void;
+    /**
      * Measure the strip's regions in PHYSICAL px (02 §6): the caption drag surface FIRST, then the
      * control rects — the publish order the Shell's back-to-front last-match-wins relies on. Empty
      * in `system` mode (no drag duty) and for any rect that is not currently laid out.
@@ -283,11 +303,16 @@ function physicalRegion(
 export function mountChrome(elements: ChromeStripElements, options: MountChromeOptions): ChromeMount {
     const doc = elements.titlebar.ownerDocument;
     const mode = options.state.mode;
+    // f1 (02 §9): a torn-out window renders the COMPACT frame — see module fact 4. The role is the
+    // Shell's own `chrome.state.window` (derived from the window id, never self-reported), so the
+    // gating is data-driven exactly like the mode's and the DOM tier proves it by injection.
+    const secondary = options.state.window === CHROME_WINDOW_SECONDARY;
     const dpr = options.devicePixelRatio ?? defaultDevicePixelRatio;
 
     const titlebar = elements.titlebar;
     titlebar.replaceChildren();
     titlebar.setAttribute(CHROME_MODE_ATTRIBUTE, mode);
+    titlebar.setAttribute(CHROME_WINDOW_ATTRIBUTE, options.state.window);
 
     // The HYBRID inset (02 §1): physical px from the Shell, CSS px on the element. Written (and
     // cleared) as custom properties so the padding rule lives in app.css with every other strip rule.
@@ -311,32 +336,39 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
     // rect, so the palette button and the controls cluster sit OUTSIDE the drag surface and need no
     // carve-out at all — a click on them is client input on every platform.
     const drag = el(doc, "div", TITLEBAR_DRAG_CLASS);
-    const brand = el(doc, "span", TITLEBAR_BRAND_CLASS);
-    brand.setAttribute("aria-hidden", "true");
-    drag.append(brand);
-    drag.append(
-        el(
-            doc,
-            "span",
-            TITLEBAR_TITLE_CLASS,
-            options.projectName !== "" ? options.projectName : DEFAULT_TITLE,
-        ),
+    if (!secondary) {
+        // The brand mark is the FULL frame's — the compact secondary strip is panel title +
+        // controls and nothing else (02 §9).
+        const brand = el(doc, "span", TITLEBAR_BRAND_CLASS);
+        brand.setAttribute("aria-hidden", "true");
+        drag.append(brand);
+    }
+    const title = el(
+        doc,
+        "span",
+        TITLEBAR_TITLE_CLASS,
+        options.projectName !== "" ? options.projectName : DEFAULT_TITLE,
     );
+    drag.append(title);
     titlebar.append(drag);
 
     // --- the palette button (01 §7: the first reliable, non-programmatic palette opener) ---------
     // A kit button dispatching `workbench.palette.toggle` through the ONE command registry — the
     // boot.ts:claimPaletteToggle pattern's public face. Late-bound: before the command layer is up
     // (and on the welcome screen, which has none) the dispatch is a no-op refusal, never a throw.
-    const palette = createButton({
-        label: "›_",
-        accessibleLabel: LABEL_PALETTE,
-        commandId: PALETTE_TOGGLE_COMMAND_ID,
-        onActivate: (): void => {
-            options.executeCommand(PALETTE_TOGGLE_COMMAND_ID);
-        },
-    });
-    titlebar.append(palette.element);
+    // NOT rendered in a secondary window (02 §9): the compact strip carries no app chrome beyond
+    // the title and the window controls.
+    if (!secondary) {
+        const palette = createButton({
+            label: "›_",
+            accessibleLabel: LABEL_PALETTE,
+            commandId: PALETTE_TOGGLE_COMMAND_ID,
+            onActivate: (): void => {
+                options.executeCommand(PALETTE_TOGGLE_COMMAND_ID);
+            },
+        });
+        titlebar.append(palette.element);
+    }
 
     // --- the window-controls cluster (custom mode ONLY — 02 §1) ----------------------------------
     let maximized = false;
@@ -400,12 +432,25 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
     // The play-bar SLOT (empty until d1) hides on the welcome screen — no session to control
     // (02 §2). The statusbar stays the empty 24px shell until d2. Both are gated here, in one
     // place, so the welcome and project boots cannot drift apart on what the frame shows.
-    elements.playbar.hidden = options.welcome;
+    //
+    // f1 (02 §9 / D4): a SECONDARY window REMOVES both siblings from the document — no play bar,
+    // no statusbar in a torn-out window, structurally (a hidden node would still be DOM for d1/d2
+    // to fill later; an absent one cannot be). The dock then takes the freed rows through the same
+    // flex column, no stylesheet change needed.
+    if (secondary) {
+        elements.playbar.remove();
+        elements.statusbar.remove();
+    } else {
+        elements.playbar.hidden = options.welcome;
+    }
 
     return {
         isMaximized: (): boolean => maximized,
         setMaximized: (next: boolean): void => {
             applyMaximized(next);
+        },
+        setTitle: (text: string): void => {
+            title.textContent = text !== "" ? text : DEFAULT_TITLE;
         },
         regions: (): readonly ShellRegion[] => {
             // NO DRAG DUTY in `system` mode (D6): the WM owns the frame, so the honest region set
@@ -633,10 +678,17 @@ export async function startChromeStrips(
     const provider: RegionProvider = mount.regions;
     const doc = elements.titlebar.ownerDocument;
     // Everything but the two counters is fixed at mount (the cluster never gains or loses buttons
-    // afterwards), so the prefix is computed ONCE instead of re-queried on every republish.
-    const prefix = `mode=${options.state.mode} controls=${String(
+    // afterwards), so the prefix is computed ONCE instead of re-queried on every republish. The
+    // play-bar token reads the DOM truth: `removed` is the f1 secondary state (the element left the
+    // document), distinct from `hidden` (the welcome screen's still-present slot).
+    const playbarState = !elements.playbar.isConnected
+        ? "removed"
+        : elements.playbar.hidden
+          ? "hidden"
+          : "visible";
+    const prefix = `mode=${options.state.mode} window=${options.state.window} controls=${String(
         elements.titlebar.querySelectorAll(`[${CHROME_CONTROL_ATTRIBUTE}]`).length,
-    )} playbar=${elements.playbar.hidden ? "hidden" : "visible"}`;
+    )} playbar=${playbarState}`;
     const report = (regionCount: number, publishes: number): void => {
         doc.documentElement.setAttribute(
             CHROME_STRIPS_ATTRIBUTE,

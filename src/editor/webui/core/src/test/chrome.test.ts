@@ -30,6 +30,7 @@ import {
     CHROME_REGION_MAX_ID,
     CHROME_REGION_MIN_ID,
     CHROME_STRIPS_ATTRIBUTE,
+    CHROME_WINDOW_ATTRIBUTE,
     ChromeRegionPublisher,
     DEFAULT_TITLE,
     EDITOR_PLAYBAR_ID,
@@ -42,6 +43,7 @@ import {
     LABEL_RESTORE,
     PLAYBAR_CLASS,
     STATUSBAR_CLASS,
+    TITLEBAR_BRAND_CLASS,
     TITLEBAR_CLASS,
     TITLEBAR_DRAG_CLASS,
     TITLEBAR_TITLE_CLASS,
@@ -68,6 +70,7 @@ import {
     CHROME_MODE_HYBRID,
     CHROME_MODE_SYSTEM,
     CHROME_WINDOW_PRIMARY,
+    CHROME_WINDOW_SECONDARY,
     type ChromeState,
     type ToggleMaximizeResult,
 } from "../window.js";
@@ -706,6 +709,270 @@ export const chromeTests: readonly TestCase[] = [
                     fixture.elements.playbar.children.length,
                     0,
                     "the welcome boot mounts no transport into the hidden slot",
+                );
+            } finally {
+                fixture.dispose();
+                root.replaceChildren();
+                root.remove();
+            }
+        },
+    },
+    // ------------------------------------------------------------------ f1: secondary windows (02 §9)
+    {
+        name: "chrome: secondary custom — compact strip (title + controls), no brand/palette, siblings leave the DOM",
+        run: () => {
+            const h = mountHarness(CHROME_MODE_CUSTOM, {
+                stateOverrides: { window: CHROME_WINDOW_SECONDARY },
+                projectName: "", // a torn-out window's welcome surface carries no project name
+            });
+            try {
+                const titlebar = h.elements.titlebar;
+                assertEqual(
+                    titlebar.getAttribute(CHROME_WINDOW_ATTRIBUTE),
+                    CHROME_WINDOW_SECONDARY,
+                    "the role gates via its own DOM attribute, beside the mode's",
+                );
+                // The COMPACT strip is panel title + window controls and NOTHING else (D4).
+                assert(
+                    titlebar.querySelector(`.${TITLEBAR_BRAND_CLASS}`) === null,
+                    "no brand mark in the compact strip",
+                );
+                assert(
+                    titlebar.querySelector(`[data-command="${PALETTE_TOGGLE_COMMAND_ID}"]`) ===
+                        null,
+                    "no palette button in the compact strip",
+                );
+                assertEqual(
+                    titlebar.querySelector(`.${TITLEBAR_TITLE_CLASS}`)?.textContent,
+                    DEFAULT_TITLE,
+                    "before the seeded panel is known the title is the honest product fallback",
+                );
+                // The WHOLE compact strip, structurally: drag surface + controls cluster and
+                // NOTHING else — a menu (or any chrome) later appended unconditionally would red
+                // this line, forcing it to gate on the role like everything else (D4: no menu).
+                assertEqual(
+                    h.elements.titlebar.children.length,
+                    2,
+                    "the compact custom strip is exactly [drag surface, controls cluster]",
+                );
+                // The seeded-boot seam: boot.ts names the torn-out panel once the roster does.
+                h.mount.setTitle("Problems");
+                assertEqual(
+                    titlebar.querySelector(`.${TITLEBAR_TITLE_CLASS}`)?.textContent,
+                    "Problems",
+                    "setTitle renames the strip to the panel title",
+                );
+                h.mount.setTitle("");
+                assertEqual(
+                    titlebar.querySelector(`.${TITLEBAR_TITLE_CLASS}`)?.textContent,
+                    DEFAULT_TITLE,
+                    "an empty title restores the fallback — the strip never renders blank",
+                );
+                // Mode-correct controls: custom keeps the full cluster, dispatching the a1 verbs.
+                controlButton(titlebar, "minimize").click();
+                controlButton(titlebar, "maximize").click();
+                controlButton(titlebar, "close").click();
+                assertEqual(
+                    h.calls,
+                    ["minimize", "toggle-maximize", "close"],
+                    "the compact cluster dispatches the same three window verbs",
+                );
+                // No play bar, no statusbar — REMOVED from the document, not hidden (D4: "no such
+                // DOM exists there" must be structural, or d1/d2 would later fill a hidden shell).
+                assert(
+                    document.getElementById(EDITOR_PLAYBAR_ID) === null,
+                    "the play-bar element left the document",
+                );
+                assert(
+                    document.getElementById(EDITOR_STATUSBAR_ID) === null,
+                    "the statusbar element left the document",
+                );
+                // …and the compact strip still measures its own caption + controls (per-window
+                // regions): caption FIRST, the three controls after — the publish order the
+                // Shell's last-match-wins arbitration relies on, identical to the primary's.
+                const regions = h.mount.regions();
+                assertEqual(regions.length, 4, "caption + three controls, wholesale");
+                assertEqual(
+                    regions[0]?.id,
+                    CHROME_REGION_CAPTION_ID,
+                    "the caption publishes first",
+                );
+                assertEqual(
+                    regions.map((region) => region.id).sort().join(","),
+                    [
+                        CHROME_REGION_CAPTION_ID,
+                        CHROME_REGION_CLOSE_ID,
+                        CHROME_REGION_MAX_ID,
+                        CHROME_REGION_MIN_ID,
+                    ]
+                        .sort()
+                        .join(","),
+                    "the compact strip publishes the full chrome vocabulary",
+                );
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "chrome: secondary hybrid — inset padding, no controls, siblings removed",
+        run: () => {
+            const h = mountHarness(CHROME_MODE_HYBRID, {
+                stateOverrides: {
+                    window: CHROME_WINDOW_SECONDARY,
+                    controlsInset: { left: 72, right: 8 },
+                },
+                devicePixelRatio: () => 2,
+            });
+            try {
+                const titlebar = h.elements.titlebar;
+                assertEqual(
+                    titlebar.getAttribute(CHROME_WINDOW_ATTRIBUTE),
+                    CHROME_WINDOW_SECONDARY,
+                    "the role attribute is set",
+                );
+                assert(
+                    titlebar.querySelector(`[${CHROME_CONTROL_ATTRIBUTE}]`) === null,
+                    "hybrid keeps the OS traffic lights — no web controls in the compact strip",
+                );
+                assertEqual(
+                    titlebar.style.getPropertyValue(CHROME_INSET_LEFT_PROPERTY),
+                    "36px",
+                    "the measured inset pads the compact strip exactly as it pads the full one",
+                );
+                assert(
+                    titlebar.querySelector(`[data-command="${PALETTE_TOGGLE_COMMAND_ID}"]`) ===
+                        null,
+                    "no palette button",
+                );
+                assertEqual(
+                    titlebar.children.length,
+                    1,
+                    "the compact hybrid strip is exactly the drag surface (title only)",
+                );
+                assert(
+                    document.getElementById(EDITOR_PLAYBAR_ID) === null &&
+                        document.getElementById(EDITOR_STATUSBAR_ID) === null,
+                    "the sibling strips left the document",
+                );
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "chrome: secondary system — title-only strip, no drag duty, siblings removed",
+        run: () => {
+            const h = mountHarness(CHROME_MODE_SYSTEM, {
+                stateOverrides: { window: CHROME_WINDOW_SECONDARY },
+            });
+            try {
+                const titlebar = h.elements.titlebar;
+                assert(
+                    titlebar.querySelector(`[${CHROME_CONTROL_ATTRIBUTE}]`) === null &&
+                        titlebar.querySelector(
+                            `[data-command="${PALETTE_TOGGLE_COMMAND_ID}"]`,
+                        ) === null,
+                    "system secondary renders the bare title strip — the WM owns the frame (D6)",
+                );
+                assertEqual(
+                    h.mount.regions().length,
+                    0,
+                    "no drag duty in system mode, secondary included",
+                );
+                assert(
+                    document.getElementById(EDITOR_PLAYBAR_ID) === null &&
+                        document.getElementById(EDITOR_STATUSBAR_ID) === null,
+                    "the sibling strips left the document",
+                );
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "chrome: a SECONDARY (torn-out) boot renders the compact frame and names the seeded panel",
+        run: async () => {
+            const fixture = stripFixture();
+            const root = document.createElement("main");
+            root.id = EDITOR_ROOT_ID;
+            document.body.append(root);
+            // The tear-out target's Shell, end to end: a SECONDARY chrome role, a boot seed naming
+            // the moved panel, and a roster that titles it — plus quiet answers for the window
+            // mechanism's runtime polls so the background interval never trips on refusals.
+            const rosterPanel = {
+                id: "builtin.problems",
+                kind: "panel",
+                title: "Problems",
+                icon: "",
+                contractVersion: 2,
+                dock: { zone: "right", singleton: true, minWidth: 0, minHeight: 0 },
+                content: { type: "uitree", entry: "" },
+                state: { schemaVersion: 1 },
+                capabilities: [],
+                commands: [],
+                hosted: true,
+                gestures: false,
+                persists: false,
+                revision: 1,
+            };
+            const shell = mockShell({
+                ...baseAnswers(),
+                "shell.hello": { nonce: "f1-secondary-nonce" },
+                "welcome.state": { mode: "project" }, // the factory names no project (boot falls back)
+                "chrome.state": {
+                    mode: "custom",
+                    controlsInset: { left: 0, right: 0 },
+                    maximized: false,
+                    focused: true,
+                    window: "secondary",
+                },
+                "panel.list": { contractMajor: 2, panels: [rosterPanel] },
+                "window.seed": {
+                    seeded: true,
+                    panelId: "builtin.problems",
+                    state: { schemaVersion: 1, data: { query: "half-typed" } },
+                },
+                "panel.state.set": {},
+                "editor.regions.publish": {},
+                "window.list": { windowId: 1, windows: [0, 1] },
+                "window.rehomed": { panels: [] },
+                "drag.probe": { active: false },
+                "ui.mirror-poll": { events: [] },
+            });
+            try {
+                const report = await bootEditorCore(new ShellBridge(shell.query));
+                assert(report.ready, "the torn-out window boots");
+                const titlebar = fixture.elements.titlebar;
+                assertEqual(
+                    titlebar.getAttribute(CHROME_WINDOW_ATTRIBUTE),
+                    CHROME_WINDOW_SECONDARY,
+                    "the SERVED secondary role gated the strips — the wiring claim",
+                );
+                assert(
+                    titlebar.querySelector(`[${CHROME_CONTROL_ATTRIBUTE}]`) !== null,
+                    "custom mode keeps the controls cluster in the compact strip",
+                );
+                assert(
+                    titlebar.querySelector(`[data-command="${PALETTE_TOGGLE_COMMAND_ID}"]`) ===
+                        null,
+                    "no palette button in the torn-out window",
+                );
+                assertEqual(
+                    titlebar.querySelector(`.${TITLEBAR_TITLE_CLASS}`)?.textContent,
+                    "Problems",
+                    "the strip names the SEEDED panel from the roster (boot.ts's seeded path)",
+                );
+                assert(
+                    document.getElementById(EDITOR_PLAYBAR_ID) === null &&
+                        document.getElementById(EDITOR_STATUSBAR_ID) === null,
+                    "no play-bar / statusbar DOM exists in the torn-out window",
+                );
+                const strips =
+                    document.documentElement.getAttribute(CHROME_STRIPS_ATTRIBUTE) ?? "";
+                assert(
+                    strips.includes("window=secondary") && strips.includes("playbar=removed"),
+                    `the data-editor-strips report names the compact state, got: ${strips}`,
                 );
             } finally {
                 fixture.dispose();

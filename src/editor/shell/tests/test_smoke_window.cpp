@@ -693,6 +693,18 @@ void test_ns_delivered_shift_for_window_move_corrects_a_moved_window_at_a_non_id
     CHECK(degenerate.dy == -7);
 }
 
+void test_region_mid_centres_a_live_rect_with_floor_division()
+{
+    // Odd extents on purpose: the midpoint divides in unsigned pixels, so a 31x41 rect centres at
+    // origin + (15, 20) — the same floor the two CEF smokes' inline copies computed before this
+    // helper replaced them.
+    ShellRegion region;
+    region.id = "chrome.caption";
+    region.rect = render::Rect2D{render::Origin2D{10, 20}, render::Extent2D{31, 41}};
+    const PointI mid = smoke::region_mid(region);
+    CHECK(mid == (PointI{25, 40}));
+}
+
 int main()
 {
     test_flag_parsing();
@@ -711,5 +723,6 @@ int main()
     test_placement_extent_for_physical_leaves_a_non_cocoa_backend_alone();
     test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi();
     test_ns_delivered_shift_for_window_move_corrects_a_moved_window_at_a_non_identity_dpi();
+    test_region_mid_centres_a_live_rect_with_floor_division();
     SHELL_TEST_MAIN_END();
 }

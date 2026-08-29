@@ -630,6 +630,15 @@ async function startPanels(
         // one mechanism, exercised here at boot and by the rehome poll at runtime. Asserted on the
         // RENDERED output (a value a fresh panel could not have) by the live tear-out smoke.
         if (seed !== null && report.started) {
+            // f1 (02 §9): the compact secondary titlebar names the TORN-OUT PANEL, and the boot
+            // seed is exactly what distinguishes a torn-out window — so the roster title of the
+            // seeded panel IS the strip's title. Set before the state restore (a refused
+            // `panel.state.set` must not leave the strip on the product-name fallback), and only
+            // when the roster actually names the panel — an unknown id keeps the honest fallback.
+            const seededTitle = host.manifest(seed.panelId)?.title ?? "";
+            if (seededTitle !== "") {
+                chrome?.mount.setTitle(seededTitle);
+            }
             await client.setState(seed.panelId, seed.state);
             await host.refreshAll();
         }
