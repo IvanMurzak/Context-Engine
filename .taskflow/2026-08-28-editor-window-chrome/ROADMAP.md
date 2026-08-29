@@ -1,6 +1,6 @@
 # ROADMAP — editor window chrome
 
-> **Status: TASKS CUT — ready for `taskflow-execute`.**
+> **Status: ✅ COMPLETE — all 10 tasks merged to `main` (PRs #480–#489), 2026-08-29. Archived.**
 > Design set authored 2026-08-28 (owner decisions D1–D7, README.md). The `taskflow-review` stage
 > was **skipped by explicit owner decision** (2026-08-28) — the set was accepted as authored.
 > Task specs are immutable and live in [`tasks/`](tasks/README.md); this board is the ONLY live
@@ -53,7 +53,7 @@ Linux needs no native task (D6): its menu-bar-mode strip is a2+d3 behavior.
 | [d3-menu-system](tasks/d3-menu-system.md) — declarative model, web menubar + NSMenu via `menu.publish`, new commands, a11y | a1, a2, c1 | . / main | 9/8 | top | ✅ done | [#488](https://github.com/IvanMurzak/Context-Engine/pull/488) merged `c8d88e2`, 42/42 CI (caption-republish fix `ac4b305`) | 2026-08-29 |
 | [e1-playbar-dock-retirement](tasks/e1-playbar-dock-retirement.md) — remove panel anchors, amend enumerated frozen gates owner-visibly | d1 | . / main | 7/8 | top | ✅ done | [#486](https://github.com/IvanMurzak/Context-Engine/pull/486) merged `affaefa`, 42/42 CI; spec deviation documented in PR (zero-mod transport clause unsatisfiable) | 2026-08-29 |
 | [f1-secondary-window-chrome](tasks/f1-secondary-window-chrome.md) — compact strip, frameless factory windows, per-window regions | a2, b1, c1 | . / main | 7/6 | mid | ✅ done | [#485](https://github.com/IvanMurzak/Context-Engine/pull/485) merged `93aa688`, 42/42 CI | 2026-08-29 |
-| [g1-verification-closeout](tasks/g1-verification-closeout.md) — live assertions, `docs/shell.md`, e16 handoff, residue audit | all | . / main | 7/6 | mid | 🔵 in-progress | pipeline implement-task | 2026-08-29 |
+| [g1-verification-closeout](tasks/g1-verification-closeout.md) — live assertions, `docs/shell.md`, e16 handoff, residue audit | all | . / main | 7/6 | mid | ✅ done | [#489](https://github.com/IvanMurzak/Context-Engine/pull/489) merged `de0237d`, 42/42 CI | 2026-08-29 |
 
 ## Known risks (named now, owned by tasks)
 
@@ -87,3 +87,15 @@ Linux needs no native task (D6): its menu-bar-mode strip is a2+d3 behavior.
   cut (a1/a2/c1/d1 cx 7→8 so tier and score agree); **interim-honesty staging** for
   `chrome.state.mode` added as a binding cross-task rule. Key `file:line` anchors re-verified
   against HEAD `62463fc`. **Next: `taskflow-execute`.**
+- **2026-08-29** — **`taskflow-execute` COMPLETE** (`--parallel=3`, engine = pipeline `implement-task`,
+  merge on-green). All 10 tasks landed in 7 rounds, every merge behind a full 42/42 rollup:
+  a1 #480 · a2 #481 · c1 #482 · b1 #483 · d1 #484 · f1 #485 · e1 #486 · d2 #487 · d3 #488 · g1 #489.
+  Landing needed 4 rebase/conflict repairs (b1/c1 platform arms, d1/b1 boot tests, d2/f1 chrome.ts —
+  all additive), 2 in-diff CI defects caught by the land gate and fixed on-branch (a1 asset-gate
+  fixtures; d3 stale caption rect published before the menubar mounted — a real product defect),
+  3 infra flakes cleared by same-SHA reruns (cocoa y-flip smoke, esbuild fetch SHA on one runner,
+  web-golden harness hang), one runner repair (HKLM PythonCore re-hijack, owner-elevated), and
+  six spend-limit kills recovered by resuming runs from their persisted state (zero work repeated).
+  Pipeline self-improvement captured to main across 5 commits. Owner follow-ups are in the
+  execution closeout report (retired `builtin.playbar` id in persisted layouts; capture-blind Cocoa
+  caption consult; d2's three deferred review findings; frozen `land.md` `:!.pipeline` scoping).
