@@ -13,6 +13,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <optional>
 #include <vector>
@@ -418,11 +419,10 @@ void test_hit_test_frame_maximized_has_no_resize_bands()
 // editor-window-chrome g1 (verification closeout). The four tests above pin hand-picked points,
 // and a hand-picked point cannot catch a boundary that slipped by one pixel SOMEWHERE ELSE in the
 // 2-D domain — which is exactly the kind of function the frame decision is: four NC strips, eight
-// corner zones, a top band INSIDE the client, four DPIs, two frame states, an overlapping region
-// map. So
-// this sweeps EVERY point of the window rect — the client plus the l/r/b strips the insets carved,
-// i.e. the whole domain WM_NCHITTEST can ask about — at four DPIs, in both frame states, over three
-// region maps, and judges every answer two ways:
+// corner zones, a top band INSIDE the client, DPI-scaled metrics, two frame states, an overlapping
+// region map. So this sweeps EVERY point of the window rect — the client plus the l/r/b strips the
+// insets carved, i.e. the whole domain WM_NCHITTEST can ask about — at five DPIs, in both frame
+// states, over three region maps, and judges every answer two ways:
 //
 //   1. against an INDEPENDENT ORACLE written from the spec (window.h § hit_test_frame) in ZONE
 //      terms — which strip, which corner zone, which rect contains the point — with its own DPI
@@ -435,8 +435,16 @@ void test_hit_test_frame_maximized_has_no_resize_bands()
 //      higher DPI's band set CONTAINS a lower DPI's.
 //
 // A mismatch is REPORTED with its coordinates, DPI, frame state and map, so a red names a point and
-// not a count. The domain (a 640x400 client) keeps the sweep at ~6.5M evaluations — sub-second in
+// not a count. The domain (a 640x400 client) keeps the sweep at ~8M evaluations — sub-second in
 // the dev gate and comfortably inside the sanitizer legs' budget.
+//
+// THE DPI SET IS CHOSEN TO MAKE THE ROUNDING RULE FALSIFIABLE. At every multiple of 12 (96, 120, 144,
+// 192 — the scales the hand-picked tests pin) the 8 px border and 16 px corner scale to EXACT
+// integers, so a metric function that truncated, or rounded halves down, would agree with the
+// oracle at all of them and the "round-to-nearest" claim would be asserted by nothing. 100 dpi puts
+// the border at 8.33 (→ 8) and the corner at 16.67 (→ 17): truncation answers 16 and reds. 150 dpi
+// puts the border at exactly 12.5 (→ 13): round-half-down answers 12 and reds. Both sit inside the
+// clamp range the shipping DPI lookup can produce.
 
 struct SweepMetrics
 {
@@ -637,7 +645,8 @@ struct SweepMap
 void test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point()
 {
     const render::Extent2D client{640, 400};
-    const std::uint32_t dpis[] = {96, 120, 144, 192};
+    // Three exact scales + the two that exercise the rounding rule (see the header note).
+    const std::uint32_t dpis[] = {96, 100, 144, 150, 192};
 
     // Three maps: nothing published (the pre-boot window), the a2 strip shape scaled to this client
     // (caption FIRST, the three controls after, a viewport below), and an OVERLAPPING shape — a
@@ -780,7 +789,7 @@ void test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point()
 
     // DPI monotonicity: every point that is a band at a lower DPI is a band at every higher one,
     // over the lower DPI's domain (which the higher one's contains).
-    for (std::size_t i = 1; i < 4; ++i)
+    for (std::size_t i = 1; i < std::size(dpis); ++i)
     {
         const SweepMetrics low = sweep_metrics(dpis[i - 1]);
         for (std::int32_t y = 0; y < height + low.border; ++y)

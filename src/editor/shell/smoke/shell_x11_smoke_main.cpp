@@ -608,8 +608,14 @@ int main(int argc, char** argv)
     const render::Extent2D chrome_client = backend->client_size();
     constexpr std::uint32_t kStripHeight = 38;  // the a2 titlebar strip
     constexpr std::uint32_t kControlWidth = 46; // one a2 window-control cell
-    X11_CHECK(chrome_client.width > 4u * kControlWidth && chrome_client.height > 3u * kStripHeight,
+    const bool client_hosts_strip =
+        chrome_client.width > 4u * kControlWidth && chrome_client.height > 3u * kStripHeight;
+    X11_CHECK(client_hosts_strip,
               "the client is large enough to host the a2 strip shape with a dock below it");
+    if (!client_hosts_strip)
+    {
+        return 1; // the rect arithmetic below would underflow — nothing past here is a checked claim
+    }
     const std::uint32_t caption_width = chrome_client.width - 3u * kControlWidth;
     const render::Rect2D caption_rect{render::Origin2D{0, 0},
                                       render::Extent2D{caption_width, kStripHeight}};
@@ -689,8 +695,14 @@ int main(int argc, char** argv)
     X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
                                   marked_pointer(shell::PointerAction::up, dock_mid, true)),
               "a marked RELEASE over the dock was accepted for injection");
+    // Wait for the counter AND for the capture to have dropped. The counter alone is `>=` for the
+    // reason 6b gives (a stray LeaveNotify is arbitrated and counted too), so it can read +4 with a
+    // stray in the stream and OUR release still in flight — at which point the capture check below
+    // would red against the desktop rather than the Shell. A release that never arrives still fails
+    // here, on the budget, with the capture claim intact.
     const bool drag_arbitrated = pump_until(manager, clock_us, [&] {
-        return editor->input().pointer_dispatches() >= drag_dispatches_before + 4;
+        return editor->input().pointer_dispatches() >= drag_dispatches_before + 4 &&
+               !editor->input().has_pointer_capture();
     });
     X11_CHECK(drag_arbitrated,
               "the four caption-drag samples came BACK from the real X server and were arbitrated");
