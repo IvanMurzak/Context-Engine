@@ -1,0 +1,19 @@
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_7b2854368302f3::t_170b1d43756696 628-641
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0da7b26d370c516dbe4c0dec969b997f630ad4a5",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

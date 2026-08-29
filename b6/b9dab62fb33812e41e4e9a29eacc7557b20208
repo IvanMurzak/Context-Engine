@@ -1,0 +1,46 @@
+src/editor/webui/core/src/panelhost.ts
+  s_7b2854368302f3::t_da5379452fd293 1123
+  s_7b2854368302f3::t_14109041639ae5 1317
+  s_7b2854368302f3::t_1b0999e8fa6504 993-1001
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_7c1e4a28b9e8b1 638
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_7b2854368302f3::t_102ff370fa4f97 614-615,618-619,621-622,624-625
+  s_7b2854368302f3::t_9860611f5db62e 483-498
+  s_7b2854368302f3::t_fdec39e1024743 678-681
+  s_7b2854368302f3::t_de0839c626b18b 635
+  s_7b2854368302f3::t_318e37647d4822 543
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_7b2854368302f3::t_6452a78de8baee 857,884,897
+  s_7b2854368302f3::t_059296b94d3361 842-843,845-846,848-849,851-852
+src/editor/shell/smoke/include/context/editor/shell/smoke/smoke_window.h
+  s_7b2854368302f3::t_e8dd297bbd5b64 158-164
+src/editor/shell/smoke/src/smoke_window.cpp
+  s_7b2854368302f3::t_2e9b6526053dfb 313-318
+src/editor/shell/tests/test_smoke_window.cpp
+  s_28c8b04f679d65::t_b8a7e51bc8709d 696-707,726
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "b6b9dab62fb33812e41e4e9a29eacc7557b20208",
+  "prompts": {},
+  "sessions": {
+    "s_28c8b04f679d65": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a7ca1044319d29a9c",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
