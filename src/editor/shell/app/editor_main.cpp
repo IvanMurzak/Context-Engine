@@ -229,11 +229,13 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
     // The control verbs reach THIS window's backend through the registry, so they stay valid for a
     // retired session (the lookup answers nullptr and the verb degrades to `accepted:false`) — the
     // same lifetime rationale the handlers above rely on. INTERIM HONESTY (tasks/README.md,
-    // binding): the provider reports what each backend actually DOES. c1 flipped cocoa: a live
-    // macOS window answers `hybrid` with the MEASURED traffic-light inset (cocoa_chrome.h — the
-    // query re-reads the window's real style at call time, so the flip can never outlive the
-    // behaviour). win32 still reports the `system` default until b1 lands its frameless NC path;
-    // x11 stays `system` permanently (D6); headless — every CI smoke — stays `system` too.
+    // binding): the provider reports what each backend actually DOES. Since b1 the win32 backend
+    // OWNS its frame (the WM_NCCALCSIZE / WM_NCHITTEST takeover, win32_window.cpp), so it
+    // truthfully reports `custom` — the flip lands in the same PR as the behaviour, never ahead of
+    // it. c1 flipped cocoa the same way: a live macOS window answers `hybrid` with the MEASURED
+    // traffic-light inset (cocoa_chrome.h — the query re-reads the window's real style at call
+    // time, so the flip can never outlive the behaviour). x11 stays `system` permanently (D6: the
+    // WM owns the frame), which the default below IS; headless — every CI smoke — stays `system` too.
     const shell::WindowId self_id = wb.self_id();
     wb.bind_chrome_state(
         [&manager, self_id]() -> shell::ChromeState
@@ -241,6 +243,10 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
             shell::ChromeState state; // defaulted: mode system, inset 0
             if (shell::EditorWindow* window = manager.window(self_id))
             {
+                if (std::string_view(window->backend().name()) == "win32")
+                {
+                    state.mode = shell::ChromeMode::custom; // b1: the frame is ours on Windows
+                }
                 state.maximized = window->backend().placement().maximized;
                 state.focused = window->focused();
                 shell::CocoaChromeState cocoa;
@@ -252,6 +258,18 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
                 }
             }
             return state;
+        });
+    // b1: the appearance report — the theme's dark/light choice reaches the backend, whose win32
+    // arm sets the ONE Dwm dark-mode attribute (02 §3); every other backend's set_appearance is an
+    // honest no-op today. Accepted iff a live window received it, like the control verbs.
+    wb.bind_appearance(
+        [&manager, self_id](bool dark) -> bool
+        {
+            shell::EditorWindow* window = manager.window(self_id);
+            if (window == nullptr)
+                return false;
+            window->backend().set_appearance(dark);
+            return true;
         });
     wb.bind_minimize(
         [&manager, self_id]() -> bool

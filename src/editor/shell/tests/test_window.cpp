@@ -228,9 +228,288 @@ void test_lifecycle_and_focus_messages()
     CHECK(moved->kind == ShellEventKind::moved);
     CHECK(moved->position == (PointI{-1900, 40})); // a monitor left of the primary
 
-    // Every other message is not the Shell's — which is most of them.
-    CHECK(!decode(0x0084 /* WM_NCHITTEST */, 0, 0).has_value());
+    // Every other message is not the Shell's — which is most of them. WM_NCHITTEST is deliberately
+    // STILL absent from this decoder: since b1 it is the frameless frame's, answered OS-side
+    // through the pure hit_test_frame (the b1 tests below) and returned to Windows as an HT code —
+    // never decoded into a ShellEvent the pump would forward.
+    CHECK(!decode(kWmNcHitTest, 0, 0).has_value());
     CHECK(!decode(0x0113 /* WM_TIMER */, 0, 0).has_value());
+}
+
+// ------------------------------------------------------------ the b1 frameless frame (pure)
+
+void test_resize_border_and_corner_scale_with_dpi()
+{
+    // SM_CXSIZEFRAME (4) + SM_CXPADDEDBORDER (4) at 96 dpi, round-to-nearest at every scale — the
+    // one number the NCCALCSIZE insets AND the hit-test bands share by construction.
+    CHECK(win32_resize_border_thickness(DpiScale{96}) == 8);
+    CHECK(win32_resize_border_thickness(DpiScale{120}) == 10);
+    CHECK(win32_resize_border_thickness(DpiScale{144}) == 12); // 150%
+    CHECK(win32_resize_border_thickness(DpiScale{192}) == 16);
+    CHECK(win32_resize_corner_extent(DpiScale{96}) == 16);
+    CHECK(win32_resize_corner_extent(DpiScale{144}) == 24);
+}
+
+void test_frameless_client_insets_restored_and_maximized()
+{
+    // Restored: l/r/b keep the system border (the NC strips the resize bands live in); TOP IS ZERO
+    // — the client reaches the window top, which is where the web titlebar draws.
+    const Win32FrameInsets restored_96 = win32_frameless_client_insets(false, DpiScale{96});
+    CHECK(restored_96.left == 8 && restored_96.top == 0 && restored_96.right == 8 &&
+          restored_96.bottom == 8);
+    // Maximized: ALL sides inset (ROADMAP risk 2's branch), at both pinned scales.
+    const Win32FrameInsets max_96 = win32_frameless_client_insets(true, DpiScale{96});
+    CHECK(max_96.left == 8 && max_96.top == 8 && max_96.right == 8 && max_96.bottom == 8);
+    const Win32FrameInsets restored_144 = win32_frameless_client_insets(false, DpiScale{144});
+    CHECK(restored_144.left == 12 && restored_144.top == 0 && restored_144.right == 12 &&
+          restored_144.bottom == 12);
+    const Win32FrameInsets max_144 = win32_frameless_client_insets(true, DpiScale{144});
+    CHECK(max_144.left == 12 && max_144.top == 12 && max_144.right == 12 && max_144.bottom == 12);
+}
+
+void test_maximized_client_lands_exactly_on_the_work_area_at_96_and_150_percent()
+{
+    // THE no-8px-overhang pin (ROADMAP risk 2): WM_GETMINMAXINFO's geometry and the maximized
+    // insets COMPOSE to client == work area EXACTLY — the frame Windows hangs off-monitor is
+    // cancelled by the all-sides inset, at both pinned scales and with a taskbar offset in play.
+    struct Case
+    {
+        std::uint32_t dpi;
+        PointI work_origin; // work-area top-left relative to the monitor (the taskbar offset)
+        render::Extent2D work;
+    };
+    const Case cases[] = {
+        {96, PointI{0, 0}, render::Extent2D{1920, 1032}},
+        {96, PointI{64, 0}, render::Extent2D{1856, 1080}}, // taskbar docked left
+        {144, PointI{0, 0}, render::Extent2D{2560, 1352}}, // 150%
+    };
+    for (const Case& c : cases)
+    {
+        const DpiScale dpi{c.dpi};
+        const Win32MaxGeometry geometry = win32_frameless_max_geometry(c.work_origin, c.work, dpi);
+        const Win32FrameInsets insets = win32_frameless_client_insets(true, dpi);
+        // The client rect the two produce together, in monitor-relative coordinates.
+        const std::int32_t client_left = geometry.position.x + insets.left;
+        const std::int32_t client_top = geometry.position.y + insets.top;
+        const std::int32_t client_right = geometry.position.x +
+                                          static_cast<std::int32_t>(geometry.size.width) -
+                                          insets.right;
+        const std::int32_t client_bottom = geometry.position.y +
+                                           static_cast<std::int32_t>(geometry.size.height) -
+                                           insets.bottom;
+        CHECK(client_left == c.work_origin.x);
+        CHECK(client_top == c.work_origin.y);
+        CHECK(client_right == c.work_origin.x + static_cast<std::int32_t>(c.work.width));
+        CHECK(client_bottom == c.work_origin.y + static_cast<std::int32_t>(c.work.height));
+    }
+}
+
+// The a2-shaped chrome map the hit-test consumes: caption FIRST, controls after (last-match-wins),
+// plus a viewport rect to prove non-caption kinds stay client.
+RegionMap make_chrome_regions()
+{
+    RegionMap map;
+    map.publish(
+        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 1096, 38), RegionKind::caption},
+         ShellRegion{"chrome.caption-min", shelltest::rect(1096, 0, 46, 38),
+                     RegionKind::caption_min},
+         ShellRegion{"chrome.caption-max", shelltest::rect(1142, 0, 46, 38),
+                     RegionKind::caption_max},
+         ShellRegion{"chrome.caption-close", shelltest::rect(1188, 0, 46, 38),
+                     RegionKind::caption_close},
+         ShellRegion{"viewport", shelltest::rect(100, 100, 600, 400), RegionKind::viewport}});
+    return map;
+}
+
+void test_hit_test_frame_resize_bands_and_corners()
+{
+    const RegionMap regions = make_chrome_regions();
+    const render::Extent2D client{1280, 800};
+    const DpiScale dpi{96}; // border 8, corner 16
+    const auto hit = [&](std::int32_t x, std::int32_t y)
+    { return hit_test_frame(PointI{x, y}, client, dpi, false, regions); };
+
+    // The l/r/b NC strips (outside the client rect the insets carved).
+    CHECK(hit(-1, 400) == kHtLeft);
+    CHECK(hit(1280, 400) == kHtRight);
+    CHECK(hit(640, 800) == kHtBottom);
+    // The top band: the first `border` rows INSIDE the client.
+    CHECK(hit(640, 4) == kHtTop);
+    CHECK(hit(640, 7) == kHtTop);
+    // Corners, via the corner extent along each edge.
+    CHECK(hit(-1, 5) == kHtTopLeft);
+    CHECK(hit(4, 4) == kHtTopLeft);
+    CHECK(hit(1276, 2) == kHtTopRight);
+    CHECK(hit(1285, 10) == kHtTopRight);
+    CHECK(hit(-1, 790) == kHtBottomLeft);
+    CHECK(hit(5, 805) == kHtBottomLeft);
+    CHECK(hit(1280, 795) == kHtBottomRight);
+    CHECK(hit(1275, 801) == kHtBottomRight);
+    // Bands come FIRST: the top rows win over the caption AND over a control under them — the same
+    // priority a stock titlebar's top edge has.
+    CHECK(hit(1200, 4) == kHtTop);      // over the close button's rect
+    CHECK(hit(1270, 4) == kHtTopRight); // over the close button, within the corner extent
+}
+
+void test_hit_test_frame_regions_and_precedence()
+{
+    const RegionMap regions = make_chrome_regions();
+    const render::Extent2D client{1280, 800};
+    const DpiScale dpi{96};
+    const auto hit = [&](std::int32_t x, std::int32_t y)
+    { return hit_test_frame(PointI{x, y}, client, dpi, false, regions); };
+
+    // Below the band: the published regions decide.
+    CHECK(hit(640, 20) == kHtCaption);
+    CHECK(hit(1119, 20) == kHtMinButton);
+    CHECK(hit(1165, 20) == kHtMaxButton); // what lights Snap Layouts on Win11
+    CHECK(hit(1211, 20) == kHtClose);
+    // Non-caption kinds are CLIENT content — the frame never claims a viewport.
+    CHECK(hit(150, 150) == kHtClient);
+    // No region at all: client.
+    CHECK(hit(640, 400) == kHtClient);
+
+    // Control-over-caption by last-match-wins: a caption spanning the WHOLE width with the close
+    // control published after it still resolves the control (no carve-out token — input.h).
+    RegionMap stacked;
+    stacked.publish(
+        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 1280, 38), RegionKind::caption},
+         ShellRegion{"chrome.caption-close", shelltest::rect(1188, 0, 46, 38),
+                     RegionKind::caption_close}});
+    CHECK(hit_test_frame(PointI{1211, 20}, client, dpi, false, stacked) == kHtClose);
+    CHECK(hit_test_frame(PointI{640, 20}, client, dpi, false, stacked) == kHtCaption);
+
+    // An EMPTY map (nothing published yet — the pre-boot window): everything in the client is
+    // client, and the bands still work.
+    const RegionMap empty;
+    CHECK(hit_test_frame(PointI{640, 20}, client, dpi, false, empty) == kHtClient);
+    CHECK(hit_test_frame(PointI{-1, 400}, client, dpi, false, empty) == kHtLeft);
+}
+
+void test_hit_test_frame_scales_bands_with_dpi()
+{
+    const RegionMap regions = make_chrome_regions();
+    const render::Extent2D client{1280, 800};
+    // y == 10: below the 8px band at 96 dpi (the caption's), inside the 12px band at 150%.
+    CHECK(hit_test_frame(PointI{640, 10}, client, DpiScale{96}, false, regions) == kHtCaption);
+    CHECK(hit_test_frame(PointI{640, 10}, client, DpiScale{144}, false, regions) == kHtTop);
+    // The corner extent scales too: 20 px down the left strip is past the 16px corner at 96 dpi,
+    // inside the 24px one at 150%.
+    CHECK(hit_test_frame(PointI{-1, 20}, client, DpiScale{96}, false, regions) == kHtLeft);
+    CHECK(hit_test_frame(PointI{-1, 20}, client, DpiScale{144}, false, regions) == kHtTopLeft);
+}
+
+void test_hit_test_frame_maximized_has_no_resize_bands()
+{
+    const RegionMap regions = make_chrome_regions();
+    const render::Extent2D client{1280, 800};
+    const DpiScale dpi{96};
+    // Maximized, the top rows belong to the caption (nothing to resize)...
+    CHECK(hit_test_frame(PointI{640, 4}, client, dpi, true, regions) == kHtCaption);
+    // ...and a would-be band point with no region under it is plain client.
+    CHECK(hit_test_frame(PointI{640, 799}, client, dpi, true, regions) == kHtClient);
+    CHECK(hit_test_frame(PointI{-1, 400}, client, dpi, true, regions) == kHtClient);
+}
+
+void test_nc_mouse_forwards_controls_and_leaves_the_caption_to_the_os()
+{
+    const PointI at{1211, 20};
+    // A move over a control is FORWARDED (CSS hover lights) and never consumed.
+    const Win32NcMouseDecision move =
+        translate_win32_nc_mouse(kWmNcMouseMove, kHtClose, at, {}, false, false);
+    CHECK(move.event.has_value());
+    CHECK(move.event->pointer.action == PointerAction::move);
+    CHECK(move.event->pointer.position == at);
+    CHECK(!move.event->pointer.modifiers.left_button_down);
+    CHECK(!move.consume);
+    CHECK(move.hover);
+    CHECK(!move.pressed);
+
+    // A press over a control is forwarded AND consumed — DefWindowProc's classic caption-button
+    // tracking must never fire the system command a web button is about to dispatch.
+    const Win32NcMouseDecision down =
+        translate_win32_nc_mouse(kWmNcLButtonDown, kHtMaxButton, at, {}, true, false);
+    CHECK(down.event.has_value());
+    CHECK(down.event->pointer.action == PointerAction::down);
+    CHECK(down.event->pointer.button == MouseButton::left);
+    CHECK(down.event->pointer.click_count == 1);
+    CHECK(down.event->pointer.modifiers.left_button_down);
+    CHECK(down.consume);
+    CHECK(down.pressed);
+    // ...and an NC double-click on a control is a second press with click_count 2, not a maximize.
+    const Win32NcMouseDecision dbl =
+        translate_win32_nc_mouse(kWmNcLButtonDblClk, kHtMinButton, at, {}, true, false);
+    CHECK(dbl.event.has_value() && dbl.event->pointer.click_count == 2 && dbl.consume);
+
+    // The caption and the bands are the OS's: nothing forwarded, nothing consumed — DefWindowProc
+    // owns drag/snap/double-click-maximize/system-menu through HTCAPTION.
+    const Win32NcMouseDecision caption_press =
+        translate_win32_nc_mouse(kWmNcLButtonDown, kHtCaption, PointI{400, 20}, {}, false, false);
+    CHECK(!caption_press.event.has_value());
+    CHECK(!caption_press.consume);
+    const Win32NcMouseDecision band_move =
+        translate_win32_nc_mouse(kWmNcMouseMove, kHtTop, PointI{400, 4}, {}, false, false);
+    CHECK(!band_move.event.has_value());
+    CHECK(!band_move.consume);
+}
+
+void test_nc_mouse_synthesizes_the_leave_that_prevents_a_stuck_hover()
+{
+    // Sliding off a hovered control onto the caption synthesizes the leave a client-area exit
+    // would have produced (ROADMAP risk 3): without it the close button stays lit while the OS
+    // drags the window.
+    const Win32NcMouseDecision off =
+        translate_win32_nc_mouse(kWmNcMouseMove, kHtCaption, PointI{800, 20}, {}, true, false);
+    CHECK(off.event.has_value());
+    CHECK(off.event->pointer.action == PointerAction::leave);
+    CHECK(!off.hover);
+    CHECK(!off.consume);
+    // Same on a caption PRESS while a control was hovered, and on WM_NCMOUSELEAVE.
+    const Win32NcMouseDecision press =
+        translate_win32_nc_mouse(kWmNcLButtonDown, kHtCaption, PointI{800, 20}, {}, true, false);
+    CHECK(press.event.has_value() && press.event->pointer.action == PointerAction::leave);
+    CHECK(!press.consume); // the drag itself stays DefWindowProc's
+    const Win32NcMouseDecision gone =
+        translate_win32_nc_mouse(kWmNcMouseLeave, kHtNowhere, PointI{}, {}, true, false);
+    CHECK(gone.event.has_value() && gone.event->pointer.action == PointerAction::leave);
+    CHECK(!gone.hover);
+    // Without a live hover, none of those synthesize anything.
+    CHECK(!translate_win32_nc_mouse(kWmNcMouseMove, kHtCaption, PointI{800, 20}, {}, false, false)
+               .event.has_value());
+    CHECK(!translate_win32_nc_mouse(kWmNcMouseLeave, kHtNowhere, PointI{}, {}, false, false)
+               .event.has_value());
+}
+
+void test_nc_mouse_releases_a_forwarded_press_wherever_it_lands()
+{
+    // The release completes ON the control: forwarded, consumed, still hovered.
+    const Win32NcMouseDecision up_on =
+        translate_win32_nc_mouse(kWmNcLButtonUp, kHtClose, PointI{1211, 20}, {}, true, true);
+    CHECK(up_on.event.has_value());
+    CHECK(up_on.event->pointer.action == PointerAction::up);
+    CHECK(!up_on.event->pointer.modifiers.left_button_down);
+    CHECK(up_on.consume);
+    CHECK(!up_on.pressed);
+    CHECK(up_on.hover);
+    // The user dragged off and released on the caption: the release is STILL forwarded — a browser
+    // left holding a phantom pressed button drag-selects from the next hover.
+    const Win32NcMouseDecision up_off =
+        translate_win32_nc_mouse(kWmNcLButtonUp, kHtCaption, PointI{800, 20}, {}, true, true);
+    CHECK(up_off.event.has_value() && up_off.event->pointer.action == PointerAction::up);
+    CHECK(up_off.consume);
+    CHECK(!up_off.pressed);
+    CHECK(!up_off.hover);
+    // A release with no forwarded press outstanding forwards nothing (there is nothing to close),
+    // but the pointer IS over a control now.
+    const Win32NcMouseDecision stray =
+        translate_win32_nc_mouse(kWmNcLButtonUp, kHtClose, PointI{1211, 20}, {}, false, false);
+    CHECK(!stray.event.has_value());
+    CHECK(stray.hover);
+    // A forwarded move while pressed carries the button state, so CEF sees a drag, not a hover.
+    const Win32NcMouseDecision drag =
+        translate_win32_nc_mouse(kWmNcMouseMove, kHtClose, PointI{1211, 22}, {}, true, true);
+    CHECK(drag.event.has_value() && drag.event->pointer.modifiers.left_button_down);
+    CHECK(drag.pressed);
 }
 
 void test_headless_backend_reports_no_native_window_by_default()
@@ -329,6 +608,35 @@ void test_headless_backend_chrome_verbs_are_honest_state_only()
     CHECK(!backend.placement().maximized);
     CHECK(backend.placement().x == 40);
     CHECK(backend.placement().width == 640u);
+}
+
+void test_headless_backend_records_the_pushed_down_chrome_facts()
+{
+    // b1: the two chrome FACTS on the honest offscreen shell. Recording is the whole behaviour —
+    // there is no OS frame — and it is the observable test_shell.cpp's push-down wiring test reads,
+    // which is what gives the EditorWindow -> backend push a ctest on every leg (the real consumer,
+    // the win32 WM_NCHITTEST, only ever runs on an interactive Windows desktop).
+    WindowDesc desc;
+    HeadlessWindowBackend backend(desc);
+    CHECK(backend.chrome_regions().empty());
+    CHECK(backend.chrome_region_pushes() == 0);
+    CHECK(!backend.appearance_dark().has_value()); // "nothing reported" != "light"
+
+    backend.set_chrome_regions(
+        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 1096, 38), RegionKind::caption}});
+    CHECK(backend.chrome_region_pushes() == 1);
+    CHECK(backend.chrome_regions().size() == 1u);
+    CHECK(backend.chrome_regions().front().id == "chrome.caption");
+
+    // Wholesale replace, like RegionMap::publish — an empty push CLEARS (mode changed to system).
+    backend.set_chrome_regions({});
+    CHECK(backend.chrome_region_pushes() == 2);
+    CHECK(backend.chrome_regions().empty());
+
+    backend.set_appearance(true);
+    CHECK(backend.appearance_dark().has_value() && *backend.appearance_dark());
+    backend.set_appearance(false);
+    CHECK(backend.appearance_dark().has_value() && !*backend.appearance_dark());
 }
 
 void test_platform_backend_selection_is_never_silent()
@@ -1360,11 +1668,22 @@ int main()
     test_key_and_char_decoding();
     test_dpi_change_reads_the_low_word();
     test_lifecycle_and_focus_messages();
+    test_resize_border_and_corner_scale_with_dpi();
+    test_frameless_client_insets_restored_and_maximized();
+    test_maximized_client_lands_exactly_on_the_work_area_at_96_and_150_percent();
+    test_hit_test_frame_resize_bands_and_corners();
+    test_hit_test_frame_regions_and_precedence();
+    test_hit_test_frame_scales_bands_with_dpi();
+    test_hit_test_frame_maximized_has_no_resize_bands();
+    test_nc_mouse_forwards_controls_and_leaves_the_caption_to_the_os();
+    test_nc_mouse_synthesizes_the_leave_that_prevents_a_stuck_hover();
+    test_nc_mouse_releases_a_forwarded_press_wherever_it_lands();
     test_headless_backend_reports_no_native_window_by_default();
     test_headless_backend_applies_state_before_delivering_events();
     test_headless_backend_close_ends_the_pump();
     test_headless_backend_records_placement_and_redraws();
     test_headless_backend_chrome_verbs_are_honest_state_only();
+    test_headless_backend_records_the_pushed_down_chrome_facts();
     test_platform_backend_selection_is_never_silent();
     test_platform_window_factories_refuse_off_their_platform();
     test_configure_notify_reports_only_what_actually_changed();

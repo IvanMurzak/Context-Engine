@@ -218,14 +218,18 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
             break;
         case InputTarget::viewport:
         case InputTarget::native:
-            // The native path (03 §6.3): camera controls / picking / gizmo gestures, and — since
-            // editor-window-chrome a1 grew the region vocabulary — the four caption chrome regions.
-            // Consumers land upstream of this arm, which is why it stays empty: c1's macOS pump
-            // consumes a caption PRESS at NSEvent time (cocoa_window.mm's caption consult — only
-            // there does performWindowDragWithEvent: still have the event), so what reaches here is
-            // the press's aftermath (its release, hovers over the strip), arbitrated and accounted
-            // for but dispatched to nobody. b1's Windows NC hit-test will likewise consume caption
-            // clicks BEFORE client routing, and e11 drives the viewport verbs over the bridge.
+            // The native path (03 §6.3): camera controls / picking / gizmo gestures (e11 drives the
+            // viewport verbs over the bridge — until then dispatch stays honestly empty), and the
+            // CAPTION drag surface (editor-window-chrome b1/c1, 02 §6): both OS consumers sit
+            // UPSTREAM of this arm. On Windows the NC hit-test consumes caption points BEFORE
+            // client routing (they arrive as NC messages the pump never forwards); on macOS c1's
+            // pump consumes a caption PRESS at NSEvent time (cocoa_window.mm's caption consult —
+            // only there does performWindowDragWithEvent: still have the event), so what reaches
+            // here is the press's aftermath (its release, hovers over the strip) — and on a backend
+            // with no native consumer at all (the headless smokes) the caption samples themselves.
+            // Dropping them here IS the suppression: a caption press must never half-reach the
+            // browser (ROADMAP risk 3). The caption CONTROLS are deliberately NOT this arm's —
+            // they are web-drawn browser content and route InputTarget::browser (input.cpp).
             break;
         case InputTarget::keymap:
         case InputTarget::swallowed:
@@ -278,6 +282,18 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
     if (!browser_size_synced_)
     {
         sync_browser_size();
+    }
+
+    // b1: push a REPUBLISHED region map down to the OS backend BEFORE draining its queue, so the
+    // WM_NCHITTEST answered during this pump (and during any modal drag loop entered from it) sees
+    // the newest chrome rects. Generation-gated — one integer compare per pump, the exact cheap
+    // change-detection the RegionMap's generation counter exists for (input.h) — and wholesale,
+    // mirroring RegionMap::publish. The publish itself lands during a LATER stage of the previous
+    // pump (the bridge call runs inside browser_->pump), so worst-case staleness is one iteration.
+    if (input_.regions().generation() != chrome_regions_pushed_generation_)
+    {
+        chrome_regions_pushed_generation_ = input_.regions().generation();
+        backend_->set_chrome_regions(input_.regions().regions());
     }
 
     events_.clear();

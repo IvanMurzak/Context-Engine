@@ -109,6 +109,14 @@ inline constexpr std::uint64_t kMkMButton = 0x0010;
 
 } // namespace
 
+// ------------------------------------------------------------------------------- IWindowBackend
+
+// The b1 chrome-fact defaults: ignoring a pushed-down fact is the truthful behaviour for a backend
+// whose platform does not consume it (window.h § the two chrome FACTS) — X11 permanently (D6: the
+// WM owns the frame), cocoa until c1. win32 and headless override both.
+void IWindowBackend::set_chrome_regions(const std::vector<ShellRegion>& /*regions*/) {}
+void IWindowBackend::set_appearance(bool /*dark*/) {}
+
 // ------------------------------------------------------------------- HeadlessWindowBackend
 
 HeadlessWindowBackend::HeadlessWindowBackend(const WindowDesc& desc) : title_(desc.title)
@@ -299,6 +307,276 @@ std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
     default:
         return std::nullopt;
     }
+}
+
+// ------------------------------------------------------------- Win32 frameless frame (b1, pure)
+
+namespace
+{
+
+// A 96-dpi metric scaled to `dpi`, round-to-nearest — the same arithmetic dpi.cpp's to_physical
+// uses, inlined over ints so a border can never round differently from the insets built on it.
+[[nodiscard]] std::int32_t scale_frame_metric(std::int32_t at_96, DpiScale dpi)
+{
+    return static_cast<std::int32_t>(
+        (static_cast<std::int64_t>(at_96) * dpi.dpi + kReferenceDpi / 2) / kReferenceDpi);
+}
+
+// SM_CXSIZEFRAME + SM_CXPADDEDBORDER at the 96-dpi reference (4 + 4). One constant, deliberately,
+// because both addends scale identically and every consumer wants their SUM.
+inline constexpr std::int32_t kResizeBorder96 = 8;
+inline constexpr std::int32_t kResizeCorner96 = 16;
+
+[[nodiscard]] bool is_caption_control_hit(std::int32_t hit_code)
+{
+    return hit_code == kHtMinButton || hit_code == kHtMaxButton || hit_code == kHtClose;
+}
+
+// A forwarded NC pointer event. Mirrors make_pointer_event, except the position arrives already
+// client-converted (an NC lParam is SCREEN-relative) and the button state cannot be read from a
+// wParam that carries a hit-test code instead of MK_* bits — so it is stated explicitly.
+[[nodiscard]] ShellEvent make_nc_pointer_event(PointerAction action, PointI position,
+                                               const Win32ModifierState& keys, bool left_down,
+                                               int click_count = 1)
+{
+    ShellEvent event;
+    event.kind = ShellEventKind::pointer;
+    event.pointer.action = action;
+    event.pointer.button =
+        action == PointerAction::move ? MouseButton::none : MouseButton::left;
+    event.pointer.click_count = click_count;
+    event.pointer.position = position;
+    event.pointer.modifiers = make_key_modifiers(keys);
+    event.pointer.modifiers.left_button_down = left_down;
+    return event;
+}
+
+// The synthesized mouse-leave: byte-for-byte the shape kWmMouseLeave decodes to, so the browser
+// cannot tell a "left the NC controls" from a "left the client area".
+[[nodiscard]] ShellEvent make_nc_leave_event(const Win32ModifierState& keys)
+{
+    ShellEvent event;
+    event.kind = ShellEventKind::pointer;
+    event.pointer.action = PointerAction::leave;
+    event.pointer.modifiers = make_key_modifiers(keys);
+    return event;
+}
+
+} // namespace
+
+std::int32_t win32_resize_border_thickness(DpiScale dpi)
+{
+    return scale_frame_metric(kResizeBorder96, dpi);
+}
+
+std::int32_t win32_resize_corner_extent(DpiScale dpi)
+{
+    return scale_frame_metric(kResizeCorner96, dpi);
+}
+
+Win32FrameInsets win32_frameless_client_insets(bool maximized, DpiScale dpi)
+{
+    const std::int32_t border = win32_resize_border_thickness(dpi);
+    Win32FrameInsets insets;
+    insets.left = border;
+    // Restored: top stays 0 — the client reaches the window top and the web titlebar draws there.
+    // Maximized: the window rect is the work area inflated by `border` on ALL sides (see
+    // win32_frameless_max_geometry), so insetting all sides is what lands the client exactly on
+    // the work area instead of hanging the classic 8px off every monitor edge (ROADMAP risk 2).
+    insets.top = maximized ? border : 0;
+    insets.right = border;
+    insets.bottom = border;
+    return insets;
+}
+
+Win32MaxGeometry win32_frameless_max_geometry(PointI work_origin_in_monitor,
+                                              render::Extent2D work_size, DpiScale dpi)
+{
+    const std::int32_t border = win32_resize_border_thickness(dpi);
+    Win32MaxGeometry geometry;
+    geometry.position =
+        PointI{work_origin_in_monitor.x - border, work_origin_in_monitor.y - border};
+    geometry.size =
+        render::Extent2D{work_size.width + 2u * static_cast<std::uint32_t>(border),
+                         work_size.height + 2u * static_cast<std::uint32_t>(border)};
+    return geometry;
+}
+
+std::int32_t hit_test_frame(PointI point, render::Extent2D client_size, DpiScale dpi,
+                            bool maximized, const RegionMap& regions)
+{
+    const std::int32_t width = static_cast<std::int32_t>(client_size.width);
+    const std::int32_t height = static_cast<std::int32_t>(client_size.height);
+
+    // Resize bands FIRST — but only restored: a maximized window cannot be edge-resized, and
+    // keeping bands there would steal the top rows of the caption for a grip that does nothing.
+    if (!maximized)
+    {
+        const std::int32_t border = win32_resize_border_thickness(dpi);
+        const std::int32_t corner = win32_resize_corner_extent(dpi);
+        if (point.y >= height)
+        {
+            // The bottom NC strip (and, at its ends, the bottom corners — an x outside the client
+            // is by construction within `corner` of the matching edge, so the diagonal wins there).
+            if (point.x < corner)
+            {
+                return kHtBottomLeft;
+            }
+            if (point.x >= width - corner)
+            {
+                return kHtBottomRight;
+            }
+            return kHtBottom;
+        }
+        if (point.x < 0)
+        {
+            // The left NC strip.
+            if (point.y < corner)
+            {
+                return kHtTopLeft;
+            }
+            if (point.y >= height - corner)
+            {
+                return kHtBottomLeft;
+            }
+            return kHtLeft;
+        }
+        if (point.x >= width)
+        {
+            // The right NC strip.
+            if (point.y < corner)
+            {
+                return kHtTopRight;
+            }
+            if (point.y >= height - corner)
+            {
+                return kHtBottomRight;
+            }
+            return kHtRight;
+        }
+        if (point.y < border)
+        {
+            // The top band: the first `border` rows INSIDE the client (there is no top NC strip to
+            // put it in — the top inset is zero). It wins over the caption AND the controls, the
+            // same priority a stock titlebar's top edge has.
+            if (point.x < corner)
+            {
+                return kHtTopLeft;
+            }
+            if (point.x >= width - corner)
+            {
+                return kHtTopRight;
+            }
+            return kHtTop;
+        }
+    }
+
+    // Then the published chrome regions, by the map's own back-to-front last-match-wins — a control
+    // published after the caption wins over it with no carve-out token (input.h).
+    if (const ShellRegion* hit = regions.hit_test(point))
+    {
+        switch (hit->kind)
+        {
+        case RegionKind::caption:
+            return kHtCaption;
+        case RegionKind::caption_min:
+            return kHtMinButton;
+        case RegionKind::caption_max:
+            return kHtMaxButton; // Snap Layouts' trigger on Windows 11
+        case RegionKind::caption_close:
+            return kHtClose;
+        case RegionKind::viewport:
+        case RegionKind::native:
+        default:
+            // Client content: its routing is the InputArbiter's concern, not the OS frame's.
+            return kHtClient;
+        }
+    }
+    return kHtClient;
+}
+
+Win32NcMouseDecision translate_win32_nc_mouse(std::uint32_t message, std::int32_t hit_code,
+                                              PointI client_position,
+                                              const Win32ModifierState& keys, bool hover_live,
+                                              bool pressed_live)
+{
+    Win32NcMouseDecision decision;
+    decision.hover = hover_live;
+    decision.pressed = pressed_live;
+    const bool control = is_caption_control_hit(hit_code);
+
+    switch (message)
+    {
+    case kWmNcMouseMove:
+        if (control)
+        {
+            // Forward so CSS hover lights; never consumed — DefWindowProc's own NC move handling
+            // (the Snap Layouts flyout timing rides it) keeps running.
+            decision.event =
+                make_nc_pointer_event(PointerAction::move, client_position, keys, pressed_live);
+            decision.hover = true;
+        }
+        else if (hover_live)
+        {
+            // Slid off the controls onto the caption/bands: synthesize the leave a client-area
+            // exit would have produced, or the last hovered button stays lit (ROADMAP risk 3).
+            decision.event = make_nc_leave_event(keys);
+            decision.hover = false;
+        }
+        break;
+    case kWmNcLButtonDown:
+    case kWmNcLButtonDblClk:
+        if (control)
+        {
+            // A double NC click on a control is a second PRESS (click_count 2, the CS_DBLCLKS
+            // decode's convention) — consumed either way, so DefWindowProc's classic caption-button
+            // tracking can never fire the system command a web button is about to dispatch.
+            decision.event = make_nc_pointer_event(PointerAction::down, client_position, keys, true,
+                                                   message == kWmNcLButtonDblClk ? 2 : 1);
+            decision.hover = true;
+            decision.pressed = true;
+            decision.consume = true;
+        }
+        else if (hover_live)
+        {
+            decision.event = make_nc_leave_event(keys);
+            decision.hover = false;
+        }
+        break;
+    case kWmNcLButtonUp:
+        if (pressed_live)
+        {
+            // Release a forwarded press WHEREVER it lands — a browser holding a phantom pressed
+            // button would drag-select from the next hover. Consumed: the press never reached
+            // DefWindowProc, so the release is not its to interpret either.
+            decision.event = make_nc_pointer_event(PointerAction::up, client_position, keys, false);
+            decision.pressed = false;
+            decision.hover = control;
+            decision.consume = true;
+        }
+        else if (control)
+        {
+            // A release whose press predates the region publish (or was the OS's to track): no
+            // event to forward, but the pointer IS over a control now.
+            decision.hover = true;
+        }
+        else if (hover_live)
+        {
+            decision.event = make_nc_leave_event(keys);
+            decision.hover = false;
+        }
+        break;
+    case kWmNcMouseLeave:
+        if (hover_live)
+        {
+            decision.event = make_nc_leave_event(keys);
+            decision.hover = false;
+        }
+        break;
+    default:
+        break;
+    }
+    return decision;
 }
 
 // ---------------------------------------------------------------------------- X11 event decoding

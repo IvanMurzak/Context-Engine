@@ -380,6 +380,64 @@ void window_controls_reach_their_handlers()
     CHECK(refused_toggle.at("maximized").as_bool() == false);
 }
 
+void appearance_report_is_total_and_reaches_its_handler()
+{
+    // b1 — the appearance report (window_bridge.h § set_appearance). The token parse is
+    // FAIL-CLOSED: a drifted token silently defaulted would tint the frame wrong with both builds
+    // green, so anything but the two pinned LITERALS (not the constants — the uibus.test.ts
+    // wire-string rationale) is kErrWindowBadParams.
+    WindowMoveStore store;
+    WindowBridge bridge(kPrimaryWindowId, store);
+
+    std::string error_code;
+    Json params = Json::object();
+    params.set("appearance", Json(std::string("dark")));
+    // Unbound: routed, counted, honest accepted:false — the sibling-smoke state.
+    Json out = bridge.set_appearance(params, error_code);
+    CHECK(error_code.empty());
+    CHECK(out.at("accepted").as_bool() == false);
+    CHECK(bridge.appearance_reports() == 1);
+    CHECK(bridge.last_appearance_dark());
+
+    // Bound: the handler receives the decoded bool, both token directions.
+    std::optional<bool> seen;
+    bridge.bind_appearance(
+        [&seen](bool dark) -> bool
+        {
+            seen = dark;
+            return true;
+        });
+    out = bridge.set_appearance(params, error_code);
+    CHECK(error_code.empty());
+    CHECK(out.at("accepted").as_bool());
+    CHECK(seen.has_value() && *seen);
+    params.set("appearance", Json(std::string("light")));
+    out = bridge.set_appearance(params, error_code);
+    CHECK(error_code.empty());
+    CHECK(seen.has_value() && !*seen);
+    CHECK(bridge.appearance_reports() == 3);
+    CHECK(!bridge.last_appearance_dark());
+
+    // Fail-closed: a missing/non-string/unknown token refuses and neither counts nor reaches the
+    // handler.
+    seen.reset();
+    error_code.clear();
+    (void)bridge.set_appearance(Json::object(), error_code);
+    CHECK(error_code == std::string(kErrWindowBadParams));
+    error_code.clear();
+    Json drifted = Json::object();
+    drifted.set("appearance", Json(std::string("darkish")));
+    (void)bridge.set_appearance(drifted, error_code);
+    CHECK(error_code == std::string(kErrWindowBadParams));
+    error_code.clear();
+    Json wrong_type = Json::object();
+    wrong_type.set("appearance", Json(true));
+    (void)bridge.set_appearance(wrong_type, error_code);
+    CHECK(error_code == std::string(kErrWindowBadParams));
+    CHECK(!seen.has_value());
+    CHECK(bridge.appearance_reports() == 3);
+}
+
 // --- the full JSON-RPC binding over a real router (deny-by-default, nothing refused) --------------
 
 void every_method_binds_and_serves_over_a_real_router()
@@ -437,6 +495,17 @@ void every_method_binds_and_serves_over_a_real_router()
     out = dispatch(router, kWindowFocusMethod, Json::object(), refused);
     CHECK(!refused);
     CHECK(out.at("accepted").as_bool() == false);
+    // b1 — the appearance report routes too; a well-formed report is never a refusal.
+    Json appearance = Json::object();
+    appearance.set("appearance", Json(std::string("dark")));
+    out = dispatch(router, kWindowSetAppearanceMethod, appearance, refused);
+    CHECK(!refused);
+    CHECK(out.at("accepted").as_bool() == false); // unbound: the honest degrade
+    // ...and a malformed one is a HANDLER-level error like the malformed tear-out below — the
+    // window.bad_params reason travels in data.reason, the router's refused() never moves.
+    Json bad_appearance = dispatch(router, kWindowSetAppearanceMethod, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(bad_appearance.at("data").at("reason").as_string() == std::string(kErrWindowBadParams));
 
     // A malformed tear-out is a HANDLER-level bridge error (an error RESPONSE editor-core's
     // ShellBridge.call rejects on), NOT a ROUTER refusal: the envelope was well-formed, so
@@ -471,6 +540,7 @@ int main()
     chrome_mode_tokens_cover_the_closed_enum();
     window_controls_unbound_degrade_to_accepted_false_and_still_count();
     window_controls_reach_their_handlers();
+    appearance_report_is_total_and_reaches_its_handler();
     every_method_binds_and_serves_over_a_real_router();
     SHELL_TEST_MAIN_END();
 }

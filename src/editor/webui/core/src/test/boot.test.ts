@@ -30,7 +30,7 @@ import {
     makePackageDaemonCall,
 } from "../boot.js";
 import { SESSION_STATE_METHOD } from "../session.js";
-import { CHROME_STATE_METHOD } from "../window.js";
+import { CHROME_STATE_METHOD, WINDOW_SET_APPEARANCE_METHOD } from "../window.js";
 
 /** A mutable answer table so a case can change what the Shell serves mid-run. */
 type Answers = Record<string, unknown>;
@@ -308,6 +308,36 @@ export const bootTests: readonly TestCase[] = [
                 chromeAttribute(),
                 "mode=system inset=0,0 maximized=false focused=false window=primary",
                 "the refusal degrades to the default and is still REPORTED",
+            );
+        },
+    },
+    {
+        // editor-window-chrome b1: the REAL bootEditorCore reports the applied theme's appearance
+        // over `window.set-appearance` (the DWM dark-mode tint's feed, 02 §3). Asserted AGAINST THE
+        // APPLIED TRUTH — the `data-appearance` attribute ThemeEngine.apply stamps — rather than a
+        // hard-coded "dark", because with no persisted choice the boot theme follows the HOST's
+        // prefers-color-scheme, an ambient input a fixed expectation would be coupled to (the
+        // theme.ts smoke-pin rationale). The Shell serving the method is enough for the report to
+        // be accepted; the refusal path is the previous case's (boot survives an older Shell).
+        name: "boot: the applied theme's appearance is reported over window.set-appearance",
+        run: async () => {
+            const reported: unknown[] = [];
+            const answers = baseAnswers();
+            answers[WINDOW_SET_APPEARANCE_METHOD] = { accepted: true };
+            const shell = mockShell(answers, (method, params) => {
+                if (method === WINDOW_SET_APPEARANCE_METHOD && params !== null) {
+                    reported.push((params as Record<string, unknown>)["appearance"]);
+                }
+            });
+            const report = await bootEditorCore(new ShellBridge(shell.query));
+            assert(report.ready, "the editor boots");
+            assert(reported.length >= 1, "boot reported the appearance at least once");
+            const applied = document.documentElement.getAttribute("data-appearance") ?? "";
+            assert(applied === "dark" || applied === "light", `a theme was applied (${applied})`);
+            assertEqual(
+                reported[reported.length - 1],
+                applied,
+                "the report carries the APPLIED theme's appearance, not a guess",
             );
         },
     },

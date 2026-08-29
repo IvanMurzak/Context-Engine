@@ -727,6 +727,14 @@ int main(int argc, char** argv)
                     "the ctx-smoke-chrome seam drove window.toggle-maximize exactly once");
         SMOKE_CHECK(window_move_bridge.focus_requests() == 1,
                     "the ctx-smoke-chrome seam drove window.focus exactly once");
+        // b1: boot reports the APPLIED theme's appearance over `window.set-appearance` — the feed
+        // the win32 backend's one DWM dark-mode call follows (02 §3). `>= 1` rather than exact: a
+        // theme re-apply (the watched-themes refresh) legitimately re-reports. The VALUE is
+        // deterministic here because the theme is pinned (`ctx-smoke-theme=builtin.dark`).
+        SMOKE_CHECK(window_move_bridge.appearance_reports() >= 1,
+                    "boot reported the applied theme's appearance at least once");
+        SMOKE_CHECK(window_move_bridge.last_appearance_dark(),
+                    "the pinned builtin.dark theme reported a DARK appearance");
     }
 
     // --- the a2 region assertions (editor-window-chrome, target design 02 §6) --------------------
@@ -796,6 +804,108 @@ int main(int argc, char** argv)
         if (caption != nullptr)
         {
             caption_width_before_resize = caption->rect.size.width;
+        }
+    }
+
+    // --- the b1 frameless-frame assertions (editor-window-chrome, target design 02 §3) -----------
+    //
+    // The Windows frame takeover lives OS-side (win32_window.cpp's WM_NCCALCSIZE / WM_NCHITTEST)
+    // and this smoke's backend is headless — Session 0 has no interactive desktop — so what is
+    // provable HERE is exactly the two halves the takeover composes from, each driven against the
+    // LIVE region map the real renderer just published (not a fixture):
+    //   1. the pure hit_test_frame answers, for these real rects, the NC codes the real WndProc
+    //      returns — caption -> HTCAPTION (the OS then owns drag/snap/double-click), the controls
+    //      -> HTMINBUTTON/HTMAXBUTTON/HTCLOSE (Snap Layouts' trigger), everything else client;
+    //   2. the arbitration routes a caption press NATIVE — the suppression that keeps it from ever
+    //      half-reaching the browser (ROADMAP risk 3): on real Windows the NC path consumes it
+    //      before client routing, and this arm is the same guarantee for every NC-less backend —
+    //      while a CONTROL press routes to the BROWSER, which is what the NC path forwards back so
+    //      the web-drawn buttons stay live.
+    // The real-HWND leg (a live NC message stream) is CI-unreachable and is named in the PR body
+    // as deferred interactive verification (the docs/shell.md precedent).
+    {
+        shell::InputArbiter& input = editor->input();
+        const shell::RegionMap& map = input.regions();
+        const shell::ShellRegion* caption = map.find("chrome.caption");
+        const shell::ShellRegion* min_region = map.find("chrome.caption-min");
+        const shell::ShellRegion* max_region = map.find("chrome.caption-max");
+        const shell::ShellRegion* close_region = map.find("chrome.caption-close");
+        const render::Extent2D client = backend_raw->client_size();
+        const shell::DpiScale dpi = backend_raw->dpi();
+        const auto mid = [](const shell::ShellRegion& region) -> shell::PointI
+        {
+            return shell::PointI{
+                static_cast<std::int32_t>(region.rect.origin.x + region.rect.size.width / 2u),
+                static_cast<std::int32_t>(region.rect.origin.y + region.rect.size.height / 2u)};
+        };
+        if (caption != nullptr && min_region != nullptr && max_region != nullptr &&
+            close_region != nullptr)
+        {
+            SMOKE_CHECK(shell::hit_test_frame(mid(*caption), client, dpi, false, map) ==
+                            shell::kHtCaption,
+                        "the live caption rect answers HTCAPTION — the OS owns the drag");
+            SMOKE_CHECK(shell::hit_test_frame(mid(*min_region), client, dpi, false, map) ==
+                            shell::kHtMinButton,
+                        "the live minimize rect answers HTMINBUTTON");
+            SMOKE_CHECK(shell::hit_test_frame(mid(*max_region), client, dpi, false, map) ==
+                            shell::kHtMaxButton,
+                        "the live maximize rect answers HTMAXBUTTON (Snap Layouts' trigger)");
+            SMOKE_CHECK(shell::hit_test_frame(mid(*close_region), client, dpi, false, map) ==
+                            shell::kHtClose,
+                        "the live close rect answers HTCLOSE");
+            // Maximized: the resize bands vanish, so the caption's very top row is a drag surface
+            // (restored it is HTTOP — the same point discriminates the two states). The caption's
+            // own mid-x, so the point is inside the LIVE caption rect by construction.
+            const shell::PointI top_row{mid(*caption).x, 2};
+            SMOKE_CHECK(shell::hit_test_frame(top_row, client, dpi, false, map) == shell::kHtTop,
+                        "restored, the top rows are the resize band");
+            SMOKE_CHECK(shell::hit_test_frame(top_row, client, dpi, true, map) ==
+                            shell::kHtCaption,
+                        "maximized, the same rows belong to the caption");
+        }
+        // Below the strips: plain client; the NC strips outside the client: the resize bands.
+        const shell::PointI body{static_cast<std::int32_t>(client.width / 2u),
+                                 static_cast<std::int32_t>(client.height / 2u)};
+        SMOKE_CHECK(shell::hit_test_frame(body, client, dpi, false, map) == shell::kHtClient,
+                    "the dock is plain client to the frame");
+        SMOKE_CHECK(shell::hit_test_frame(shell::PointI{-1, body.y}, client, dpi, false, map) ==
+                        shell::kHtLeft,
+                    "the left NC strip answers HTLEFT");
+        SMOKE_CHECK(shell::hit_test_frame(
+                        shell::PointI{body.x, static_cast<std::int32_t>(client.height)}, client,
+                        dpi, false, map) == shell::kHtBottom,
+                    "the bottom NC strip answers HTBOTTOM");
+
+        // The suppression half, through the SAME live arbitration the pump runs. A press + release
+        // pair each, so the implicit button capture never leaks into the input round-trip below.
+        if (caption != nullptr && close_region != nullptr)
+        {
+            shell::PointerEvent press;
+            press.action = shell::PointerAction::down;
+            press.button = shell::MouseButton::left;
+            press.position = mid(*caption);
+            shell::PointerEvent release = press;
+            release.action = shell::PointerAction::up;
+
+            const shell::PointerDispatch caption_down = input.route_pointer(press, 0);
+            SMOKE_CHECK(caption_down.target == shell::InputTarget::native,
+                        "a caption press routes NATIVE — never half-reaches the browser");
+            SMOKE_CHECK(caption_down.region_id == "chrome.caption",
+                        "and it is the caption that claimed it");
+            const shell::PointerDispatch caption_up = input.route_pointer(release, 0);
+            SMOKE_CHECK(caption_up.target == shell::InputTarget::native,
+                        "the caption release stays native too");
+
+            press.position = mid(*close_region);
+            release.position = press.position;
+            const shell::PointerDispatch close_down = input.route_pointer(press, 0);
+            SMOKE_CHECK(close_down.target == shell::InputTarget::browser,
+                        "a close-control press routes to the BROWSER — the web button is live");
+            SMOKE_CHECK(close_down.region_id == "chrome.caption-close",
+                        "with the control's own region id carried");
+            const shell::PointerDispatch close_up = input.route_pointer(release, 0);
+            SMOKE_CHECK(close_up.target == shell::InputTarget::browser,
+                        "and its release completes in the browser");
         }
     }
 

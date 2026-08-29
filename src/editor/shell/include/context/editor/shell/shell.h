@@ -169,6 +169,10 @@ private:
     // so a local would malloc/free once per frame with input. The Win32 backend keeps its own
     // pending_ buffer for the same reason.
     std::vector<ShellEvent> events_;
+    // The RegionMap generation last pushed down to the backend (b1: pump_once § the chrome-region
+    // push). Starts at 0 — the map's own pre-first-publish generation — so an empty map is never
+    // pushed at boot, and the first real publish is.
+    std::uint64_t chrome_regions_pushed_generation_ = 0;
     std::uint64_t last_placement_poll_us_ = 0;
     std::string diagnostic_;
     bool placement_dirty_ = false;

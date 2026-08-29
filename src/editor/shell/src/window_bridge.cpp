@@ -150,6 +150,11 @@ void WindowBridge::bind_chrome_state(ChromeStateProvider provider)
     chrome_state_ = std::move(provider);
 }
 
+void WindowBridge::bind_appearance(AppearanceHandler handler)
+{
+    appearance_ = std::move(handler);
+}
+
 void WindowBridge::bind_drag_store(CrossWindowDragStore* store)
 {
     drag_store_ = store;
@@ -359,6 +364,33 @@ contract::Json WindowBridge::chrome_state()
     return out;
 }
 
+contract::Json WindowBridge::set_appearance(const contract::Json& params, std::string& error_code)
+{
+    // Fail CLOSED on a token that is neither pinned value (window_bridge.h § set_appearance): a
+    // drifted token silently defaulted would tint the frame wrong with both builds green.
+    if (!params.is_object() || !params.contains("appearance") ||
+        !params.at("appearance").is_string())
+    {
+        error_code = kErrWindowBadParams;
+        return contract::Json{};
+    }
+    const std::string& token = params.at("appearance").as_string();
+    if (token != kWindowAppearanceDark && token != kWindowAppearanceLight)
+    {
+        error_code = kErrWindowBadParams;
+        return contract::Json{};
+    }
+    const bool dark = token == kWindowAppearanceDark;
+    // Counted on every well-formed report, bound or not — the same ten-smoke routing discipline
+    // the control verbs follow.
+    ++appearance_reports_;
+    last_appearance_dark_ = dark;
+    const bool accepted = appearance_ ? appearance_(dark) : false;
+    contract::Json out = contract::Json::object();
+    out.set("accepted", contract::Json(accepted));
+    return out;
+}
+
 contract::Json WindowBridge::drag_probe()
 {
     contract::Json out = contract::Json::object();
@@ -556,6 +588,21 @@ bool WindowBridge::install(BridgeRouter& router)
     ok = router.register_method(kChromeStateMethod,
                                 [this](const BridgeRequest&) -> BridgeResult
                                 { return BridgeResult::ok(chrome_state()); }) &&
+         ok;
+    // b1 — the appearance report: params-taking (and so refusable on malformed params, like
+    // tear-out/move-to), but never refused for being unbound.
+    ok = router.register_method(
+             kWindowSetAppearanceMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 std::string error_code;
+                 contract::Json value = set_appearance(request.params, error_code);
+                 if (!error_code.empty())
+                 {
+                     return BridgeResult::error(error_code, "appearance report was malformed");
+                 }
+                 return BridgeResult::ok(std::move(value));
+             }) &&
          ok;
     ok = router.register_method(kDragProbeMethod,
                                 [this](const BridgeRequest&) -> BridgeResult
