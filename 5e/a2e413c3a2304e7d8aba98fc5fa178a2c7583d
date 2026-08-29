@@ -1,0 +1,21 @@
+src/editor/shell/src/win32_window.cpp
+  s_7b2854368302f3::t_7864fe11439876 389-392
+  s_7b2854368302f3::t_f1b39481749e60 442-455
+  s_7b2854368302f3::t_f875955b65add2 577-596,602-618
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "5ea2e413c3a2304e7d8aba98fc5fa178a2c7583d",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
