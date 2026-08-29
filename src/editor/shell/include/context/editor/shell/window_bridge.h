@@ -86,8 +86,28 @@ inline constexpr const char* kWindowCloseMethod = "window.close";
 // drag/mirror stores follow.
 inline constexpr const char* kWindowMinimizeMethod = "window.minimize";
 inline constexpr const char* kWindowToggleMaximizeMethod = "window.toggle-maximize";
+// `window.focus` takes an OPTIONAL numeric `windowId` since editor-window-chrome d3 (the Window
+// menu's window list): absent targets THIS window (the a1 behaviour, unchanged for every existing
+// caller), present targets the named peer — the handler routes `request_activation` at whichever
+// window the id resolves to. A present-but-non-numeric id is refused (kErrWindowBadParams), never
+// silently retargeted at self.
 inline constexpr const char* kWindowFocusMethod = "window.focus";
 inline constexpr const char* kChromeStateMethod = "chrome.state";
+
+// The MENU PUBLISH (editor-window-chrome d3, menu structure 03 / target 02 §4): editor-core hands
+// the Shell its ONE declarative menu model — the same model whose web menubar renders inside the
+// titlebar strip on Windows/Linux — so the Cocoa backend can build the native global NSMenu bar
+// from it (cocoa_menu.h). The write-shaped sibling of `window.set-appearance`, riding this same
+// surface for the same reason: installed on EVERY window that installs `window.*` — every live
+// smoke — with no per-smoke change, and degrading honestly when unbound (`accepted:false`, never
+// `unknown_method`; Windows/Linux answer exactly that, because the web menubar IS the rendering
+// there and nothing native exists to feed). Editor-core publishes at BOOT on the primary window's
+// editor path, so the ten-smoke rule (this header's top note) applies in full: every live smoke
+// asserts the method routes, and the main boot smoke asserts the publish arrived
+// (`menu_publishes() >= 1`). The activation RETURN path is menu_facts.h — a fact on the existing
+// `editor.ui` mirror relay carrying the command id, which editor-core executes through the ONE
+// e07b registry (no second dispatch system, 03's core rule).
+inline constexpr const char* kMenuPublishMethod = "menu.publish";
 
 // The APPEARANCE report (editor-window-chrome b1, target design 02 §3): editor-core tells the Shell
 // whether the ACTIVE theme is dark, whenever the theme engine applies one (boot included), so the
@@ -282,11 +302,19 @@ public:
     // defaulted-ChromeState degrade every smoke gets, never a refusal.
     using MinimizeHandler = std::function<bool()>;
     using ToggleMaximizeHandler = std::function<std::optional<bool>()>;
-    using FocusHandler = std::function<bool()>;
+    // d3: the focus handler takes the TARGET window id (the bridge resolves an absent wire
+    // `windowId` to `self_id_`, so the a1 self-focus callers behave exactly as before; the Window
+    // menu's window-list entries name a peer). The handler routes `request_activation` at whatever
+    // the id resolves to — an unknown id is its honest false.
+    using FocusHandler = std::function<bool(WindowId target)>;
     using ChromeStateProvider = std::function<ChromeState()>;
     // b1: the appearance report's sink — `dark` is true for a dark theme. Optional like the four
     // above: unbound is the honest `accepted:false` degrade (a build with no OS window to tint).
     using AppearanceHandler = std::function<bool(bool dark)>;
+    // d3: the menu publish's sink — the published model, verbatim (the handler parses it through
+    // menu_model.h and feeds the platform's native menu host). True when a native bar was actually
+    // (re)built; false is the honest "no native menu host here" every non-macOS build answers.
+    using MenuPublishHandler = std::function<bool(const contract::Json& model)>;
 
     // `self_id` is THIS window's id — the source of every request from this window's editor-core, and
     // the key its `window.seed` / `window.rehomed` read. `store` outlives every window (it is owned by
@@ -312,6 +340,8 @@ public:
     void bind_chrome_state(ChromeStateProvider provider);
     // b1: bind the appearance report's sink (see the using above).
     void bind_appearance(AppearanceHandler handler);
+    // d3: bind the menu publish's sink (see the using above).
+    void bind_menu(MenuPublishHandler handler);
 
     // Bind the shared cross-window drag relay (e10c). NULL — the default — leaves `drag.probe` /
     // `drag.report-zone` INERT: probe answers `{active:false}` and report-zone is an accepted no-op, so
@@ -350,8 +380,19 @@ public:
     // sibling smoke), which degrades honestly instead of tripping `bridge.refused() == 0`.
     [[nodiscard]] contract::Json minimize();
     [[nodiscard]] contract::Json toggle_maximize();
-    [[nodiscard]] contract::Json focus();
+    // d3: `focus` is params-taking now (the OPTIONAL `windowId` — see kWindowFocusMethod). Absent
+    // resolves to `self_id_`; present-but-non-numeric sets `error_code` (kErrWindowBadParams).
+    [[nodiscard]] contract::Json focus(const contract::Json& params, std::string& error_code);
     [[nodiscard]] contract::Json chrome_state();
+
+    // d3 — the menu publish. Total over renderer-controlled `params`; `error_code` is set
+    // (kErrWindowBadParams) when the payload is not an object carrying a `menus` array — the same
+    // outer fail-closed shape `parse_menu_model` refuses, checked HERE so a malformed publish is a
+    // loud wiring bug rather than a silently-empty menu bar. A well-formed publish answers
+    // `{accepted}` — false when no handler is bound (every non-macOS build, every sibling smoke),
+    // the honest degrade the control verbs use.
+    [[nodiscard]] contract::Json menu_publish(const contract::Json& params,
+                                              std::string& error_code);
 
     // b1 — the appearance report. Total over renderer-controlled `params`; `error_code` is set
     // (kErrWindowBadParams) when `appearance` is missing or is neither pinned token — fail-closed,
@@ -406,6 +447,11 @@ public:
     [[nodiscard]] std::size_t maximize_toggles() const { return maximize_toggles_; }
     [[nodiscard]] std::size_t focus_requests() const { return focus_requests_; }
     [[nodiscard]] std::size_t chrome_reads() const { return chrome_reads_; }
+    // d3: how many WELL-FORMED menu publishes arrived (routed, bound or not — the ten-smoke
+    // discipline), and how many command items the LAST one carried (meaningful once
+    // `menu_publishes() >= 1`; the live boot smoke asserts both from editor-core's boot publish).
+    [[nodiscard]] std::size_t menu_publishes() const { return menu_publishes_; }
+    [[nodiscard]] std::size_t last_menu_commands() const { return last_menu_commands_; }
     // b1: how many WELL-FORMED appearance reports arrived (routed, bound or not — the ten-smoke
     // discipline), and the last one's value (meaningful once `appearance_reports() >= 1`; the live
     // boot smoke asserts it matches its pinned theme's appearance).
@@ -446,6 +492,7 @@ private:
     FocusHandler focus_;
     ChromeStateProvider chrome_state_;
     AppearanceHandler appearance_;
+    MenuPublishHandler menu_;
     std::size_t tear_outs_ = 0;
     std::size_t moves_ = 0;
     std::size_t seeds_served_ = 0;
@@ -453,6 +500,8 @@ private:
     std::size_t maximize_toggles_ = 0;
     std::size_t focus_requests_ = 0;
     std::size_t chrome_reads_ = 0;
+    std::size_t menu_publishes_ = 0;
+    std::size_t last_menu_commands_ = 0;
     std::size_t appearance_reports_ = 0;
     bool last_appearance_dark_ = false;
     std::size_t drag_probes_active_ = 0;

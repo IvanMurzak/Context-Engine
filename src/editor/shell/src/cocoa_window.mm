@@ -37,6 +37,8 @@
 #if defined(__APPLE__)
 
 #include "context/editor/shell/cocoa_chrome.h"
+#include "context/editor/shell/cocoa_menu.h"
+#include "context/editor/shell/menu_model.h"
 
 #import <AppKit/AppKit.h>
 #import <CoreGraphics/CoreGraphics.h>
@@ -45,8 +47,11 @@
 #include <algorithm>
 #include <cmath>
 #include <cstring>
+#include <functional>
 #include <memory>
+#include <optional>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace
@@ -188,6 +193,36 @@ struct ContextShellWindowMailbox
 
 @end
 
+// The ONE target every d3 NSMenuItem points at (cocoa_menu.h). At FILE scope for the same reason the
+// delegate is; its entire knowledge of the Shell is ONE dispatch function pointer, aimed at a member
+// the owning backend keeps alive for its whole life (the mailbox discipline). The command id rides
+// the item's own representedObject, so this class holds no per-item state at all.
+@interface ContextShellMenuTarget : NSObject
+{
+@public
+    std::function<void(const std::string&)>* dispatch;
+}
+- (void)contextShellMenuActivate:(NSMenuItem*)sender;
+@end
+
+@implementation ContextShellMenuTarget
+
+- (void)contextShellMenuActivate:(NSMenuItem*)sender
+{
+    id represented = [sender representedObject];
+    if (dispatch == nullptr || !(*dispatch) || ![represented isKindOfClass:[NSString class]])
+    {
+        return; // an unwired or nameless item dispatches nothing — never a crash, never a guess
+    }
+    const char* utf8 = [(NSString*)represented UTF8String];
+    if (utf8 != nullptr)
+    {
+        (*dispatch)(std::string(utf8));
+    }
+}
+
+@end
+
 namespace context::editor::shell
 {
 namespace
@@ -268,6 +303,142 @@ void cocoa_ensure_application()
                                                length:utf8.size()
                                              encoding:NSUTF8StringEncoding];
     return value != nil ? value : @"";
+}
+
+// --------------------------------------------------------------------------- the d3 menu builders
+// (cocoa_menu.h). Pure-ish AppKit assembly: everything DECIDED here — what parses, what an
+// accelerator means — was decided by menu_model.h's tested functions; these only transcribe.
+
+// One parsed accelerator becoming an NSMenuItem key equivalent. `Ctrl` (and `Meta`) map onto the
+// COMMAND key — the platform's primary modifier, the CmdOrCtrl reading cocoa_menu.h pins — so the
+// published `Ctrl+Z` accelerator is the ⌘Z macOS users expect. A key token this table cannot name
+// yields the honest "no equivalent" (empty string, zero mask) rather than a guessed binding.
+[[nodiscard]] NSString* ns_key_equivalent(const context::editor::shell::MenuAccelerator& accel,
+                                          NSEventModifierFlags& mask)
+{
+    mask = 0;
+    if (accel.ctrl || accel.meta)
+    {
+        mask |= NSEventModifierFlagCommand;
+    }
+    if (accel.shift)
+    {
+        mask |= NSEventModifierFlagShift;
+    }
+    if (accel.alt)
+    {
+        mask |= NSEventModifierFlagOption;
+    }
+    if (accel.key.size() == 1)
+    {
+        return cocoa_string(accel.key);
+    }
+    unichar function_key = 0;
+    if (accel.key == "ArrowLeft")
+    {
+        function_key = NSLeftArrowFunctionKey;
+    }
+    else if (accel.key == "ArrowRight")
+    {
+        function_key = NSRightArrowFunctionKey;
+    }
+    else if (accel.key == "ArrowUp")
+    {
+        function_key = NSUpArrowFunctionKey;
+    }
+    else if (accel.key == "ArrowDown")
+    {
+        function_key = NSDownArrowFunctionKey;
+    }
+    if (function_key == 0)
+    {
+        mask = 0;
+        return @"";
+    }
+    return [NSString stringWithCharacters:&function_key length:1];
+}
+
+// Build one NSMenu from parsed items, recursively for submenus, counting the COMMAND items kept
+// (the CocoaMenuStats::items observable). `autoenablesItems` is OFF on every menu built here:
+// enablement is the PUBLISHED model's snapshot (cocoa_menu.h), never AppKit's responder-chain guess.
+[[nodiscard]] NSMenu* build_ns_menu(const std::string& title,
+                                    const std::vector<context::editor::shell::MenuItem>& items,
+                                    ContextShellMenuTarget* target, std::size_t& command_items)
+{
+    using context::editor::shell::MenuItem;
+    NSMenu* menu = [[NSMenu alloc] initWithTitle:cocoa_string(title)];
+    [menu setAutoenablesItems:NO];
+    for (const MenuItem& item : items)
+    {
+        switch (item.kind)
+        {
+        case MenuItem::Kind::separator:
+            [menu addItem:[NSMenuItem separatorItem]];
+            break;
+        case MenuItem::Kind::submenu:
+        {
+            NSMenuItem* holder = [[NSMenuItem alloc] initWithTitle:cocoa_string(item.label)
+                                                            action:nil
+                                                     keyEquivalent:@""];
+            [holder setSubmenu:build_ns_menu(item.label, item.items, target, command_items)];
+            [menu addItem:holder];
+            break;
+        }
+        case MenuItem::Kind::command:
+        {
+            NSString* key = @"";
+            NSEventModifierFlags mask = 0;
+            const std::optional<context::editor::shell::MenuAccelerator> accel =
+                context::editor::shell::parse_menu_accelerator(item.accelerator);
+            if (accel.has_value())
+            {
+                key = ns_key_equivalent(*accel, mask);
+            }
+            NSMenuItem* entry =
+                [[NSMenuItem alloc] initWithTitle:cocoa_string(item.label)
+                                           action:@selector(contextShellMenuActivate:)
+                                    keyEquivalent:key];
+            [entry setKeyEquivalentModifierMask:mask];
+            [entry setTarget:target];
+            [entry setEnabled:(item.enabled ? YES : NO)];
+            // The command id rides the item itself, so the shared target stays stateless.
+            [entry setRepresentedObject:cocoa_string(item.command_id)];
+            if (!item.tooltip.empty())
+            {
+                [entry setToolTip:cocoa_string(item.tooltip)];
+            }
+            [menu addItem:entry];
+            ++command_items;
+            break;
+        }
+        }
+    }
+    return menu;
+}
+
+// Find the command item carrying `command_id`, depth-first — the programmatic-activation lookup
+// (cocoa_menu.h `cocoa_menu_perform`).
+[[nodiscard]] NSMenuItem* find_ns_menu_item(NSMenu* menu, NSString* command_id)
+{
+    for (NSMenuItem* item in [menu itemArray])
+    {
+        if ([item hasSubmenu])
+        {
+            NSMenuItem* found = find_ns_menu_item([item submenu], command_id);
+            if (found != nil)
+            {
+                return found;
+            }
+            continue;
+        }
+        id represented = [item representedObject];
+        if ([represented isKindOfClass:[NSString class]] &&
+            [(NSString*)represented isEqualToString:command_id])
+        {
+            return item;
+        }
+    }
+    return nil;
 }
 
 // ------------------------------------------------------------------------------------ the backend
@@ -396,6 +567,14 @@ public:
     }
     [[nodiscard]] bool hybrid_chrome(CocoaChromeState& out) const;
 
+    // --- the d3 native-menu surface (cocoa_menu.h; reached the same name()-keyed way) ------------
+    [[nodiscard]] bool install_menu(const MenuModel& model, MenuActivationCallback on_activate);
+    [[nodiscard]] CocoaMenuStats menu_stats() const
+    {
+        return CocoaMenuStats{menu_installs_, menu_items_, menu_activations_};
+    }
+    [[nodiscard]] bool perform_menu(const std::string& command_id);
+
 private:
     void destroy();
     void drain_geometry();
@@ -420,6 +599,16 @@ private:
     const RegionMap* caption_regions_ = nullptr;
     std::size_t caption_drags_ = 0;
     std::size_t caption_zooms_ = 0;
+    // d3: the installed global menu bar + its one shared target. `menu_dispatch_` is the member the
+    // target aims at (the mailbox discipline: the ObjC object knows one pointer, the backend owns
+    // the lifetime) — it wraps the caller's callback with the activation counter, so the two can
+    // never disagree about how many activations happened.
+    NSMenu* main_menu_ = nil;
+    ContextShellMenuTarget* menu_target_ = nil;
+    std::function<void(const std::string&)> menu_dispatch_;
+    std::size_t menu_installs_ = 0;
+    std::size_t menu_items_ = 0;
+    std::size_t menu_activations_ = 0;
     bool alive_ = true;
 };
 
@@ -549,13 +738,93 @@ void CocoaWindowBackend::destroy()
         {
             delegate_->mailbox = nullptr;
         }
+        // d3: unhook the menu the same way the delegate is unhooked, and for the same reason —
+        // every installed NSMenuItem's (unretained) target and its dispatch pointer aim into THIS
+        // dying object. Detaching the bar from NSApp is what makes them unreachable from the UI;
+        // nulling the target's pointer is the belt-and-braces for anything still holding the menu.
+        if (menu_target_ != nil)
+        {
+            menu_target_->dispatch = nullptr;
+        }
+        if (main_menu_ != nil && [NSApp mainMenu] == main_menu_)
+        {
+            [NSApp setMainMenu:nil];
+        }
         [window_ orderOut:nil];
         [window_ close];
     }
     delegate_ = nil;
+    menu_target_ = nil;
+    main_menu_ = nil;
     layer_ = nil;
     view_ = nil;
     window_ = nil;
+}
+
+bool CocoaWindowBackend::install_menu(const MenuModel& model, MenuActivationCallback on_activate)
+{
+    if (window_ == nil)
+    {
+        return false; // no live window — nothing owns an app menu bar here
+    }
+    @autoreleasepool
+    {
+        if (menu_target_ == nil)
+        {
+            menu_target_ = [ContextShellMenuTarget new];
+            menu_target_->dispatch = &menu_dispatch_;
+        }
+        // The dispatch wraps the caller's callback with the activation counter, so the stats and
+        // the relay can never disagree about how many activations happened.
+        menu_dispatch_ = [this, callback = std::move(on_activate)](const std::string& id)
+        {
+            ++menu_activations_;
+            if (callback)
+            {
+                callback(id);
+            }
+        };
+        // Built WHOLESALE and swapped in one `setMainMenu:` — a re-publish is a re-render, the
+        // mountChrome rule; there is no in-place item surgery to drift.
+        NSMenu* bar = [[NSMenu alloc] initWithTitle:@"MainMenu"];
+        [bar setAutoenablesItems:NO];
+        std::size_t command_items = 0;
+        for (const MenuDefinition& menu : model.menus)
+        {
+            NSMenuItem* holder = [[NSMenuItem alloc] initWithTitle:cocoa_string(menu.label)
+                                                            action:nil
+                                                     keyEquivalent:@""];
+            [holder setSubmenu:build_ns_menu(menu.label, menu.items, menu_target_, command_items)];
+            [bar addItem:holder];
+        }
+        [NSApp setMainMenu:bar];
+        main_menu_ = bar;
+        // What the BUILT tree holds — the builder's own tally, so the stat cannot drift from the
+        // items actually installed.
+        menu_items_ = command_items;
+    }
+    ++menu_installs_;
+    return true;
+}
+
+bool CocoaWindowBackend::perform_menu(const std::string& command_id)
+{
+    if (main_menu_ == nil)
+    {
+        return false;
+    }
+    @autoreleasepool
+    {
+        NSMenuItem* item = find_ns_menu_item(main_menu_, cocoa_string(command_id));
+        if (item == nil || ![item isEnabled])
+        {
+            // A DISABLED item is truly inert — the honesty the DoD pins: the programmatic path
+            // refuses exactly where a real menu click could not fire.
+            return false;
+        }
+        // Exactly what an activation invokes: the bound target/action pair, from the item itself.
+        return [NSApp sendAction:[item action] to:[item target] from:item] == YES;
+    }
 }
 
 NsWindowGeometry CocoaWindowBackend::read_geometry() const
@@ -1000,6 +1269,34 @@ bool cocoa_caption_stats(const IWindowBackend& backend, CocoaCaptionStats& out)
     }
     out = cocoa->caption_stats();
     return true;
+}
+
+// --- the d3 native-menu query/wiring surface (cocoa_menu.h) --------------------------------------
+// Same name()-keyed downcast as the c1 surface above; every non-Cocoa backend (headless — every mac
+// CI smoke — and the other platforms' backends) answers the honest false.
+
+bool cocoa_install_menu(IWindowBackend& backend, const MenuModel& model,
+                        MenuActivationCallback on_activate)
+{
+    CocoaWindowBackend* cocoa = as_cocoa(backend);
+    return cocoa != nullptr && cocoa->install_menu(model, std::move(on_activate));
+}
+
+bool cocoa_menu_stats(const IWindowBackend& backend, CocoaMenuStats& out)
+{
+    const CocoaWindowBackend* cocoa = as_cocoa(backend);
+    if (cocoa == nullptr)
+    {
+        return false;
+    }
+    out = cocoa->menu_stats();
+    return true;
+}
+
+bool cocoa_menu_perform(IWindowBackend& backend, const std::string& command_id)
+{
+    CocoaWindowBackend* cocoa = as_cocoa(backend);
+    return cocoa != nullptr && cocoa->perform_menu(command_id);
 }
 
 std::unique_ptr<IWindowBackend> make_cocoa_window_backend(const WindowDesc& desc,

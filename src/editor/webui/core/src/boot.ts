@@ -61,12 +61,22 @@ import {
 import { ShellPackageGrants } from "./packagegrants.js";
 import { PANEL_UI_DELIVER_VERB, PackageUiFanout } from "./packageui.js";
 import {
+    CHROME_WINDOW_PRIMARY,
     WINDOW_APPEARANCE_DARK,
     WINDOW_APPEARANCE_LIGHT,
     WindowClient,
     type ChromeState,
     type WindowSeed,
 } from "./window.js";
+import {
+    buildMenuModel,
+    makeMenuActions,
+    menuCommands,
+    menuModelJson,
+    mountMenubar,
+    openAboutDialog,
+    subscribeMenuFacts,
+} from "./menu.js";
 import {
     EDITOR_PLAYBAR_ID,
     EDITOR_STATUSBAR_ID,
@@ -109,7 +119,7 @@ import {
     type ThemeChangedPayload,
     type ThemeRoot,
 } from "./theme.js";
-import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome } from "./welcome.js";
+import { WELCOME_MODE_WELCOME, WelcomeClient, mountWelcome, type WelcomeState } from "./welcome.js";
 import { BannerClient, mountBanners, type BannerData, type DaemonLinkState } from "./banners.js";
 import {
     SessionControlClient,
@@ -488,6 +498,22 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // all dispatch ONE implementation over `session.control`.
         const playActions = startPlaybar(bridge, session, playbarHolder, liveRegistry);
 
+        // --- the application menu (editor-window-chrome d3, menu structure 03) --------------------
+        // The ONE declarative model + the d3 command set, built on the EDITOR path only (the
+        // welcome screen has no command registry to dispatch into — its front door carries the same
+        // actions as buttons). The web menubar mounts into the a2 titlebar's slot where one exists
+        // (custom/system chrome, primary window); the model is PUBLISHED to the Shell after the
+        // command layer is up (below), so the macOS NSMenu's enablement snapshot reflects the real
+        // registry. NEVER fatal, like every boot feed.
+        const menu = await startMenu(bridge, {
+            chromeClient,
+            chromeState,
+            welcomeState,
+            chromeStrips,
+            liveRegistry,
+            whenContext,
+        });
+
         // --- the app layer (e05d1) ----------------------------------------------------------------
         // The channel is proven; bring up the panels. A failure HERE is reported but does NOT undo
         // `ready`: the bridge genuinely does round-trip, and conflating "the editor has no panels"
@@ -502,7 +528,14 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             liveRegistry,
             playActions,
             statusbarMount,
+            menu,
         );
+
+        // d3: publish the menu model to the Shell now the command layer is up, so the native bar's
+        // publish-time enablement snapshot reads the REAL registry (menu.ts § menuModelJson).
+        // Awaited so the live smoke's `menu_publishes()` counter is settled before boot reports
+        // ready — the runChromeSmoke discipline.
+        await menu.publishNative();
         // d2: seed the problems count from whatever the bring-up already hydrated; the refresh tick
         // inside startPanels re-derives it from then on (and hides it again if the panel closes).
         statusbarMount?.refreshProblems();
@@ -582,6 +615,10 @@ async function startPanels(
     // through to the window mechanism's runtime tick, which re-derives the problems count after
     // each `pollRevisions` pass.
     statusbar?: StatusbarMount,
+    // d3: the menu bring-up — its command set joins the registry (before the panel source), its
+    // host holder is filled once the PanelHost exists (`view.panel.open.settings`'s late bind),
+    // and its dispatch is what the native menu-activation fact routes through.
+    menu?: MenuBringUp,
 ): Promise<PanelBringUp> {
     if (typeof document === "undefined") {
         return { mounted: 0, unavailable: [], error: "no document to mount into" };
@@ -679,6 +716,11 @@ async function startPanels(
                     request: binding.request,
                 }),
         });
+        // d3: `view.panel.open.settings` dispatches through this holder — filled the moment the
+        // host exists, so a menu activation can open Settings as soon as the registry is live.
+        if (menu !== undefined) {
+            menu.hostHolder.current = host;
+        }
         const report = await host.start(seed !== null ? { only: seed.panelId } : {});
         // Restore the moved panel's D6 state onto the freshly-opened panel — the SAME recreate path
         // (open + panel.state.set + refresh) window-close rehome uses, which is the whole point of D6:
@@ -757,6 +799,7 @@ async function startPanels(
                     },
                     chrome?.mount,
                     statusbar,
+                    menu?.executeCommand,
                 );
                 // --- the command layer + palette (e07d) ----------------------------------------
                 // The docking root is up and persistence is live; wire the ONE command registry, the
@@ -773,6 +816,7 @@ async function startPanels(
                     theme,
                     whenContext,
                     playActions,
+                    menu?.commands,
                 );
                 // e06d settings-smoke seam: only under `?ctx-smoke-settings`, drive a REAL theme
                 // switch through the Settings panel so the live leg can assert the Shell persisted it.
@@ -883,6 +927,126 @@ function startPlaybar(
         // Reported by the absence of `data-editor-playbar`; the editor is up and usable.
     }
     return actions;
+}
+
+/** What `startMenu` wired — threaded into the command layer and the window mechanism. */
+interface MenuBringUp {
+    /** The d3 command set, registered through `buildCommandRegistry`'s `menuCommands` source. */
+    readonly commands: readonly Command[];
+    /** Filled by startPanels once the PanelHost exists — `view.panel.open.settings`'s late bind. */
+    readonly hostHolder: { current: { openById(panelId: string): boolean } | undefined };
+    /** Route a command id through the late-bound registry (the menubar + the native-fact path). */
+    readonly executeCommand: (commandId: string) => void;
+    /** Publish the model to the Shell (macOS NSMenu feed) — called once the command layer is up. */
+    publishNative(): Promise<void>;
+}
+
+/** What `startMenu` composes over — the clients bootEditorCore already built. */
+interface StartMenuOptions {
+    readonly chromeClient: WindowClient;
+    readonly chromeState: ChromeState;
+    readonly welcomeState: WelcomeState | null;
+    readonly chromeStrips: ChromeStrips | undefined;
+    readonly liveRegistry: { current: CommandRegistry | undefined };
+    readonly whenContext: () => WhenContext;
+}
+
+/**
+ * Bring up the d3 application menu (menu structure 03): build the ONE model + the d3 command set,
+ * mount the web menubar into the titlebar's slot where one exists, and hand back the publisher the
+ * boot sequence runs once the command layer is live. NEVER fatal, like every boot feed: a document
+ * with no menubar slot (hybrid chrome, a secondary window, an older served page) still registers
+ * every command — the palette remains the universal path — and a failed mount costs the strip its
+ * menus, never the editor its boot.
+ */
+async function startMenu(bridge: ShellBridge, options: StartMenuOptions): Promise<MenuBringUp> {
+    const { chromeClient, chromeState, welcomeState, chromeStrips, liveRegistry, whenContext } =
+        options;
+    const banners = new BannerClient(bridge);
+    const executeCommand = (commandId: string): void => {
+        void liveRegistry.current?.execute(commandId);
+    };
+    const commandAvailable = (commandId: string): boolean =>
+        liveRegistry.current?.has(commandId) ?? false;
+    const isMaximized = (): boolean =>
+        chromeStrips?.mount.isMaximized() ?? chromeState.maximized;
+
+    // The Window menu's window list — the same read the window mechanism repeats later; issued
+    // here because the list is boot DATA the model + commands close over (menu.ts's honest scope:
+    // the list is the boot-time snapshot, refreshed when the menu is rebuilt).
+    const list = await chromeClient.list();
+    const selfWindowId = list?.windowId ?? 0;
+    const windows = list?.windows ?? [];
+    const recents = welcomeState?.recents ?? [];
+
+    const hostHolder: MenuBringUp["hostHolder"] = { current: undefined };
+    const actions = makeMenuActions({
+        project: new WelcomeClient(bridge),
+        windowControls: chromeClient,
+        select: new SessionControlClient(bridge),
+        openPanel: (panelId: string): boolean => hostHolder.current?.openById(panelId) ?? false,
+        openDocs: (): Promise<boolean> => banners.openDocs(),
+        showAbout: (): void => {
+            // The dialog renders whatever `update.state` already knows (03's table: version + the
+            // existing read) — fetched fresh here, rendered when it lands; editor-core still makes
+            // no network call of its own (the Shell owns the check — banners.ts).
+            void banners.updateState().then((state): void => {
+                if (typeof document !== "undefined") {
+                    openAboutDialog(document.body, state);
+                }
+            });
+        },
+        defaultTemplate: welcomeState?.templates[0]?.name ?? "default",
+    });
+    const commands = menuCommands(actions, { recents, windows, selfWindowId });
+    const model = buildMenuModel({ mode: chromeState.mode, recents, windows, selfWindowId });
+
+    // The web menubar — only where the titlebar mounted a slot (custom/system chrome on the
+    // primary window; chrome.ts owns the gating and the hybrid/secondary "no slot" cases).
+    try {
+        const slot = chromeStrips?.mount.menubarSlot ?? null;
+        if (slot !== null) {
+            mountMenubar(slot, {
+                model,
+                contextProvider: whenContext,
+                executeCommand,
+                commandAvailable,
+                isMaximized,
+            });
+        }
+    } catch {
+        // Reported by the absence of `data-editor-menubar`; the editor is up and usable.
+    }
+
+    return {
+        commands,
+        hostHolder,
+        executeCommand,
+        publishNative: async (): Promise<void> => {
+            // The primary window owns the app menu bar; a secondary publishes nothing (02 §9).
+            if (chromeState.window !== CHROME_WINDOW_PRIMARY) {
+                return;
+            }
+            let detail: string;
+            try {
+                const result = await chromeClient.publishMenu(
+                    menuModelJson(model, {
+                        context: whenContext(),
+                        available: commandAvailable,
+                        maximized: isMaximized(),
+                    }),
+                );
+                // `accepted:false` is the ORDINARY non-macOS answer (window.ts MenuPublishResult) —
+                // reported as information, never as an error.
+                detail = `menus=${String(model.menus.length)} published=${String(result.accepted)}`;
+            } catch (error) {
+                detail = `publish failed: ${error instanceof Error ? error.message : String(error)}`;
+            }
+            if (typeof document !== "undefined") {
+                document.documentElement.setAttribute("data-editor-menu", detail);
+            }
+        },
+    };
 }
 
 /**
@@ -1168,6 +1332,11 @@ async function startWindowMechanism(
     // count tracks the hydrated Problems panel — the diagnostics feed's only rendering in this
     // window — and hides again when that panel closes.
     statusbar?: StatusbarMount,
+    // d3: the menu dispatch (undefined when no menu came up). Subscribed here — not at menu
+    // mount — for the subscribeChromeFacts reasons exactly: the `editor.ui.menu` activation fact
+    // arrives over THIS window's bus, which only exists once this mechanism is up, and the filter
+    // needs the window id `window.list` reports.
+    executeMenuCommand?: (commandId: string) => void,
 ): Promise<number> {
     let windowId = 0;
     let detail = "single window";
@@ -1209,6 +1378,12 @@ async function startWindowMechanism(
             // the affected window over the ui.mirror relay; the poll below drains it onto this bus.
             if (chromeMount !== undefined) {
                 subscribeChromeFacts(uiBus, windowId, chromeMount);
+            }
+            // d3: route native menu activations (the Shell's `editor.ui.menu` unicast — an NSMenu
+            // click or key equivalent) into the ONE registry, exactly as a web-menubar click
+            // dispatches (menu.ts fact 1: no second dispatch system).
+            if (executeMenuCommand !== undefined) {
+                subscribeMenuFacts(uiBus, windowId, executeMenuCommand);
             }
             // M9 e09b-3 — THE LOUD SURFACE. The editor's ONE notification host, attached to this
             // window's bus. Every refused write the Shell publishes (an L-30 drop, a write-path
@@ -1365,6 +1540,9 @@ function startCommandLayer(
     theme: ThemeEngine | undefined,
     whenContext: () => WhenContext,
     playActions: PlayCommandActions,
+    // d3: the menu-backed command set (menu.ts built it over the boot data), registered before
+    // the panel source so incumbent-wins protects the ids.
+    menuCommandSet?: readonly Command[],
 ): CommandRegistry | undefined {
     if (typeof document === "undefined") {
         return undefined;
@@ -1403,6 +1581,10 @@ function startCommandLayer(
             // d1: the four `play.*` transports, writing over `session.control` (startPlaybar built
             // them) — registered BEFORE the panel source, so incumbent-wins protects the ids.
             playActions,
+            // d3: the menu-backed commands (project/edit/selection/window/help + the per-recent and
+            // per-window entries), same incumbent-wins protection. The spread keeps the option
+            // ABSENT when no menu came up, per exactOptionalPropertyTypes.
+            ...(menuCommandSet === undefined ? {} : { menuCommands: menuCommandSet }),
             roster,
             // A panel-manifest command dispatches to its panel over the real `panel.command` bridge.
             panelDispatch: dispatchPanelCommand,

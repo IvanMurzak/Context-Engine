@@ -25,9 +25,12 @@
 
 #include "shell_test.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <stdexcept>
 #include <string>
+#include <utility>
+#include <vector>
 
 using namespace context::editor::shell;
 using Json = context::editor::contract::Json;
@@ -325,6 +328,103 @@ void a_throwing_control_handler_degrades()
     CHECK(result.at("simTick").as_int() == 3);
 }
 
+// One `session.select` dispatch (d3). Returns the WHOLE response envelope, like dispatch_control —
+// a malformed `ids` answers a handler ERROR the caller must be able to see.
+Json dispatch_select(BridgeRouter& router, Json params, bool& refused)
+{
+    Json request = Json::object();
+    request.set("jsonrpc", Json("2.0"));
+    request.set("id", Json(9));
+    request.set("method", Json(kSessionSelectMethod));
+    request.set("params", std::move(params));
+    const BridgeDispatch dispatch = router.dispatch(request.dump());
+    refused = dispatch.refused();
+    return Json::parse(dispatch.response);
+}
+
+Json ids_params(std::vector<std::string> ids)
+{
+    Json wire = Json::array();
+    for (const std::string& id : ids)
+    {
+        wire.push_back(Json(id));
+    }
+    Json params = Json::object();
+    params.set("ids", std::move(wire));
+    return params;
+}
+
+// d3 — the selection write. Unbound is the honest applied:false (the smokes' state); a bound
+// handler receives the validated ids and its post-write answer is relayed verbatim; malformed ids
+// fail closed as a handler error, never a router refusal and never a silent "clear".
+void session_select_is_total_and_reaches_its_handler()
+{
+    BridgeRouter router;
+    SessionBridge bridge;
+    CHECK(bridge.install(router));
+
+    bool refused = true;
+    // Unbound: routed (no refusal), honest applied:false, ids empty.
+    Json response = dispatch_select(router, ids_params({}), refused);
+    CHECK(!refused);
+    CHECK(response.at("result").at("applied").as_bool() == false);
+    CHECK(response.at("result").at("ids").size() == 0);
+    CHECK(bridge.selects() == 1);
+
+    // Bound: the CLEAR (`ids: []`) reaches the handler, whose post-write selection is relayed —
+    // a value the unbound default could not produce, so a bridge that stopped consulting the
+    // handler reds both members.
+    std::vector<std::string> received{"sentinel"};
+    bridge.bind_select(
+        [&received](const std::vector<std::string>& ids) -> SessionSelectOutcome
+        {
+            received = ids;
+            SessionSelectOutcome outcome;
+            outcome.applied = true;
+            outcome.ids = {"e-kept"};
+            return outcome;
+        });
+    response = dispatch_select(router, ids_params({}), refused);
+    CHECK(!refused);
+    CHECK(received.empty()); // the clear really carried an EMPTY id list
+    CHECK(response.at("result").at("applied").as_bool());
+    CHECK(response.at("result").at("ids").size() == 1);
+    CHECK(response.at("result").at("ids").at(std::size_t{0}).as_string() == "e-kept");
+    CHECK(bridge.selects() == 2);
+
+    // Malformed ids fail CLOSED as a handler error (kSessionSelectBadIdsCode), uncounted, and the
+    // handler never sees them — a garbled request must not silently apply as "clear".
+    bool handler_hit = false;
+    bridge.bind_select(
+        [&handler_hit](const std::vector<std::string>&) -> SessionSelectOutcome
+        {
+            handler_hit = true;
+            return SessionSelectOutcome{};
+        });
+    response = dispatch_select(router, Json::object(), refused);
+    CHECK(!refused);
+    CHECK(response.at("error").at("data").at("reason").as_string() ==
+          std::string(kSessionSelectBadIdsCode));
+    Json mixed = Json::object();
+    Json mixed_ids = Json::array();
+    mixed_ids.push_back(Json(std::string("ok")));
+    mixed_ids.push_back(Json(42));
+    mixed.set("ids", std::move(mixed_ids));
+    response = dispatch_select(router, std::move(mixed), refused);
+    CHECK(!refused);
+    CHECK(response.at("error").at("data").at("reason").as_string() ==
+          std::string(kSessionSelectBadIdsCode));
+    CHECK(!handler_hit);
+    CHECK(bridge.selects() == 2);
+
+    // A throwing handler degrades to the honest applied:false (the control_json containment rule).
+    bridge.bind_select([](const std::vector<std::string>&) -> SessionSelectOutcome
+                       { throw std::runtime_error("no feed"); });
+    response = dispatch_select(router, ids_params({"x"}), refused);
+    CHECK(!refused);
+    CHECK(response.at("result").at("applied").as_bool() == false);
+}
+
 } // namespace
 
 int main()
@@ -340,5 +440,6 @@ int main()
     a_bound_control_handler_round_trips();
     a_malformed_verb_is_an_error_not_a_refusal();
     a_throwing_control_handler_degrades();
+    session_select_is_total_and_reaches_its_handler();
     SHELL_TEST_MAIN_END();
 }

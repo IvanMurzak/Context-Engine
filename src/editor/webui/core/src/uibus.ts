@@ -94,8 +94,28 @@ export const UI_TOPIC_WRITE_NOTICE = "editor.ui.write-notice";
 export const UI_TOPIC_CHROME = "editor.ui.chrome";
 
 /**
- * The CLOSED built-in topic set (05 §5, extended by 05 §8's write-notice requirement and 02 §1's
- * chrome fact).
+ * A NATIVE MENU ITEM WAS ACTIVATED (editor-window-chrome d3, menu structure 03) — exactly one
+ * payload: `{windowId, commandId}`, the command id an activated NSMenu item carries. menu.ts's
+ * subscriber (`subscribeMenuFacts`) executes it through the ONE e07b registry, which is what keeps
+ * "no second dispatch system" true across the native rendering.
+ *
+ * ⚠ THE NINTH MEMBER OF THE CLOSED SET, ADDED DELIBERATELY — the write-notice / chrome-fact posture
+ * exactly, with the same kind of authority: 03 binds "an activated item comes back as a fact on the
+ * EXISTING editor.ui mirror relay carrying the command id". The set stays CLOSED; `publish` still
+ * refuses any `editor.ui.*` name nobody declared.
+ *
+ * ⚠ ITS PUBLISHER IS THE SHELL, NOT THIS WINDOW — an activation is a fact only the C++ side can
+ * observe (AppKit owns the menu bar), so it arrives over the `ui.mirror` relay and enters this bus
+ * through `receiveMirrored`, which is why it must be a KNOWN topic here or every activation would
+ * be refused as an unknown mirrored envelope. The C++ spelling is `shell::kUiTopicMenu`
+ * (menu_facts.h), byte-compared against this constant out of the built bundle by
+ * `tools/check_webui_assets.py --panel-contract`.
+ */
+export const UI_TOPIC_MENU = "editor.ui.menu";
+
+/**
+ * The CLOSED built-in topic set (05 §5, extended by 05 §8's write-notice requirement, 02 §1's
+ * chrome fact, and 03's menu-activation fact).
  *
  * Closed on purpose, exactly like `GESTURE_VERBS` and the panel content-type vocabulary: a topic
  * nobody declared is a typo, and silently accepting it would produce a subscription that can never
@@ -110,6 +130,7 @@ export const BUILTIN_UI_TOPICS = [
     UI_TOPIC_PALETTE,
     UI_TOPIC_WRITE_NOTICE,
     UI_TOPIC_CHROME,
+    UI_TOPIC_MENU,
 ] as const;
 
 /** The origin stamped on an envelope published by a bus that was given no window id. */

@@ -179,12 +179,15 @@ html[data-theme-transition="true"] * {
     padding-right: var(--ctx-chrome-inset-right, 8px);
 }
 
-/* The caption drag surface: brand + title + the strip's flexible middle. Its OWN element so the a2
- * regionProvider measures exactly this rect as the `caption` region — the palette button and the
- * window controls sit OUTSIDE it and therefore need no carve-out (chrome.ts § regions). */
+/* The caption drag surface: the title + the strip's flexible middle. Its OWN element so the a2
+ * regionProvider measures exactly this rect as the `caption` region — the brand, the d3 menubar,
+ * the palette button and the window controls all sit OUTSIDE it and therefore need no carve-out
+ * (chrome.ts § regions). The `min-width` is the guaranteed DRAG HANDLE (d3): the menubar is a real
+ * content column now, and a crowded strip may shrink the caption but must never collapse it to an
+ * un-grabbable sliver — the live boot smoke asserts this floor in physical px. */
 .ctx-titlebar__drag {
     flex: 1 1 auto;
-    min-width: 0;
+    min-width: 48px;
     height: 100%;
     display: flex;
     align-items: center;
@@ -215,6 +218,177 @@ html[data-theme-transition="true"] * {
     display: flex;
     align-items: center;
     gap: 2px;
+}
+
+/* --- the application menu (editor-window-chrome d3, menu structure 03) ------------------------ *
+ *
+ * The web menubar inside the titlebar strip (Windows/Linux; `system` mode's strip IS this bar —
+ * D6) and its dropdown overlays, built at runtime by core/src/menu.ts with these classes — the
+ * palette overlay's exact pattern (CSP-clean DOM, tokens only, no new kit family). Each dropdown
+ * is positioned by its OWN entry wrapper (`position: relative` + `top: 100%`), so no script ever
+ * computes a coordinate; the z-index sits BELOW the palette's 1000 (the palette is the universal
+ * keyboard path and must win) and above the banner host's 40. */
+.ctx-titlebar__menu {
+    flex: none;
+    height: 100%;
+    display: flex;
+    align-items: stretch;
+    /* The strip is `user-select: none` already; menus add no selection surface of their own. */
+}
+
+.ctx-menubar__entry {
+    position: relative;
+    display: flex;
+    align-items: stretch;
+}
+
+/* A top-level menu name: chrome-styled text, not a kit button — role="menuitem" carries the
+ * semantics (the palette's raw-DOM precedent; the kit's twelve families stay closed). */
+.ctx-menubar__item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    margin: 0;
+    padding: 0 var(--ctx-shape-space-sm, 8px);
+    font: inherit;
+    font-size: var(--ctx-typography-size-sm, 13px);
+    color: var(--ctx-colors-muted, #93a1b1);
+    cursor: default;
+}
+
+.ctx-menubar__item:hover,
+.ctx-menubar__item[aria-expanded="true"] {
+    background: var(--ctx-colors-panel, #0a0a0a);
+    color: var(--ctx-colors-ink, var(--editor-fg));
+}
+
+.ctx-menubar__item:focus-visible {
+    outline: 2px solid var(--ctx-colors-accent, var(--editor-fg));
+    outline-offset: -2px;
+}
+
+/* The dropdown: an app-chrome overlay in the palette's visual language (panel2 surface, line
+ * border, the one floating-overlay shadow exception). `top: 100%` hangs it off its entry wrapper,
+ * which sits inside the fixed-height titlebar — no computed coordinates anywhere. */
+.ctx-menu {
+    position: absolute;
+    top: 100%;
+    left: 0;
+    min-width: 220px;
+    padding: 4px;
+    display: flex;
+    flex-direction: column;
+    background: var(--ctx-colors-panel2, #141414);
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    border: var(--ctx-shape-border-width, 1px) solid
+        var(--ctx-colors-line, rgba(230, 237, 245, 0.25));
+    border-radius: var(--ctx-shape-radius-md, 6px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    z-index: 900;
+    font-size: var(--ctx-typography-size-sm, 13px);
+}
+
+.ctx-menu[hidden] {
+    display: none;
+}
+
+/* A nested submenu (Open Recent) hangs off its item wrapper to the RIGHT. */
+.ctx-menu__entry {
+    position: relative;
+}
+
+.ctx-menu--submenu {
+    top: 0;
+    left: 100%;
+}
+
+.ctx-menu__item {
+    appearance: none;
+    background: transparent;
+    border: 0;
+    margin: 0;
+    display: flex;
+    align-items: center;
+    gap: var(--ctx-shape-space-md, 12px);
+    width: 100%;
+    padding: 5px var(--ctx-shape-space-sm, 8px);
+    border-radius: var(--ctx-shape-radius-sm, 4px);
+    font: inherit;
+    font-size: var(--ctx-typography-size-sm, 13px);
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    text-align: left;
+    cursor: default;
+    white-space: nowrap;
+}
+
+.ctx-menu__item:hover,
+.ctx-menu__item:focus-visible {
+    background: var(--ctx-colors-panel, #0a0a0a);
+    outline: none;
+}
+
+/* Disabled = aria-disabled (the ARIA menu pattern keeps it focusable); the activation guard in
+ * menu.ts is what makes it truly inert — this rule only says so visually. */
+.ctx-menu__item[aria-disabled="true"] {
+    color: var(--ctx-colors-muted2, #7e7e7e);
+}
+
+.ctx-menu__label {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* The accelerator COLUMN (01 §7: display only) — muted, right-aligned, tabular. */
+.ctx-menu__accel {
+    flex: none;
+    margin-left: auto;
+    font-family: var(--ctx-typography-font-mono, ui-monospace, monospace);
+    font-size: var(--ctx-typography-size-2xs, 10.5px);
+    font-variant-numeric: tabular-nums;
+    color: var(--ctx-colors-muted2, #7e7e7e);
+}
+
+.ctx-menu__separator {
+    height: 1px;
+    margin: 4px var(--ctx-shape-space-sm, 8px);
+    background: var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+}
+
+/* --- the About dialog (d3: version + update state, 03's table) -------------------------------- *
+ * A small centered chrome dialog in the palette overlay's visual language; its one CONTROL is a
+ * kit button (the banners rule: the strip is chrome, the controls are the kit's). */
+.ctx-about {
+    position: fixed;
+    top: 20%;
+    left: 50%;
+    transform: translateX(-50%);
+    width: min(360px, 90vw);
+    display: flex;
+    flex-direction: column;
+    gap: var(--ctx-shape-space-sm, 8px);
+    padding: var(--ctx-shape-space-md, 12px);
+    background: var(--ctx-colors-panel2, #141414);
+    color: var(--ctx-colors-ink, var(--editor-fg));
+    border: var(--ctx-shape-border-width, 1px) solid
+        var(--ctx-colors-line, rgba(230, 237, 245, 0.25));
+    border-radius: var(--ctx-shape-radius-md, 6px);
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.45);
+    z-index: 950;
+    font-size: var(--ctx-typography-size-sm, 13px);
+}
+
+.ctx-about__title {
+    font-size: var(--ctx-typography-size-md, 15px);
+    font-weight: 600;
+}
+
+.ctx-about__version {
+    color: var(--ctx-colors-muted, #93a1b1);
+}
+
+.ctx-about__update {
+    color: var(--ctx-colors-muted, #93a1b1);
 }
 
 /* The play-bar strip (02 §7, filled by d1 — playbar.ts): transport / status dot + label / `t+`

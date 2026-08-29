@@ -32,6 +32,7 @@
 
 using context::editor::shell::PanelHost;
 using context::editor::shell::SessionControlOutcome;
+using context::editor::shell::SessionSelectOutcome;
 using context::editor::shell::kSessionControlBadVerbCode;
 using context::editor::shell::kSessionControlVerbPause;
 using context::editor::shell::kSessionControlVerbPlay;
@@ -44,6 +45,7 @@ using context::editor::shell::panels::kSelectionChangedEvent;
 using context::editor::shell::panels::kSessionTopicName;
 using context::editor::shell::panels::session_control;
 using context::editor::shell::panels::session_control_generation;
+using context::editor::shell::panels::session_select;
 using context::editor::shell::panels::session_sim_tick;
 namespace client = context::editor::client;
 namespace playbar = context::editor::gui::playbar;
@@ -325,6 +327,15 @@ int main()
         {
             CHECK(after[1].params.at("ids").size() == 0);
         }
+
+        // d3: the `session_select` SEAM the composition root binds for `selection.clear` rides the
+        // SAME writer — one more `editor.select` on the same channel, the daemon's post-write ids
+        // relayed member-for-member as `applied:true`. This is what makes the menu's clear and a
+        // scene-tree clear indistinguishable to the daemon (the one-write-path rule).
+        const SessionSelectOutcome cleared = session_select(feed, {});
+        CHECK(cleared.applied);
+        CHECK(cleared.ids.empty());
+        CHECK(wired.channel->requests_for("editor.select").size() == 3);
     }
 
     // --- a daemon no-op still renders the daemon's selection; a refusal renders nothing ------------
@@ -354,6 +365,11 @@ int main()
         wired.channel->fail_method("editor.select", "scope denied", "scope.denied");
         CHECK(!tree.select("e2"));
         CHECK(tree.selection().identity == "e1");
+
+        // d3: the seam relays that refusal as the honest applied:false — never a pretend clear.
+        const SessionSelectOutcome refused_select = session_select(feed, {});
+        CHECK(!refused_select.applied);
+        CHECK(refused_select.ids.empty());
     }
 
     // --- the WRITE seam: play control, and the ok<-changed / catalog-code mapping ------------------

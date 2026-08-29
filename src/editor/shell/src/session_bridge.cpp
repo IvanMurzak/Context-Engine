@@ -2,8 +2,10 @@
 
 #include "context/editor/shell/session_bridge.h"
 
+#include <cstddef>
 #include <string>
 #include <utility>
+#include <vector>
 
 namespace context::editor::shell
 {
@@ -29,6 +31,11 @@ void SessionBridge::bind_provider(Provider provider)
 void SessionBridge::bind_control(ControlHandler handler)
 {
     control_ = std::move(handler);
+}
+
+void SessionBridge::bind_select(SelectHandler handler)
+{
+    select_ = std::move(handler);
 }
 
 SessionStateSnapshot SessionBridge::snapshot() const
@@ -118,6 +125,33 @@ contract::Json SessionBridge::control_json(const std::string& verb)
     return out;
 }
 
+contract::Json SessionBridge::select_json(const std::vector<std::string>& ids)
+{
+    SessionSelectOutcome outcome;
+    if (select_)
+    {
+        try
+        {
+            outcome = select_(ids);
+        }
+        catch (...)
+        {
+            // Contained, never propagated — the renderer's query path (the control_json rule). A
+            // throwing handler costs the write its effect, reported as the honest applied:false.
+            outcome = SessionSelectOutcome{};
+        }
+    }
+    contract::Json out = contract::Json::object();
+    out.set("applied", contract::Json(outcome.applied));
+    contract::Json wire = contract::Json::array();
+    for (const std::string& id : outcome.ids)
+    {
+        wire.push_back(contract::Json(id));
+    }
+    out.set("ids", std::move(wire));
+    return out;
+}
+
 bool SessionBridge::install(BridgeRouter& router)
 {
     bool ok = router.register_method(kSessionStateMethod,
@@ -141,6 +175,35 @@ bool SessionBridge::install(BridgeRouter& router)
                  }
                  ++controls_;
                  return BridgeResult::ok(control_json(verb));
+             }) &&
+         ok;
+    // d3: the selection write. `ids` is validated CLOSED here — editor-core only ever sends a
+    // string array, so a malformed one is a wiring bug surfacing loudly, never silently applied
+    // as "clear" (session_bridge.h § kSessionSelectBadIdsCode).
+    ok = router.register_method(
+             kSessionSelectMethod,
+             [this](const BridgeRequest& request) -> BridgeResult
+             {
+                 const contract::Json& ids_member = request.params.at("ids");
+                 if (!ids_member.is_array())
+                 {
+                     return BridgeResult::error(kSessionSelectBadIdsCode,
+                                                "session.select needs an `ids` string array");
+                 }
+                 std::vector<std::string> ids;
+                 ids.reserve(ids_member.size());
+                 for (std::size_t i = 0; i < ids_member.size(); ++i)
+                 {
+                     const contract::Json& entry = ids_member.at(i);
+                     if (!entry.is_string())
+                     {
+                         return BridgeResult::error(kSessionSelectBadIdsCode,
+                                                    "session.select ids must all be strings");
+                     }
+                     ids.push_back(entry.as_string());
+                 }
+                 ++selects_;
+                 return BridgeResult::ok(select_json(ids));
              }) &&
          ok;
     return ok;

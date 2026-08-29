@@ -302,6 +302,21 @@ SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb
     return outcome;
 }
 
+SessionSelectOutcome session_select(SessionFeed& feed, const std::vector<std::string>& ids)
+{
+    SessionSelectOutcome outcome;
+    // The writer's reply `ids` is THE DAEMON'S post-write selection (session_feed.cpp: including on
+    // a `changed:false` no-op, where it is exactly what is already selected) — relayed as-is, never
+    // re-derived from the request, so the browser side renders daemon truth.
+    std::optional<std::vector<std::string>> applied = feed.request_selection(ids);
+    if (applied.has_value())
+    {
+        outcome.applied = true;
+        outcome.ids = std::move(*applied);
+    }
+    return outcome;
+}
+
 void bind_session_client(SessionFeed& feed, client::Client* client)
 {
     // The id comes from the client itself (0 when there is none), so the pointer and the identity

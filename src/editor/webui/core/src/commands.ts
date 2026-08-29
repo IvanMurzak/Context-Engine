@@ -639,6 +639,14 @@ export interface RegistrySources {
     readonly editorActions: EditorCommandActions;
     readonly sessionActions: SessionCommandActions;
     readonly playActions: PlayCommandActions;
+    /**
+     * The d3 menu-backed command set (menu.ts `menuCommands` builds it — project/edit/selection/
+     * window/help), OPTIONAL so a caller with no menu surface (and every pre-d3 test fixture)
+     * assembles exactly what it did before. Registered as a PRE-BUILT array rather than an actions
+     * interface, because its contents are boot-data-dependent (one command per recent project, one
+     * per listed window) — a fixed projector could not express that.
+     */
+    readonly menuCommands?: readonly Command[];
     readonly roster: PanelRoster;
     readonly panelDispatch: PanelCommandDispatch;
 }
@@ -665,6 +673,11 @@ export function buildCommandRegistry(sources: RegistrySources): CommandRegistry 
     registry.tryRegisterAll(editorCommands(sources.editorActions));
     registry.tryRegisterAll(sessionCommands(sources.sessionActions));
     registry.tryRegisterAll(playCommands(sources.playActions));
+    // d3: the menu-backed commands, BEFORE the panel source like every other built-in set, so
+    // incumbent-wins protects their ids from a package manifest.
+    if (sources.menuCommands !== undefined) {
+        registry.tryRegisterAll(sources.menuCommands);
+    }
     registry.tryRegisterAll(projectPanelCommands(sources.roster, sources.panelDispatch));
     return registry;
 }

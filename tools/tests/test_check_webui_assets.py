@@ -566,6 +566,8 @@ PANEL_BUNDLE = (
     'var SESSION_CONTROL_VERB_PAUSE = "pause";\n'
     'var SESSION_CONTROL_VERB_STOP = "stop";\n'
     'var SESSION_CONTROL_VERB_STEP = "step";\n'
+    # editor-window-chrome d3: the selection write (session.ts).
+    'var SESSION_SELECT_METHOD = "session.select";\n'
     # e10b window-management vocabulary (window.ts).
     'var WINDOW_LIST_METHOD = "window.list";\n'
     'var WINDOW_TEAR_OUT_METHOD = "window.tear-out";\n'
@@ -589,6 +591,10 @@ PANEL_BUNDLE = (
     'var CHROME_WINDOW_SECONDARY = "secondary";\n'
     # editor-window-chrome a1: the `editor.ui.chrome` fact topic (uibus.ts).
     'var UI_TOPIC_CHROME = "editor.ui.chrome";\n'
+    # editor-window-chrome d3: the menu publish (window.ts) + its activation-fact topic
+    # (uibus.ts).
+    'var MENU_PUBLISH_METHOD = "menu.publish";\n'
+    'var UI_TOPIC_MENU = "editor.ui.menu";\n'
     # e10c cross-window drag vocabulary (drag.ts).
     'var DRAG_PROBE_METHOD = "drag.probe";\n'
     'var DRAG_REPORT_ZONE_METHOD = "drag.report-zone";\n'
@@ -696,6 +702,8 @@ PANEL_CPP_SESSION = (
     'inline constexpr const char* kSessionControlVerbPause = "pause";\n'
     'inline constexpr const char* kSessionControlVerbStop = "stop";\n'
     'inline constexpr const char* kSessionControlVerbStep = "step";\n'
+    # editor-window-chrome d3: the selection write rides the same header.
+    'inline constexpr const char* kSessionSelectMethod = "session.select";\n'
 )
 
 # The e10b window-management surface's methods live in window_bridge.h, same plain-constant way. A
@@ -729,11 +737,18 @@ PANEL_CPP_WINDOW = (
     'inline constexpr const char* kChromeModeSystem = "system";\n'
     'inline constexpr const char* kChromeWindowPrimary = "primary";\n'
     'inline constexpr const char* kChromeWindowSecondary = "secondary";\n'
+    # editor-window-chrome d3: the menu publish rides window_bridge.h too.
+    'inline constexpr const char* kMenuPublishMethod = "menu.publish";\n'
 )
 
 # The a1 `editor.ui.chrome` fact topic lives in its OWN header (chrome_facts.h) — the unicast
 # maximized-fact relay's home, not window_bridge.h — so the fixture mirrors that split.
 PANEL_CPP_CHROME_FACTS = 'inline constexpr const char* kUiTopicChrome = "editor.ui.chrome";\n'
+
+# The d3 `editor.ui.menu` activation-fact topic lives in its OWN header (menu_facts.h), the
+# chrome fact's exact sibling — same unicast relay shape, same drift symptom (the native menu
+# silently stops doing anything) — so the fixture mirrors that split too.
+PANEL_CPP_MENU_FACTS = 'inline constexpr const char* kUiTopicMenu = "editor.ui.menu";\n'
 
 # The e09b-3 LOUD write-notice vocabulary lives in its OWN header (write_notice.h), unlike the drag /
 # mirror surfaces that ride window_bridge.h — it is a write-path concern, not a window-management one.
@@ -795,6 +810,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    session: str = PANEL_CPP_SESSION,
                    window: str = PANEL_CPP_WINDOW,
                    chrome_facts: str = PANEL_CPP_CHROME_FACTS,
+                   menu_facts: str = PANEL_CPP_MENU_FACTS,
                    write_notice: str = PANEL_CPP_WRITE_NOTICE,
                    package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
                    package_events: str = PANEL_CPP_PACKAGE_EVENTS,
@@ -819,6 +835,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "session_bridge.h").write_text(session, encoding="utf-8")
     (include_dir / "window_bridge.h").write_text(window, encoding="utf-8")
     (include_dir / "chrome_facts.h").write_text(chrome_facts, encoding="utf-8")
+    (include_dir / "menu_facts.h").write_text(menu_facts, encoding="utf-8")
     (include_dir / "write_notice.h").write_text(write_notice, encoding="utf-8")
     (include_dir / "package_sessions.h").write_text(package_sessions, encoding="utf-8")
     (include_dir / "package_events.h").write_text(package_events, encoding="utf-8")

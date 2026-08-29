@@ -44,8 +44,22 @@ export const WINDOW_CLOSE_METHOD = "window.close";
 // dispatching methods the Shell no longer routes, and the caption controls silently die.
 export const WINDOW_MINIMIZE_METHOD = "window.minimize";
 export const WINDOW_TOGGLE_MAXIMIZE_METHOD = "window.toggle-maximize";
+// `window.focus` takes an OPTIONAL numeric `windowId` since editor-window-chrome d3 (the Window
+// menu's window list): absent focuses THIS window (the a1 behaviour), present asks the Shell to
+// raise the named peer.
 export const WINDOW_FOCUS_METHOD = "window.focus";
 export const CHROME_STATE_METHOD = "chrome.state";
+
+// The MENU PUBLISH (editor-window-chrome d3, menu structure 03 / target 02 §4): editor-core hands
+// the Shell its ONE declarative menu model (menu.ts) so the Cocoa backend can build the native
+// global NSMenu bar from it. MUST match window_bridge.h's kMenuPublishMethod — same gate, same
+// silent-drift hazard as the verbs above: a rename leaves boot publishing a model the Shell no
+// longer routes, and the macOS menu bar silently never appears while the web menubar keeps working
+// everywhere it is looked at. Published at boot on the primary window's editor path on EVERY
+// platform (the model is platform-neutral data); a Shell with no native menu host — Windows,
+// Linux, every smoke — answers the honest `accepted:false` and the titlebar's web menubar is the
+// rendering there.
+export const MENU_PUBLISH_METHOD = "menu.publish";
 
 // The appearance report (editor-window-chrome b1, 02 §3): boot tells the Shell whether the ACTIVE
 // theme is dark on every theme apply, so the OS-drawn frame remnants (Windows' DWM edge tint /
@@ -192,6 +206,15 @@ export function parseChromeState(value: unknown): ChromeState {
 
 /** The outcome of a window-control verb (`window.minimize` / `window.focus`). */
 export interface WindowControlResult {
+    readonly accepted: boolean;
+}
+
+/**
+ * The outcome of a `menu.publish` (d3). `accepted:false` is the ORDINARY answer everywhere but a
+ * live macOS window — the web menubar is the rendering on Windows/Linux, and every smoke's Shell
+ * binds no native menu host — so a caller treats it as information, never as an error.
+ */
+export interface MenuPublishResult {
     readonly accepted: boolean;
 }
 
@@ -393,9 +416,32 @@ export class WindowClient {
         );
     }
 
-    /** Ask the Shell to raise/focus THIS window (routes `request_activation`). Refusal-tolerant. */
-    async focus(): Promise<WindowControlResult> {
-        return this.#control(WINDOW_FOCUS_METHOD);
+    /**
+     * Ask the Shell to raise/focus a window (routes `request_activation`). Refusal-tolerant. With
+     * no argument it targets THIS window (the a1 behaviour — the titlebar's callers); with a
+     * `windowId` it targets the named peer (d3 — the Window menu's window-list entries).
+     */
+    async focus(windowId?: number): Promise<WindowControlResult> {
+        return this.#tolerant(
+            WINDOW_FOCUS_METHOD,
+            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
+            { accepted: false },
+            windowId === undefined ? undefined : { windowId },
+        );
+    }
+
+    /**
+     * Publish the ONE declarative menu model (d3 — menu.ts serializes the `{menus: [...]}` wire
+     * shape, passed verbatim). Refusal-tolerant like every chrome call, and `accepted:false` is
+     * the ordinary non-macOS answer — see `MenuPublishResult`.
+     */
+    async publishMenu(model: Record<string, unknown>): Promise<MenuPublishResult> {
+        return this.#tolerant(
+            MENU_PUBLISH_METHOD,
+            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
+            { accepted: false },
+            model,
+        );
     }
 
     /**

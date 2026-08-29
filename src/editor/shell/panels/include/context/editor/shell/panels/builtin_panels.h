@@ -310,6 +310,14 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
 // the model's own honest "nothing to drive" (`ok:false`, no code, state unmoved).
 [[nodiscard]] SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb);
 
+// The d3 SELECTION write seam (editor-window-chrome d3): drive one `session.select` write through
+// the feed's selection writer (`SessionFeed::request_selection` — the proven e08b `editor.select`
+// chain, `origin` echo suppression included), reported in the shape the bridge relays. Today's only
+// production caller is the `selection.clear` menu/palette command (`ids: []`); a feed with no daemon
+// client reports the writer's own honest nullopt as `applied:false`.
+[[nodiscard]] SessionSelectOutcome session_select(SessionFeed& feed,
+                                                  const std::vector<std::string>& ids);
+
 // Point the Session feed at the daemon link's CURRENT client — `nullptr` to clear it. The feed's
 // pointer is a NON-OWNING view of a client the daemon lifecycle owns and can destroy (a lost daemon
 // tears the link down; exit resets it), so this is the seam the owner calls at EVERY point the

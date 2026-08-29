@@ -70,6 +70,15 @@ inline constexpr const char* kUpdateDismissMethod = "update.dismiss";
 inline constexpr const char* kUpdateOpenDownloadsMethod = "update.openDownloads";
 inline constexpr const char* kDaemonLinkStateMethod = "daemon.linkState";
 
+// The DOCUMENTATION click-through (editor-window-chrome d3, menu structure 03): the `help.docs`
+// menu/palette command's one backing — the SAME native URL opener the downloads click-through rides
+// (the `ReleaseNotice` opener seam), pointed at the docs page. It rides THIS surface because the
+// opener lives here and every live smoke already installs it; unlike the two banner READS above it
+// is invoked only on an explicit user activation, never at boot, so the smokes' `refused() == 0`
+// invariant never meets it uninvited. Mirrored by the TS side (banners.ts `HELP_OPEN_DOCS_METHOD`)
+// and cross-checked by the `webui-welcome-contract` gate like its siblings.
+inline constexpr const char* kHelpOpenDocsMethod = "help.openDocs";
+
 // The ownership tokens `daemon.linkState` reports. Mirrored by the TS `DAEMON_OWNERSHIP_*` constants.
 inline constexpr const char* kDaemonOwnershipNone = "none";
 inline constexpr const char* kDaemonOwnershipExternal = "external";
@@ -92,6 +101,10 @@ inline constexpr const char* kReleaseCheckEndpoint =
     "https://api.github.com/repos/IvanMurzak/Context-Engine/releases/latest";
 inline constexpr const char* kDownloadsPageUrl =
     "https://github.com/IvanMurzak/Context-Engine/releases/latest";
+// The human documentation page the d3 Help > Documentation item opens. The repository front page is
+// the docs' honest current home (the in-repo docs/ tree renders there); a dedicated docs site
+// re-points this ONE constant when it exists.
+inline constexpr const char* kDocsPageUrl = "https://github.com/IvanMurzak/Context-Engine";
 inline constexpr const char* kReleaseCheckUserAgent = "Context-Editor";
 inline constexpr const char* kReleaseCheckAccept = "application/vnd.github+json";
 
@@ -211,6 +224,9 @@ public:
     // than production emits.
     void set_endpoint(std::string endpoint) { endpoint_ = std::move(endpoint); }
     void set_downloads_url(std::string url) { downloads_ = std::move(url); }
+    // d3: where Help > Documentation points. Defaults to `kDocsPageUrl`; tests point it at a
+    // recorder-visible value.
+    void set_docs_url(std::string url) { docs_ = std::move(url); }
     void bind_transport(HttpTransport transport) { transport_ = std::move(transport); }
     void bind_url_opener(UrlOpener opener) { opener_ = std::move(opener); }
 
@@ -239,6 +255,9 @@ public:
     bool dismiss();
     // Open the downloads page in the user's browser. False when no opener is wired.
     [[nodiscard]] bool open_downloads();
+    // d3: open the documentation page through the SAME opener seam. False when no opener is wired —
+    // the identical honest degrade, relayed by the bridge as kErrUpdateNoOpener.
+    [[nodiscard]] bool open_docs();
 
     // `{ checked, current, latest, updateAvailable, dismissed, downloadsUrl, error }`.
     [[nodiscard]] contract::Json state_json() const;
@@ -251,6 +270,7 @@ public:
     [[nodiscard]] const std::string& error() const noexcept { return error_; }
     [[nodiscard]] std::size_t checks_completed() const noexcept { return checks_; }
     [[nodiscard]] std::size_t downloads_opened() const noexcept { return opens_; }
+    [[nodiscard]] std::size_t docs_opened() const noexcept { return docs_opens_; }
 
 private:
     void adopt(const HttpResponse& response);
@@ -258,6 +278,7 @@ private:
     std::string current_ = editor_version();
     std::string endpoint_ = kReleaseCheckEndpoint;
     std::string downloads_ = kDownloadsPageUrl;
+    std::string docs_ = kDocsPageUrl;
     HttpTransport transport_;
     UrlOpener opener_;
 
@@ -269,6 +290,7 @@ private:
     std::string error_;
     std::size_t checks_ = 0;
     std::size_t opens_ = 0;
+    std::size_t docs_opens_ = 0;
 
     // The worker handoff: `pending_` is written once by the worker under `mutex_`, then adopted once
     // by `poll()` on the owner thread.

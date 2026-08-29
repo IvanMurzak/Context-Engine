@@ -308,6 +308,22 @@ bool ReleaseNotice::open_downloads()
     return opened;
 }
 
+bool ReleaseNotice::open_docs()
+{
+    // The downloads click-through, re-pointed (d3): same opener seam, same honest false when no
+    // opener is wired on this platform.
+    if (!opener_ || docs_.empty())
+    {
+        return false;
+    }
+    const bool opened = opener_(docs_);
+    if (opened)
+    {
+        ++docs_opens_;
+    }
+    return opened;
+}
+
 contract::Json ReleaseNotice::state_json() const
 {
     contract::Json state = contract::Json::object();
@@ -433,6 +449,29 @@ bool BannerBridge::install(BridgeRouter& router)
                      return BridgeResult::error(
                          kErrUpdateNoOpener,
                          "opening the downloads page is not wired on this platform yet");
+                 }
+                 contract::Json result = contract::Json::object();
+                 result.set("opened", contract::Json(true));
+                 return BridgeResult::ok(std::move(result));
+             }) &&
+         ok;
+    // d3: the documentation click-through — the openDownloads handler re-pointed through the same
+    // opener seam, with the same honest kErrUpdateNoOpener degrade.
+    ok = router.register_method(
+             kHelpOpenDocsMethod,
+             [this](const BridgeRequest&) -> BridgeResult
+             {
+                 if (notice_ == nullptr)
+                 {
+                     return BridgeResult::error(kErrUpdateNoOpener,
+                                                "this build has no documentation page wired");
+                 }
+                 const bool opened = notice_->open_docs();
+                 if (!opened)
+                 {
+                     return BridgeResult::error(
+                         kErrUpdateNoOpener,
+                         "opening the documentation page is not wired on this platform yet");
                  }
                  contract::Json result = contract::Json::object();
                  result.set("opened", contract::Json(true));

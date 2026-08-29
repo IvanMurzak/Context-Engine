@@ -82,6 +82,8 @@ export const EDITOR_STATUSBAR_ID = "editor-statusbar";
 export const TITLEBAR_CLASS = "ctx-titlebar";
 export const TITLEBAR_DRAG_CLASS = "ctx-titlebar__drag";
 export const TITLEBAR_BRAND_CLASS = "ctx-titlebar__brand";
+/** The d3 menubar HOST (menu.ts fills it on the editor path) — see mountChrome § the menubar slot. */
+export const TITLEBAR_MENU_CLASS = "ctx-titlebar__menu";
 export const TITLEBAR_TITLE_CLASS = "ctx-titlebar__title";
 export const TITLEBAR_CONTROLS_CLASS = "ctx-titlebar__controls";
 /** The sibling strips' classes — mirrored by `app/index.html` exactly like the titlebar's. */
@@ -256,6 +258,15 @@ export interface ChromeMount {
      * in `system` mode (no drag duty) and for any rect that is not currently laid out.
      */
     regions(): readonly ShellRegion[];
+    /**
+     * The d3 menubar HOST (menu.ts's `mountMenubar` fills it on the editor path), or `null` where
+     * no web menubar belongs: `hybrid` mode (macOS — the native NSMenu bar is the rendering, 02
+     * §4) and every secondary window (the compact frame carries no menu — 02 §9). Kept OUTSIDE
+     * the caption drag element deliberately: the caption region is measured from the drag rect and
+     * the Shell consumes caption hits BEFORE client routing, so a menubar inside it could never
+     * receive a click (chrome.ts § the caption drag surface).
+     */
+    readonly menubarSlot: HTMLElement | null;
 }
 
 function el(doc: Document, tag: string, className: string, text = ""): HTMLElement {
@@ -341,18 +352,35 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
         titlebar.style.removeProperty(CHROME_INSET_RIGHT_PROPERTY);
     }
 
-    // --- the caption drag surface: brand + title, and the strip's flexible middle ---------------
-    // Its OWN element rather than "the whole bar": the caption region is measured from exactly this
-    // rect, so the palette button and the controls cluster sit OUTSIDE the drag surface and need no
-    // carve-out at all — a click on them is client input on every platform.
-    const drag = el(doc, "div", TITLEBAR_DRAG_CLASS);
+    // --- the brand + the d3 menubar slot (both OUTSIDE the drag surface) -------------------------
+    // The brand mark is the FULL frame's — the compact secondary strip is panel title + controls
+    // and nothing else (02 §9). Since d3 it sits beside (not inside) the caption drag element, so
+    // the MENUBAR can sit between it and the title: the caption region is measured from the drag
+    // rect and the Shell consumes caption hits BEFORE client routing (02 §6), so anything that must
+    // receive clicks — the menubar above all — has to live outside that rect, exactly like the
+    // palette button and the controls cluster always have.
+    let menubarSlot: HTMLElement | null = null;
     if (!secondary) {
-        // The brand mark is the FULL frame's — the compact secondary strip is panel title +
-        // controls and nothing else (02 §9).
         const brand = el(doc, "span", TITLEBAR_BRAND_CLASS);
         brand.setAttribute("aria-hidden", "true");
-        drag.append(brand);
+        titlebar.append(brand);
+        // The menubar HOST (03): rendered in `custom` (Windows — the strip hosts the menus beside
+        // the caption) and `system` (Linux — D6: the strip IS the menu bar), NEVER in `hybrid`
+        // (macOS — the native NSMenu bar is the rendering, 02 §4: "no web menubar renders"). An
+        // EMPTY host here; menu.ts fills it on the editor path (the welcome screen has no command
+        // registry to dispatch into, so its frame renders no menus — the play-bar slot's rule).
+        if (mode !== CHROME_MODE_HYBRID) {
+            menubarSlot = el(doc, "div", TITLEBAR_MENU_CLASS);
+            titlebar.append(menubarSlot);
+        }
     }
+
+    // --- the caption drag surface: the title, and the strip's flexible middle --------------------
+    // Its OWN element rather than "the whole bar": the caption region is measured from exactly this
+    // rect, so the brand, the menubar, the palette button and the controls cluster all sit OUTSIDE
+    // the drag surface and need no carve-out at all — a click on them is client input on every
+    // platform.
+    const drag = el(doc, "div", TITLEBAR_DRAG_CLASS);
     const title = el(
         doc,
         "span",
@@ -456,6 +484,7 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
     }
 
     return {
+        menubarSlot,
         isMaximized: (): boolean => maximized,
         setMaximized: (next: boolean): void => {
             applyMaximized(next);

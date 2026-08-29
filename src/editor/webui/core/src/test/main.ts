@@ -29,6 +29,7 @@ import { playbarTests } from "./playbar.test.js";
 import { statusbarTests } from "./statusbar.test.js";
 import { windowTests } from "./window.test.js";
 import { windowA11yTests } from "./window_a11y.test.js";
+import { menuTests } from "./menu.test.js";
 import { uimirrorBroadcastTests } from "./uimirror_broadcast.test.js";
 import { notificationTests } from "./notifications.test.js";
 import { dragTests } from "./drag.test.js";
@@ -70,6 +71,7 @@ void runTests([
     ...statusbarTests,
     ...windowTests,
     ...windowA11yTests,
+    ...menuTests,
     ...uimirrorBroadcastTests,
     ...notificationTests,
     ...dragTests,

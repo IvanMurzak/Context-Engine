@@ -74,6 +74,8 @@ add_library(context_editor_shell STATIC
     src/cross_window_drag.cpp # e10c: the Shell-mediated cross-window drag session + the RAII cursor capture
     src/write_notice.cpp     # e09b-3: a refused write -> an editor.ui fact in every window (05 §8)
     src/chrome_facts.cpp     # editor-window-chrome a1: a maximized flip -> an editor.ui fact (02 §1)
+    src/menu_model.cpp       # editor-window-chrome d3: the published menu model's fail-closed parse
+    src/menu_facts.cpp       # editor-window-chrome d3: a native menu activation -> an editor.ui fact
     src/shell.cpp)        # WindowManager / EditorWindow / the single-threaded owner loop
 
 # The version the e14d update banner reports as "running". PROJECT_VERSION is the ONE source of
@@ -273,6 +275,12 @@ set(_context_shell_tests
                        #         never-a-window-id origin, and the honest unbound/throwing-provider paths
     test_chrome_facts  # editor-window-chrome a1: the maximized-flip chrome fact - envelope shape,
                        #         the UNICAST delivery, and the honest unbound-store path
+    test_menu_model    # editor-window-chrome d3: the published menu model's total parse (drop-per-
+                       #         item tolerance, the depth/size caps, the fail-closed outer shape)
+                       #         + the accelerator tokenizer, on every leg
+    test_menu_facts    # editor-window-chrome d3: the menu-activation fact - envelope shape, the
+                       #         UNICAST delivery, the empty-id refusal, the honest unbound-store
+                       #         path, and the off-platform cocoa_menu refusals (cocoa_window.cpp)
     test_cocoa_chrome  # editor-window-chrome c1: the caption-press consult (drag/zoom/none over the
                        #         real RegionMap) + the measured traffic-light inset arithmetic + the
                        #         off-platform/wrong-backend refusals of the cocoa_chrome.h surface

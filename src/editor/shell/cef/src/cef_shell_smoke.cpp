@@ -477,6 +477,9 @@ int main(int argc, char** argv)
     // d1: install() also routes `session.control` — session_bridge.h § kSessionControlMethod.
     SMOKE_CHECK(bridge.has_method(shell::kSessionControlMethod),
                 "the d1 session.control write surface routes");
+    // d3: install() also routes `session.select` (selection.clear's relay) — the ten-smoke rule.
+    SMOKE_CHECK(bridge.has_method(shell::kSessionSelectMethod),
+                "the d3 session.select write surface routes");
     // e10b: editor-core's boot now calls `window.seed` / `window.list` / `window.rehomed`; install
     // the surface (unbound — no tear-out is driven here) so those calls are not `unknown_method`
     // refusals that trip this smoke's `refused() == 0` invariant (the e06d regression).
@@ -502,6 +505,9 @@ int main(int argc, char** argv)
             return state;
         });
     SMOKE_CHECK(window_move_bridge.install(bridge), "the window.* bridge surface installed");
+    // d3: the window bridge's install() also routes `menu.publish` (the ten-smoke rule).
+    SMOKE_CHECK(bridge.has_method(shell::kMenuPublishMethod),
+                "the d3 menu.publish surface routes");
 
     // --- the per-user config read surface (e06d) ------------------------------------------------
     // editor-core's boot reads the per-user config with `config.get` BEFORE it applies a theme
@@ -739,6 +745,16 @@ int main(int argc, char** argv)
                     "boot reported the applied theme's appearance at least once");
         SMOKE_CHECK(window_move_bridge.last_appearance_dark(),
                     "the pinned builtin.dark theme reported a DARK appearance");
+        // d3: the live renderer PUBLISHED its menu model at boot (the primary window's editor path
+        // — boot.ts awaits it before ready), and the model was non-trivial: a real d3 tree carries
+        // dozens of command items, so a floor of 10 catches a publish that silently emptied
+        // without pinning the exact tree (which menu.test.ts owns). The handler is deliberately
+        // UNBOUND here (no native menu host in an OSR smoke): the claim is the ROUTING + the
+        // model, exactly like the control verbs above.
+        SMOKE_CHECK(window_move_bridge.menu_publishes() >= 1,
+                    "the live renderer published its d3 menu model at boot");
+        SMOKE_CHECK(window_move_bridge.last_menu_commands() >= 10,
+                    "the published d3 menu model carried a real command tree");
     }
 
     // --- the a2 region assertions (editor-window-chrome, target design 02 §6) --------------------
@@ -796,8 +812,14 @@ int main(int argc, char** argv)
                         "every chrome rect lies inside the PHYSICAL composited surface");
             SMOKE_CHECK(caption->rect.origin.y == 0,
                         "the caption strip starts at the physical top of the window");
-            SMOKE_CHECK(caption->rect.size.width > composed.width / 2u,
-                        "the caption drag surface spans a substantial share of the physical width");
+            // d3 RECALIBRATION (was `> composed.width / 2`): the titlebar now hosts the menubar —
+            // a real content column between the brand and the drag surface — so the caption is the
+            // strip's flexible MIDDLE, not most of it. The honest floor is the guaranteed drag
+            // handle app.css pins on the drag element (`min-width`), asserted here in physical px
+            // (dpr 1 on this headless surface): a crowded strip may shrink the caption, but it can
+            // never collapse it to an un-grabbable sliver.
+            SMOKE_CHECK(caption->rect.size.width >= 48u,
+                        "the caption drag surface keeps at least its minimum drag-handle width");
             // The controls sit OUTSIDE (to the right of) the drag surface — what makes carve-out
             // tokens unnecessary before last-match-wins is even consulted.
             SMOKE_CHECK(min_region->rect.origin.x >=

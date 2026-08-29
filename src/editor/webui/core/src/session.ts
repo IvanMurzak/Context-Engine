@@ -51,6 +51,17 @@ export const SESSION_STATE_METHOD = "session.state";
 export const SESSION_CONTROL_METHOD = "session.control";
 
 /**
+ * The Shell method the `selection.clear` command writes through (editor-window-chrome d3).
+ *
+ * MUST match `kSessionSelectMethod` in session_bridge.h — the `webui-panel-contract` gate
+ * cross-checks it like its two siblings above. The Shell relays the id array to its `SessionFeed`
+ * selection writer (the proven e08b `editor.select` chain, `origin` echo suppression included), so
+ * the menu's clear and a scene-tree clear are indistinguishable to the daemon. Today's only
+ * production caller sends `ids: []`; the array shape is the daemon's own, ready for e11 picking.
+ */
+export const SESSION_SELECT_METHOD = "session.select";
+
+/**
  * The `verb` vocabulary `session.control` accepts — MUST match `kSessionControlVerb*` in
  * session_bridge.h (same gate). A drifted verb is refused as `session.bad_verb` on every press of a
  * button that looks perfectly wired, which is why the tokens are pinned rather than trusted.
@@ -171,6 +182,26 @@ export interface SessionControlSender {
     send(verb: SessionControlVerb): Promise<SessionControlReport>;
 }
 
+/** What one `session.select` write produced (d3). TOTAL — never a throw. */
+export interface SessionSelectReport {
+    /** Did the Shell serve the method? False = an older Shell, or a transport fault. */
+    readonly served: boolean;
+    /** Did the daemon answer the write? False also covers "no daemon link" and "refused". */
+    readonly applied: boolean;
+    /** The daemon's POST-WRITE selection when applied (its own truth, never the request echoed). */
+    readonly ids: readonly string[];
+    /** `""` on a served write; the refusal reason otherwise. */
+    readonly diagnostic: string;
+}
+
+/**
+ * The seam the `selection.clear` menu command writes through — named so the T1 tier can drive the
+ * menu actions with a scripted sender, the SessionControlSender rule.
+ */
+export interface SessionSelectSender {
+    select(ids: readonly string[]): Promise<SessionSelectReport>;
+}
+
 /**
  * The typed client over `session.control` (editor-window-chrome d1) — the strip's ONE write path.
  *
@@ -181,11 +212,43 @@ export interface SessionControlSender {
  * benign no-op, or no daemon link — the Shell deliberately does not distinguish them; see
  * session_bridge.h `SessionControlOutcome`).
  */
-export class SessionControlClient implements SessionControlSender {
+export class SessionControlClient implements SessionControlSender, SessionSelectSender {
     readonly #bridge: ShellBridge;
 
     constructor(bridge: ShellBridge) {
         this.#bridge = bridge;
+    }
+
+    /**
+     * One `session.select` write (d3) — the `selection.clear` command's transport. TOTAL like
+     * `send`: a refusal or transport fault is a report, never a throw (the command sits in a menu
+     * activation nobody awaits).
+     */
+    async select(ids: readonly string[]): Promise<SessionSelectReport> {
+        let reply: unknown;
+        try {
+            reply = await this.#bridge.call(SESSION_SELECT_METHOD, { ids: [...ids] });
+        } catch (error) {
+            return { served: false, applied: false, ids: [], diagnostic: bridgeDiagnostic(error) };
+        }
+        if (!isRecord(reply)) {
+            return {
+                served: true,
+                applied: false,
+                ids: [],
+                diagnostic: "the Shell answered session.select with a non-record",
+            };
+        }
+        const rawIds = reply["ids"];
+        return {
+            served: true,
+            applied: reply["applied"] === true,
+            // The daemon's post-write selection, kept string-only (the total-parser rule).
+            ids: Array.isArray(rawIds)
+                ? rawIds.filter((id): id is string => typeof id === "string")
+                : [],
+            diagnostic: "",
+        };
     }
 
     async send(verb: SessionControlVerb): Promise<SessionControlReport> {

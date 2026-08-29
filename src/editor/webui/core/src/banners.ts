@@ -34,6 +34,11 @@ export const UPDATE_STATE_METHOD = "update.state";
 export const UPDATE_DISMISS_METHOD = "update.dismiss";
 export const UPDATE_OPEN_DOWNLOADS_METHOD = "update.openDownloads";
 export const DAEMON_LINK_STATE_METHOD = "daemon.linkState";
+// The DOCUMENTATION click-through (editor-window-chrome d3): the `help.docs` menu/palette command's
+// backing — the SAME native URL opener the downloads click-through rides, pointed at the docs page.
+// MUST match banners.h's kHelpOpenDocsMethod (the same `webui-welcome-contract` gate). Invoked only
+// on an explicit user activation, never at boot.
+export const HELP_OPEN_DOCS_METHOD = "help.openDocs";
 
 /** How this process relates to the daemon it is talking to. Mirrors `kDaemonOwnership*`. */
 export const DAEMON_OWNERSHIP_NONE = "none";
@@ -147,6 +152,18 @@ export class BannerClient {
     /** Open the downloads page. Resolves false when the Shell refused or the surface is absent. */
     async openDownloads(): Promise<boolean> {
         const result = await this.#call(UPDATE_OPEN_DOWNLOADS_METHOD, (value) =>
+            isRecord(value) ? readBoolean(value, "opened") : null,
+        );
+        return result === true;
+    }
+
+    /**
+     * Open the documentation page (d3 — the Help > Documentation backing). Resolves false when the
+     * Shell refused (no opener on this platform yet) or the surface is absent — the command's
+     * honest `ok:false`.
+     */
+    async openDocs(): Promise<boolean> {
+        const result = await this.#call(HELP_OPEN_DOCS_METHOD, (value) =>
             isRecord(value) ? readBoolean(value, "opened") : null,
         );
         return result === true;
