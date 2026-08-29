@@ -705,6 +705,38 @@ void test_region_mid_centres_a_live_rect_with_floor_division()
     CHECK(mid == (PointI{25, 40}));
 }
 
+// The marker pair and the counter both windowed smokes judge their chrome claims by: a sample is
+// one of ours only when the WHOLE mask round-tripped (a desktop's own Shift- or Control-modified
+// sample must not count), the baseline is inclusive, and a baseline past the end is an empty tail
+// rather than a read past it.
+void test_count_marked_counts_only_marked_samples_at_or_past_the_baseline()
+{
+    std::vector<PointerEvent> samples(6);
+    smoke::apply_marker(samples[1].modifiers);
+    samples[1].action = PointerAction::down;
+    smoke::apply_marker(samples[3].modifiers);
+    samples[3].action = PointerAction::up;
+    smoke::apply_marker(samples[5].modifiers); // a marked move
+    samples[0].modifiers.shift = true;         // a foreign Shift-move
+    samples[2].modifiers.control = true;       // a foreign Control+Alt press
+    samples[2].modifiers.alt = true;
+    samples[2].action = PointerAction::down;
+    samples[4].action = PointerAction::down; // an unmodified foreign press
+
+    CHECK(smoke::has_marker(samples[1].modifiers));
+    CHECK(!smoke::has_marker(samples[0].modifiers));
+    CHECK(!smoke::has_marker(samples[2].modifiers));
+    CHECK(smoke::count_marked(samples, 0) == 3);
+    CHECK(smoke::count_marked(samples, 0, PointerAction::down) == 1);
+    CHECK(smoke::count_marked(samples, 0, PointerAction::up) == 1);
+    CHECK(smoke::count_marked(samples, 0, PointerAction::move) == 1);
+    CHECK(smoke::count_marked(samples, 1) == 3);
+    CHECK(smoke::count_marked(samples, 2) == 2);
+    CHECK(smoke::count_marked(samples, 4, PointerAction::down) == 0);
+    CHECK(smoke::count_marked(samples, samples.size()) == 0);
+    CHECK(smoke::count_marked(samples, samples.size() + 7) == 0);
+}
+
 int main()
 {
     test_flag_parsing();
@@ -724,5 +756,6 @@ int main()
     test_ns_view_point_for_physical_inverts_the_shipping_decoder_at_a_non_identity_dpi();
     test_ns_delivered_shift_for_window_move_corrects_a_moved_window_at_a_non_identity_dpi();
     test_region_mid_centres_a_live_rect_with_floor_division();
+    test_count_marked_counts_only_marked_samples_at_or_past_the_baseline();
     SHELL_TEST_MAIN_END();
 }

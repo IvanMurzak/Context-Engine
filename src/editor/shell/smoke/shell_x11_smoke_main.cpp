@@ -543,6 +543,182 @@ int main(int argc, char** argv)
     X11_CHECK(observed_injected_resize,
               "the injected resize came back as a real ConfigureNotify, not a synthesized event");
 
+    // --------------------------------- 6c. the CHROME REGIONS under SSD (editor-window-chrome g1)
+    //
+    // Linux is the one v1 platform with NO native chrome consumer: `chrome.state.mode` is
+    // `"system"` (D6 — the WM owns the frame, server-side decorations), the X11 backend keeps
+    // window.h's no-op
+    // `set_chrome_regions`, and editor-core's titlebar publishes an EMPTY region set in that mode.
+    // What THIS leg can prove is therefore the other half of the chrome contract — the half b1/c1
+    // lean on for every backend without an NC or NSEvent-time consumer (shell.cpp's native arm,
+    // ROADMAP risk 3): a caption gesture that made the real client -> X SERVER -> client round trip
+    // through `translate_x11_event` is arbitrated and DROPPED, never half-reaching the browser,
+    // while a press on a web-drawn CONTROL rect does reach it. The regions are published by this
+    // smoke (a CEF-free smoke has no editor-core to measure a strip) in the a2 shape — the caption
+    // drag surface FIRST, the three controls after, so back-to-front last-match-wins needs no
+    // carve-out token — in the PHYSICAL client pixels the server delivers, which is what makes the
+    // rects a checked claim (4) rather than a fixture the decoder is free to mis-scale.
+    //
+    // Four claims, each with a real failure path:
+    //   1. SUPPRESSION: a marked hover + press on the caption is arbitrated (the dispatch counter
+    //      advances by the whole gesture) and reaches the browser NEVER — no half-press, no stuck
+    //      hover (risk 3 on the backend that has no OS frame to consume it first).
+    //   2. THE DRAG STAYS CAPTURED: a move that leaves the caption mid-gesture, over the dock,
+    //      still routes native (the implicit button capture — input.h § capture), and so does
+    //      the release there; only once the release has landed does the capture drop, and a
+    //      sample over the dock reaches the browser again.
+    //   3. A CONTROL PRESS IS FORWARDED: the close rect's press + release reach the browser — the
+    //      web-drawn button stays live on a backend the OS frame never helps (input.cpp
+    //      target_for).
+    //   4. THE RECTS ARE PHYSICAL: the forwarded samples arrive INSIDE the rect they were aimed at,
+    //      at the coordinates the server carried, so a decode that scaled or offset them would
+    //      mis-route rather than pass by accident.
+    // Wholesale publish, per the region contract: the "scene" viewport from step 3 is gone, which
+    // is what frees the dock for the forwarding drills.
+    X11_CHECK(!editor->input().has_pointer_capture(),
+              "no implicit capture is live before the chrome drills (6b's press was released)");
+    const render::Extent2D chrome_client = backend->client_size();
+    // An a2-SHAPED fixture, not the a2 strip: the real strip is measured from CSS by editor-core,
+    // which this CEF-free smoke does not host, and none of the four claims depends on the metric.
+    constexpr std::uint32_t kStripHeight = 38;  // the titlebar strip
+    constexpr std::uint32_t kControlWidth = 46; // one window-control cell
+    const bool client_hosts_strip =
+        chrome_client.width > 4u * kControlWidth && chrome_client.height > 3u * kStripHeight;
+    X11_CHECK(client_hosts_strip,
+              "the client is large enough to host the a2 strip shape with a dock below it");
+    if (!client_hosts_strip)
+    {
+        return 1; // the rect arithmetic below would underflow — nothing past here is a checked claim
+    }
+    const std::uint32_t caption_width = chrome_client.width - 3u * kControlWidth;
+    const render::Rect2D caption_rect{render::Origin2D{0, 0},
+                                      render::Extent2D{caption_width, kStripHeight}};
+    const render::Rect2D min_rect{render::Origin2D{caption_width, 0},
+                                  render::Extent2D{kControlWidth, kStripHeight}};
+    const render::Rect2D max_rect{render::Origin2D{caption_width + kControlWidth, 0},
+                                  render::Extent2D{kControlWidth, kStripHeight}};
+    const render::Rect2D close_rect{render::Origin2D{caption_width + 2u * kControlWidth, 0},
+                                    render::Extent2D{kControlWidth, kStripHeight}};
+    editor->input().regions().publish(
+        {shell::ShellRegion{"chrome.caption", caption_rect, shell::RegionKind::caption},
+         shell::ShellRegion{"chrome.caption-min", min_rect, shell::RegionKind::caption_min},
+         shell::ShellRegion{"chrome.caption-max", max_rect, shell::RegionKind::caption_max},
+         shell::ShellRegion{"chrome.caption-close", close_rect, shell::RegionKind::caption_close}});
+    const shell::ShellRegion* caption_region = editor->input().regions().find("chrome.caption");
+    const shell::ShellRegion* close_region = editor->input().regions().find("chrome.caption-close");
+    X11_CHECK(caption_region != nullptr && close_region != nullptr,
+              "the caption and close regions are in the window's live map");
+    if (caption_region == nullptr || close_region == nullptr)
+    {
+        return 1;
+    }
+    const shell::PointI caption_mid = smoke::region_mid(*caption_region);
+    const shell::PointI close_mid = smoke::region_mid(*close_region);
+    // Below the strip, over no region at all: the dock.
+    const shell::PointI dock_mid{static_cast<std::int32_t>(chrome_client.width / 2u),
+                                 static_cast<std::int32_t>(chrome_client.height / 2u)};
+    X11_CHECK(editor->input().regions().hit_test(dock_mid) == nullptr,
+              "the dock point lies in no published region");
+
+    // A MARKED pointer sample (smoke_window.h § apply_marker records the mask, and why it carries
+    // no chord semantics on X). X reports the button MASK as it was BEFORE the event, so a press
+    // carries no button and a mid-drag move / the release carry the held button (the 6b rule).
+    const auto marked_pointer = [](shell::PointerAction action, shell::PointI position,
+                                   bool left_held) {
+        shell::ShellEvent event;
+        event.kind = shell::ShellEventKind::pointer;
+        event.pointer.action = action;
+        event.pointer.button = action == shell::PointerAction::move ? shell::MouseButton::none
+                                                                   : shell::MouseButton::left;
+        event.pointer.position = position;
+        smoke::apply_marker(event.pointer.modifiers);
+        event.pointer.modifiers.left_button_down = left_held;
+        return event;
+    };
+    // Every claim below is judged by `smoke::count_marked` over the browser's record: suppression
+    // needs zero marked samples past its baseline, forwarding waits for one.
+
+    // --- 1 + 2: a caption drag through the X server — hover, press, drag off the strip, release
+    const std::size_t drag_baseline = browser->pointers().size();
+    const int drag_dispatches_before = editor->input().pointer_dispatches();
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::move, caption_mid, false)),
+              "a marked HOVER over the caption was accepted for injection");
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::down, caption_mid, false)),
+              "a marked caption PRESS was accepted for injection");
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::move, dock_mid, true)),
+              "a marked mid-drag MOVE off the strip was accepted for injection");
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::up, dock_mid, true)),
+              "a marked RELEASE over the dock was accepted for injection");
+    // Wait for the counter AND for the capture to have dropped. The counter alone is `>=` for the
+    // reason 6b gives (a stray LeaveNotify is arbitrated and counted too), so it can read +4 with a
+    // stray in the stream and OUR release still in flight — at which point the capture check below
+    // would red against the desktop rather than the Shell. A release that never arrives still fails
+    // here, on the budget, with the capture claim intact.
+    const bool drag_arbitrated = pump_until(manager, clock_us, [&] {
+        return editor->input().pointer_dispatches() >= drag_dispatches_before + 4 &&
+               !editor->input().has_pointer_capture();
+    });
+    X11_CHECK(drag_arbitrated,
+              "the four caption-drag samples came BACK from the real X server and were arbitrated");
+    X11_CHECK(smoke::count_marked(browser->pointers(), drag_baseline) == 0,
+              "NONE of the caption gesture reached the browser — not the hover, not the press, not "
+              "the drag that left the strip, not the release: no half-press, no stuck hover");
+    X11_CHECK(!editor->input().has_pointer_capture(),
+              "the release dropped the implicit capture — nothing leaked past the gesture");
+
+    // --- 2, the positive half: the dock is the browser's again once the release has landed ---
+    const std::size_t forward_baseline = browser->pointers().size();
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::move, dock_mid, false)),
+              "a marked MOVE over the dock was accepted for injection");
+    const bool dock_forwarded = pump_until(manager, clock_us, [&] {
+        return smoke::count_marked(browser->pointers(), forward_baseline,
+                                   shell::PointerAction::move) > 0;
+    });
+    X11_CHECK(dock_forwarded,
+              "a sample over the dock reaches the browser again after the release — the capture "
+              "was dropped, not leaked");
+
+    // --- 3 + 4: a CONTROL press is forwarded, inside the physical rect it was aimed at -------
+    const std::size_t control_baseline = browser->pointers().size();
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::down, close_mid, false)),
+              "a marked PRESS on the close control was accepted for injection");
+    X11_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real,
+                                  marked_pointer(shell::PointerAction::up, close_mid, true)),
+              "the close control's marked RELEASE was accepted for injection");
+    const bool control_forwarded = pump_until(manager, clock_us, [&] {
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        return smoke::count_marked(samples, control_baseline, shell::PointerAction::down) > 0 &&
+               smoke::count_marked(samples, control_baseline, shell::PointerAction::up) > 0;
+    });
+    X11_CHECK(control_forwarded,
+              "the close control's press AND release reached the browser — the web-drawn button is "
+              "live on a backend with no OS frame");
+    {
+        // Judged by the LIVE map's own hit-test at the coordinates the browser was handed — the
+        // close rect is the last-published region, so last-match-wins answers it exactly when the
+        // sample lies inside it.
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        int inside_close = 0;
+        for (std::size_t i = control_baseline; i < samples.size(); ++i)
+        {
+            if (smoke::has_marker(samples[i].modifiers) &&
+                editor->input().regions().hit_test(samples[i].position) == close_region)
+            {
+                ++inside_close;
+            }
+        }
+        const int marked_control_samples = smoke::count_marked(samples, control_baseline);
+        X11_CHECK(marked_control_samples > 0 && inside_close == marked_control_samples,
+                  "every forwarded control sample landed INSIDE the close rect — the server "
+                  "carried the physical client coordinates the regions are published in");
+    }
+
     // ------------------------------------------------------- 7. teardown persists the session
     manager.shutdown();
     X11_CHECK(manager.state_store().write_count() >= 1,
@@ -557,7 +733,8 @@ int main(int argc, char** argv)
         return 1;
     }
     std::printf("[editor-shell-x11] PASS: real X11 window, %s present, %zu live panels rendered, "
-                "server-driven repaint + resize observed, session persisted\n",
+                "server-driven repaint + resize observed, chrome caption suppressed + control "
+                "forwarded through the X server, session persisted\n",
                 blitter_name.c_str(), panels::hostable_panel_ids().size());
     return 0;
 }

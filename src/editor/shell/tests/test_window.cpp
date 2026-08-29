@@ -11,8 +11,12 @@
 #include "shell_test.h"
 
 #include <cstdint>
+#include <cstdio>
+#include <initializer_list>
+#include <iterator>
 #include <limits>
 #include <optional>
+#include <utility>
 #include <vector>
 
 using namespace context::editor::shell;
@@ -304,20 +308,29 @@ void test_maximized_client_lands_exactly_on_the_work_area_at_96_and_150_percent(
     }
 }
 
-// The a2-shaped chrome map the hit-test consumes: caption FIRST, controls after (last-match-wins),
-// plus a viewport rect to prove non-caption kinds stay client.
-RegionMap make_chrome_regions()
+// The a2-shaped chrome map the hit-test consumes: a caption `caption_width` wide FIRST, the three
+// 46-px controls after it (last-match-wins), plus a viewport rect to prove non-caption kinds stay
+// client. The defaults are the 1280x800 fixture the hand-picked tests probe.
+RegionMap make_chrome_regions(std::uint32_t caption_width = 1096,
+                              render::Rect2D viewport = shelltest::rect(100, 100, 600, 400))
 {
+    constexpr std::uint32_t kStripHeight = 38;
+    constexpr std::uint32_t kControlWidth = 46;
     RegionMap map;
-    map.publish(
-        {ShellRegion{"chrome.caption", shelltest::rect(0, 0, 1096, 38), RegionKind::caption},
-         ShellRegion{"chrome.caption-min", shelltest::rect(1096, 0, 46, 38),
-                     RegionKind::caption_min},
-         ShellRegion{"chrome.caption-max", shelltest::rect(1142, 0, 46, 38),
-                     RegionKind::caption_max},
-         ShellRegion{"chrome.caption-close", shelltest::rect(1188, 0, 46, 38),
-                     RegionKind::caption_close},
-         ShellRegion{"viewport", shelltest::rect(100, 100, 600, 400), RegionKind::viewport}});
+    map.publish({ShellRegion{"chrome.caption", shelltest::rect(0, 0, caption_width, kStripHeight),
+                             RegionKind::caption},
+                 ShellRegion{"chrome.caption-min",
+                             shelltest::rect(caption_width, 0, kControlWidth, kStripHeight),
+                             RegionKind::caption_min},
+                 ShellRegion{"chrome.caption-max",
+                             shelltest::rect(caption_width + kControlWidth, 0, kControlWidth,
+                                             kStripHeight),
+                             RegionKind::caption_max},
+                 ShellRegion{"chrome.caption-close",
+                             shelltest::rect(caption_width + 2u * kControlWidth, 0, kControlWidth,
+                                             kStripHeight),
+                             RegionKind::caption_close},
+                 ShellRegion{"viewport", viewport, RegionKind::viewport}});
     return map;
 }
 
@@ -409,6 +422,377 @@ void test_hit_test_frame_maximized_has_no_resize_bands()
     // ...and a would-be band point with no region under it is plain client.
     CHECK(hit_test_frame(PointI{640, 799}, client, dpi, true, regions) == kHtClient);
     CHECK(hit_test_frame(PointI{-1, 400}, client, dpi, true, regions) == kHtClient);
+}
+
+// --- the g1 SWEEP CORPUS over hit_test_frame ----------------------------------------------------
+//
+// editor-window-chrome g1 (verification closeout). The four tests above pin hand-picked points,
+// and a hand-picked point cannot catch a boundary that slipped by one pixel SOMEWHERE ELSE in the
+// 2-D domain — which is exactly the kind of function the frame decision is: four NC strips, eight
+// corner zones, a top band INSIDE the client, DPI-scaled metrics, two frame states, an overlapping
+// region map. So this sweeps EVERY point of the window rect — the client plus the l/r/b strips the
+// insets carved, i.e. the whole domain WM_NCHITTEST can ask about — at five DPIs, in both frame
+// states, over three region maps, and judges every answer two ways:
+//
+//   1. against an ORACLE written from the spec (window.h § hit_test_frame) in ZONE terms — which
+//      strip, which corner zone, which rect contains the point — with its OWN metric arithmetic
+//      (integer round-to-nearest, not the shipped float path) and its own last-match-wins lookup.
+//      Honestly: the zone predicates restate the spec's rules in the spec's order, so a rule that
+//      is WRONG IN THE SPEC would agree; what the oracle is independent of is the implementation's
+//      metric functions, `RegionMap::hit_test`, and every off-by-one in how those are combined;
+//   2. against oracle-FREE invariants of the spec that must hold whatever the oracle says: the
+//      answer set is CLOSED; a maximized window has NO band answer anywhere; the band answers do
+//      not depend on the region map (bands come first); an empty map is left/right
+//      MIRROR-symmetric; the band
+//      thickness and corner extent MEASURED along the edges equal the DPI-scaled metrics; and a
+//      higher DPI's band set CONTAINS a lower DPI's.
+//
+// A mismatch is REPORTED with its coordinates, DPI, frame state and map, so a red names a point and
+// not a count. The domain (a 640x400 client) keeps the sweep at ~8M evaluations — sub-second in
+// the dev gate and comfortably inside the sanitizer legs' budget.
+//
+// THE DPI SET IS CHOSEN TO MAKE THE ROUNDING RULE FALSIFIABLE. At every multiple of 12 (96, 120, 144,
+// 192 — the scales the hand-picked tests pin) the 8 px border and 16 px corner scale to EXACT
+// integers, so a metric function that truncated, or rounded halves down, would agree with the
+// oracle at all of them and the "round-to-nearest" claim would be asserted by nothing. 100 dpi puts
+// the border at 8.33 (→ 8) and the corner at 16.67 (→ 17): truncation answers 16 and reds. 150 dpi
+// puts the border at exactly 12.5 (→ 13): round-half-down answers 12 and reds. Both sit inside the
+// clamp range the shipping DPI lookup can produce.
+
+struct SweepMetrics
+{
+    std::int32_t border; // the resize border, in px at this DPI
+    std::int32_t corner; // the corner grip's extent along each edge
+};
+
+// The spec's numbers, computed HERE from the 96-dpi reference (8 px border, 16 px corner) with the
+// spec's own round-to-nearest rule — deliberately not read back from the functions under test, so
+// a metric regression is visible to the oracle too.
+SweepMetrics sweep_metrics(std::uint32_t dpi)
+{
+    const auto scaled = [dpi](std::int32_t at_96)
+    { return static_cast<std::int32_t>((static_cast<std::uint32_t>(at_96) * dpi + 48u) / 96u); };
+    return SweepMetrics{scaled(8), scaled(16)};
+}
+
+// Which resize band, if any, the spec places `point` in — as its HT code, kHtClient for none: the
+// l/r/b NC strips outside the client rect, the first `border` rows INSIDE it, and within any of
+// those, the corner zones within `corner` of a client edge. A maximized window has no bands at all.
+std::int32_t sweep_band_code(PointI point, render::Extent2D client, SweepMetrics metrics,
+                             bool maximized)
+{
+    if (maximized)
+    {
+        return kHtClient;
+    }
+    const std::int32_t width = static_cast<std::int32_t>(client.width);
+    const std::int32_t height = static_cast<std::int32_t>(client.height);
+    const bool left_strip = point.x < 0;
+    const bool right_strip = point.x >= width;
+    const bool bottom_strip = point.y >= height;
+    const bool top_band = point.y < metrics.border;
+    if (!left_strip && !right_strip && !bottom_strip && !top_band)
+    {
+        return kHtClient;
+    }
+    const bool near_left = point.x < metrics.corner;
+    const bool near_right = point.x >= width - metrics.corner;
+    if (point.y < metrics.corner)
+    {
+        return near_left ? kHtTopLeft : near_right ? kHtTopRight : kHtTop;
+    }
+    if (point.y >= height - metrics.corner)
+    {
+        return near_left ? kHtBottomLeft : near_right ? kHtBottomRight : kHtBottom;
+    }
+    return near_left ? kHtLeft : kHtRight;
+}
+
+// The oracle's own region lookup: half-open rects, LAST match wins, the spec's kind -> code table.
+std::int32_t sweep_region_code(PointI point, const std::vector<ShellRegion>& regions)
+{
+    for (std::size_t i = regions.size(); i > 0; --i)
+    {
+        const ShellRegion& region = regions[i - 1];
+        const std::int64_t x0 = region.rect.origin.x;
+        const std::int64_t y0 = region.rect.origin.y;
+        const std::int64_t x1 = x0 + region.rect.size.width;
+        const std::int64_t y1 = y0 + region.rect.size.height;
+        if (point.x < x0 || point.x >= x1 || point.y < y0 || point.y >= y1)
+        {
+            continue;
+        }
+        switch (region.kind)
+        {
+        case RegionKind::caption:
+            return kHtCaption;
+        case RegionKind::caption_min:
+            return kHtMinButton;
+        case RegionKind::caption_max:
+            return kHtMaxButton;
+        case RegionKind::caption_close:
+            return kHtClose;
+        case RegionKind::viewport:
+        case RegionKind::native:
+            break;
+        }
+        return kHtClient;
+    }
+    return kHtClient;
+}
+
+std::int32_t sweep_oracle(PointI point, render::Extent2D client, SweepMetrics metrics,
+                          bool maximized, const std::vector<ShellRegion>& regions)
+{
+    const std::int32_t band = sweep_band_code(point, client, metrics, maximized);
+    return band == kHtClient ? sweep_region_code(point, regions) : band;
+}
+
+bool sweep_is_band_code(std::int32_t code)
+{
+    return code == kHtLeft || code == kHtRight || code == kHtTop || code == kHtTopLeft ||
+           code == kHtTopRight || code == kHtBottom || code == kHtBottomLeft ||
+           code == kHtBottomRight;
+}
+
+bool sweep_is_known_code(std::int32_t code)
+{
+    return code == kHtClient || code == kHtCaption || code == kHtMinButton ||
+           code == kHtMaxButton || code == kHtClose || sweep_is_band_code(code);
+}
+
+// The left/right mirror of a code, for the symmetry invariant.
+std::int32_t sweep_mirror_code(std::int32_t code)
+{
+    switch (code)
+    {
+    case kHtLeft:
+        return kHtRight;
+    case kHtRight:
+        return kHtLeft;
+    case kHtTopLeft:
+        return kHtTopRight;
+    case kHtTopRight:
+        return kHtTopLeft;
+    case kHtBottomLeft:
+        return kHtBottomRight;
+    case kHtBottomRight:
+        return kHtBottomLeft;
+    default:
+        return code;
+    }
+}
+
+// Mismatch accounting: every failed claim counts, the FIRST is described with its coordinates. The
+// "where am I" context a description needs (map, DPI, frame state) is set by the sweep as it enters
+// each section, so a claim passes only what is its own: the point and the two answers.
+struct SweepReport
+{
+    const char* map = "empty";
+    std::uint32_t dpi = 0;
+    bool maximized = false;
+    int failures = 0;
+    bool described = false;
+
+    void note(bool ok, const char* claim, PointI point, std::int32_t expected, std::int32_t got)
+    {
+        if (ok)
+        {
+            return;
+        }
+        ++failures;
+        if (!described)
+        {
+            described = true;
+            std::fprintf(stderr,
+                         "hit_test_frame sweep: %s -- map=%s dpi=%u %s point=(%d,%d) expected=%d "
+                         "got=%d\n",
+                         claim, map, dpi, maximized ? "maximized" : "restored", point.x, point.y,
+                         expected, got);
+        }
+    }
+};
+
+// A named live map: the `RegionMap` the implementation reads, whose `regions()` is the oracle's
+// list — one copy, not two coupled by index.
+struct SweepMap
+{
+    const char* name;
+    RegionMap live;
+};
+
+RegionMap published(std::vector<ShellRegion> regions)
+{
+    RegionMap map;
+    map.publish(std::move(regions));
+    return map;
+}
+
+void test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point()
+{
+    const render::Extent2D client{640, 400};
+    // Three exact scales + the two that exercise the rounding rule (see the header note).
+    const std::uint32_t dpis[] = {96, 100, 144, 150, 192};
+
+    // Three maps, published once (they do not depend on the DPI): nothing published (the pre-boot
+    // window), the a2 strip shape sized to this client (`make_chrome_regions`: caption FIRST, the
+    // three controls after, a viewport below), and an OVERLAPPING shape — a full-width caption with
+    // two controls published over it in a non-geometric order plus a native rect under a viewport —
+    // so last-match-wins is judged over whole overlap AREAS, not one point.
+    const SweepMap maps[] = {
+        SweepMap{"empty", published({})},
+        // 640 - 3 x 46: the three controls end flush with the client's right edge.
+        SweepMap{"chrome", make_chrome_regions(502, shelltest::rect(60, 60, 300, 200))},
+        SweepMap{"stacked",
+                 published({ShellRegion{"chrome.caption", shelltest::rect(0, 0, 640, 38),
+                                        RegionKind::caption},
+                            ShellRegion{"chrome.caption-close", shelltest::rect(594, 0, 46, 38),
+                                        RegionKind::caption_close},
+                            ShellRegion{"chrome.caption-max", shelltest::rect(548, 0, 46, 38),
+                                        RegionKind::caption_max},
+                            ShellRegion{"native", shelltest::rect(100, 100, 200, 100),
+                                        RegionKind::native},
+                            ShellRegion{"viewport", shelltest::rect(150, 150, 200, 100),
+                                        RegionKind::viewport}})},
+    };
+
+    SweepReport report;
+    const std::int32_t width = static_cast<std::int32_t>(client.width);
+    const std::int32_t height = static_cast<std::int32_t>(client.height);
+    const RegionMap bare;
+
+    for (const std::uint32_t dpi_value : dpis)
+    {
+        report.dpi = dpi_value;
+        const DpiScale dpi{dpi_value};
+        const SweepMetrics metrics = sweep_metrics(dpi_value);
+        // The window rect: the client plus the l/r/b strips of `border` px. Nothing above y == 0 —
+        // the top inset is zero, so there is no NC strip there to ask about.
+        const std::int32_t x_begin = -metrics.border;
+        const std::int32_t x_end = width + metrics.border;
+        const std::int32_t y_end = height + metrics.border;
+
+        for (std::int32_t y = 0; y < y_end; ++y)
+        {
+            for (std::int32_t x = x_begin; x < x_end; ++x)
+            {
+                const PointI point{x, y};
+                // The bare frame's answer at this point, once per point: the band-independence
+                // invariant below reads it against every map.
+                const std::int32_t plain = hit_test_frame(point, client, dpi, false, bare);
+                for (const SweepMap& map : maps)
+                {
+                    report.map = map.name;
+                    for (const bool maximized : {false, true})
+                    {
+                        report.maximized = maximized;
+                        const std::int32_t got =
+                            hit_test_frame(point, client, dpi, maximized, map.live);
+                        const std::int32_t expected = sweep_oracle(point, client, metrics,
+                                                                   maximized, map.live.regions());
+                        report.note(got == expected, "the answer matches the spec oracle", point,
+                                    expected, got);
+                        report.note(sweep_is_known_code(got), "the answer is a known HT code",
+                                    point, expected, got);
+                        report.note(!maximized || !sweep_is_band_code(got),
+                                    "a maximized window answers no resize band anywhere", point,
+                                    expected, got);
+                        if (!maximized)
+                        {
+                            // Bands come FIRST: the empty map's band answer is every map's answer,
+                            // and where the empty map says client, no map may say band.
+                            const bool band_agrees = sweep_is_band_code(plain)
+                                                         ? got == plain
+                                                         : !sweep_is_band_code(got);
+                            report.note(band_agrees,
+                                        "the band answers are independent of the region map",
+                                        point, plain, got);
+                        }
+                    }
+                }
+            }
+        }
+
+        // The bare-frame invariants below are all judged restored, over the empty map.
+        report.map = "empty";
+        report.maximized = false;
+
+        // Mirror symmetry of the bare frame: x and (width - 1 - x) answer mirrored codes, on every
+        // row of the domain (the strips included: -border mirrors onto width + border - 1).
+        for (std::int32_t y = 0; y < y_end; ++y)
+        {
+            for (std::int32_t x = x_begin; x < x_end; ++x)
+            {
+                const std::int32_t got = hit_test_frame(PointI{x, y}, client, dpi, false, bare);
+                const std::int32_t mirrored =
+                    hit_test_frame(PointI{width - 1 - x, y}, client, dpi, false, bare);
+                const std::int32_t expected = sweep_mirror_code(mirrored);
+                report.note(got == expected, "the bare frame is left/right mirror-symmetric",
+                            PointI{x, y}, expected, got);
+            }
+        }
+
+        // The metrics, MEASURED along the edges: the top band is exactly `border` rows deep at the
+        // mid-column, the left strip is `border` columns wide at mid-height (its whole extent in
+        // the domain), and the top-left corner zone runs exactly `corner` rows down the left strip.
+        std::int32_t top_rows = 0;
+        while (top_rows < height &&
+               hit_test_frame(PointI{width / 2, top_rows}, client, dpi, false, bare) == kHtTop)
+        {
+            ++top_rows;
+        }
+        report.note(top_rows == metrics.border, "the top band measures `border` rows",
+                    PointI{width / 2, top_rows}, metrics.border, top_rows);
+        std::int32_t left_columns = 0;
+        while (left_columns < metrics.border &&
+               hit_test_frame(PointI{-1 - left_columns, height / 2}, client, dpi, false, bare) ==
+                   kHtLeft)
+        {
+            ++left_columns;
+        }
+        report.note(left_columns == metrics.border, "the left strip measures `border` columns",
+                    PointI{-1 - left_columns, height / 2}, metrics.border, left_columns);
+        std::int32_t corner_rows = 0;
+        while (corner_rows < height &&
+               hit_test_frame(PointI{-1, corner_rows}, client, dpi, false, bare) == kHtTopLeft)
+        {
+            ++corner_rows;
+        }
+        report.note(corner_rows == metrics.corner, "the corner zone measures `corner` rows",
+                    PointI{-1, corner_rows}, metrics.corner, corner_rows);
+        // And the spec's numbers agree with the shipped metric functions (no point is involved).
+        report.note(win32_resize_border_thickness(dpi) == metrics.border,
+                    "win32_resize_border_thickness matches the spec's scaling", PointI{0, 0},
+                    metrics.border, win32_resize_border_thickness(dpi));
+        report.note(win32_resize_corner_extent(dpi) == metrics.corner,
+                    "win32_resize_corner_extent matches the spec's scaling", PointI{0, 0},
+                    metrics.corner, win32_resize_corner_extent(dpi));
+    }
+
+    // DPI monotonicity: every point that is a band at a lower DPI is a band at every higher one,
+    // over the lower DPI's domain (which the higher one's contains).
+    report.map = "empty";
+    report.maximized = false;
+    for (std::size_t i = 1; i < std::size(dpis); ++i)
+    {
+        report.dpi = dpis[i];
+        const SweepMetrics low = sweep_metrics(dpis[i - 1]);
+        for (std::int32_t y = 0; y < height + low.border; ++y)
+        {
+            for (std::int32_t x = -low.border; x < width + low.border; ++x)
+            {
+                const std::int32_t at_low =
+                    hit_test_frame(PointI{x, y}, client, DpiScale{dpis[i - 1]}, false, bare);
+                const std::int32_t at_high =
+                    hit_test_frame(PointI{x, y}, client, DpiScale{dpis[i]}, false, bare);
+                report.note(!sweep_is_band_code(at_low) || sweep_is_band_code(at_high),
+                            "a higher DPI's band set contains a lower DPI's", PointI{x, y}, at_low,
+                            at_high);
+            }
+        }
+    }
+
+    CHECK(report.failures == 0);
 }
 
 void test_nc_mouse_forwards_controls_and_leaves_the_caption_to_the_os()
@@ -1675,6 +2059,7 @@ int main()
     test_hit_test_frame_regions_and_precedence();
     test_hit_test_frame_scales_bands_with_dpi();
     test_hit_test_frame_maximized_has_no_resize_bands();
+    test_hit_test_frame_sweep_corpus_matches_the_spec_oracle_at_every_point();
     test_nc_mouse_forwards_controls_and_leaves_the_caption_to_the_os();
     test_nc_mouse_synthesizes_the_leave_that_prevents_a_stuck_hover();
     test_nc_mouse_releases_a_forwarded_press_wherever_it_lands();

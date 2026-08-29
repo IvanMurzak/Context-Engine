@@ -232,39 +232,6 @@ bool pump_until_stable(shell::WindowManager& manager, std::uint64_t& clock_us, R
     });
 }
 
-// THE INJECTED-SAMPLE MARKER: Shift+Control+Option, set on the way out and tested on the way back.
-// The pair lives in ONE place so "these exact flags round-tripped" is structurally true rather than
-// true only while two literal lists happen to agree.
-//
-// WHY A MARKER AT ALL. The position claims below name their samples ("the FIRST move", "the SECOND
-// move"), but the stream they are read out of is the desktop's, not this smoke's — the same reason the
-// dispatch counters are read as a delta and the log is scanned as a tail. A MouseExited was already
-// anticipated there; a foreign MouseMoved is the shape that was not, and it is indistinguishable from
-// an injected one by position alone (MEASURED: a probe of this exact injection channel folded a real
-// cursor-derived move in as "the first move" and compared a desktop coordinate against an injected
-// one). These flags travel ON the event — the injectable half of the modifier inverse
-// (smoke_inject_cocoa.mm, shape 2) — so they survive the AppKit round trip and come back through the
-// SHIPPING `make_ns_modifiers`, which makes the identification positive rather than positional AND
-// strengthens the modifier claim from "flags are encodable" to "these exact flags round-tripped".
-//
-// ⚠ WHY THIS MASK, AND WHY IT IS NOT REUSABLE BLIND. Command is out because a Cmd-click carries
-// app-level meaning AppKit would be entitled to act on. Control is NOT inert either: Control-click is
-// macOS's canonical SECONDARY-click chord, so as far as AppKit is concerned the marked press below is
-// a context-menu gesture. It is harmless HERE for a checked reason and not by luck — this smoke's
-// content view carries no `menu`, so `-menuForEvent:` yields nil and nothing opens. A view that DOES
-// carry one would need a chord-free mask (Shift+Option alone).
-void apply_marker(shell::Modifiers& modifiers)
-{
-    modifiers.shift = true;
-    modifiers.control = true;
-    modifiers.alt = true;
-}
-
-[[nodiscard]] bool has_marker(const shell::Modifiers& modifiers)
-{
-    return modifiers.shift && modifiers.control && modifiers.alt;
-}
-
 bool has_flag(int argc, char** argv, const char* flag)
 {
     for (int i = 1; i < argc; ++i)
@@ -567,10 +534,30 @@ int main(int argc, char** argv)
     move_high.kind = shell::ShellEventKind::pointer;
     move_high.pointer.action = shell::PointerAction::move;
     move_high.pointer.position = shell::PointI{x_in_browser_half, high_in_shell_space};
-    // The marker the delivered-sample loop below selects on — the mask, and why the samples are no
-    // longer identified by their ORDINAL position, are `apply_marker`'s own comment. The three
-    // remaining samples inherit it by copy-construction from this one.
-    apply_marker(move_high.pointer.modifiers);
+    // THE INJECTED-SAMPLE MARKER (the shared `smoke::apply_marker` / `smoke::has_marker` pair,
+    // smoke_window.h), which the delivered-sample loop below selects on. The three remaining
+    // samples inherit it by copy-construction from this one.
+    //
+    // WHY A MARKER AT ALL. The position claims below name their samples ("the FIRST move", "the
+    // SECOND move"), but the stream they are read out of is the desktop's, not this smoke's — the
+    // same reason the dispatch counters are read as a delta and the log is scanned as a tail. A
+    // MouseExited was already anticipated there; a foreign MouseMoved is the shape that was not,
+    // and it is indistinguishable from an injected one by position alone (MEASURED: a probe of
+    // this exact injection channel folded a real cursor-derived move in as "the first move" and
+    // compared a desktop coordinate against an injected one). These flags travel ON the event —
+    // the injectable half of the modifier inverse (smoke_inject_cocoa.mm, shape 2) — so they
+    // survive the AppKit round trip and come back through the SHIPPING `make_ns_modifiers`, which
+    // makes the identification positive rather than positional AND strengthens the modifier claim
+    // from "flags are encodable" to "these exact flags round-tripped".
+    //
+    // ⚠ WHY THIS MASK, AND WHY IT IS NOT REUSABLE BLIND. Command is out because a Cmd-click
+    // carries app-level meaning AppKit would be entitled to act on. Control is NOT inert either:
+    // Control-click is macOS's canonical SECONDARY-click chord, so as far as AppKit is concerned
+    // the marked press below is a context-menu gesture. It is harmless HERE for a checked reason
+    // and not by luck — this smoke's content view carries no `menu`, so `-menuForEvent:` yields
+    // nil and nothing opens. A view that DOES carry one would need a chord-free mask (Shift+Option
+    // alone).
+    smoke::apply_marker(move_high.pointer.modifiers);
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, move_high),
                 "a pointer MOVE near the TOP was accepted for injection through AppKit");
 
@@ -640,7 +627,7 @@ int main(int argc, char** argv)
         // silently, and both counts are reported below, so a desktop delivering its own input stays
         // VISIBLE. Split so a foreign MOVE — the shape the old positional identification could have
         // confused with one of ours — stays legible separately from the already-anticipated `leave`.
-        if (!has_marker(pointer.modifiers))
+        if (!smoke::has_marker(pointer.modifiers))
         {
             if (pointer.action == shell::PointerAction::move)
             {
@@ -877,7 +864,7 @@ int main(int argc, char** argv)
     zoom_press.pointer.position =
         shell::PointI{static_cast<std::int32_t>(chrome_client.width / 2u),
                       static_cast<std::int32_t>(chrome_client.height / 4u)};
-    apply_marker(zoom_press.pointer.modifiers);
+    smoke::apply_marker(zoom_press.pointer.modifiers);
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, zoom_press),
                 "a double-click caption press was accepted for injection");
     shell::ShellEvent zoom_release = zoom_press;
@@ -941,24 +928,12 @@ int main(int argc, char** argv)
                 "the release flowed through ordinary arbitration - only the press was consumed");
 
     // "One of OUR presses reached the browser", counted from a baseline: a marked pointer-down at
-    // or past it. The load-bearing predicate for both claims below — suppression needs zero of
-    // them, forwarding waits for one — so it is defined exactly once.
-    const auto marked_downs_since = [&](std::size_t baseline) {
-        int marked_downs = 0;
-        const std::vector<shell::PointerEvent>& samples = browser->pointers();
-        for (std::size_t i = baseline; i < samples.size(); ++i)
-        {
-            if (has_marker(samples[i].modifiers) &&
-                samples[i].action == shell::PointerAction::down)
-            {
-                ++marked_downs;
-            }
-        }
-        return marked_downs;
-    };
+    // or past it (`smoke::count_marked`, the predicate both claims below share — suppression needs
+    // zero of them, forwarding waits for one).
 
     // --- the suppression claims (ROADMAP risk 3: no stuck hover) ---------------------------------
-    COCOA_CHECK(marked_downs_since(chrome_samples_baseline) == 0,
+    COCOA_CHECK(smoke::count_marked(browser->pointers(), chrome_samples_baseline,
+                                    shell::PointerAction::down) == 0,
                 "neither consumed caption press reached the browser - no half-press, no stuck "
                 "hover");
     COCOA_CHECK(!editor->input().has_pointer_capture(),
@@ -979,7 +954,8 @@ int main(int argc, char** argv)
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, forward_release),
                 "the non-caption release was accepted for injection");
     const bool forwarded = pump_until(manager, clock_us, [&] {
-        return marked_downs_since(forward_baseline) > 0;
+        return smoke::count_marked(browser->pointers(), forward_baseline,
+                                   shell::PointerAction::down) > 0;
     });
     COCOA_CHECK(forwarded,
                 "a press OUTSIDE the caption still reaches the browser - the always-forward rule "
