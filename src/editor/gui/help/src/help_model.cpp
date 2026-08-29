@@ -176,9 +176,9 @@ std::vector<PanelHelp> panel_topics()
         {"builtin.viewport", "Viewport",
          "The read-only render observer of the current scene.",
          {"context query", "context describe"}},
-        {"builtin.playbar", "Play Bar",
-         "Drive a play-in-editor session: create, seed, step, and inspect the deterministic state.",
-         {"context session new", "context session step"}},
+        // (`builtin.playbar` retired by editor-window-chrome e1: the titlebar strip is the Play
+        // Bar's only home, and a chrome strip is not a roster panel — no topic, per the roster==
+        // topics contract gui-help-contextual enforces.)
         {"builtin.problems", "Problems",
          "The diagnostics list — post-merge convergence and validation findings, keyboard-navigable.",
          {"context validate"}},

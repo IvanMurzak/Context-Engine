@@ -157,19 +157,25 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // SIX panels, from five different libraries (uitree / problems / the e05d3 pair / the e08b
-    // playbar / the e09c session journal) — the panel-agnosticism claim exercised across every
-    // hosted shape.
-    CHECK(panels::hostable_panel_ids().size() == 6);
+    // FIVE panels, from four different libraries (uitree / problems / the e05d3 pair / the e09c
+    // session journal) — the panel-agnosticism claim exercised across every hosted shape.
+    // (AMENDED by editor-window-chrome e1: the docked `builtin.playbar` retired, 6 -> 5.)
+    CHECK(panels::hostable_panel_ids().size() == 5);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
     CHECK(host.hosts("builtin.scene-tree"));
     CHECK(host.hosts("builtin.inspector"));
-    CHECK(host.hosts("builtin.playbar"));
     // e09c: rostered since e05b and UNHOSTED until now — which is exactly why the journal's
     // to_json/load_json had no caller. Hosting it is what gives `session.undo` / `session.redo` a
     // reachable path (R-CLI-001).
     CHECK(host.hosts("builtin.session.undo"));
+
+    // THE e1 RETIREMENT, pinned (D2 — the strip is the Play Bar's only home): the docked playbar is
+    // not hosted and not even ON the roster any more — so the hydration runtime cannot reach it
+    // through any `panel.*` verb. (Non-membership in `hostable_panel_ids()` follows: every id in
+    // that list was asserted hosted above, and this one is not.)
+    CHECK(!host.hosts("builtin.playbar"));
+    CHECK(!host.knows("builtin.playbar"));
 
     // The feed owners came back, so every provider's captures stay alive.
     CHECK(bound.problems != nullptr);
@@ -214,10 +220,13 @@ void binds_every_hostable_panel_and_nothing_else()
     // constructs the panel's `UitreePanelRenderer`, and what `hydration.ts` gates `#bindGestures` on —
     // one fact, three consumers, so this assertion IS the cross-language consistency check.
     CHECK(inspector_entry != nullptr && inspector_entry->at("gestures").as_bool());
-    // The playbar is a transport, not a continuous surface: four commands, still no gestures. The
-    // flip must be about the panel that gained a write path, not about every hosted panel.
-    const Json* playbar_entry = find_panel(listing, "builtin.playbar");
-    CHECK(playbar_entry != nullptr && !playbar_entry->at("gestures").as_bool());
+    // The flip is about the ONE panel that gained a write path, not about every hosted panel: the
+    // journal's replay surface is command-driven, still no gestures.
+    const Json* undo_entry = find_panel(listing, "builtin.session.undo");
+    CHECK(undo_entry != nullptr && !undo_entry->at("gestures").as_bool());
+    // e1: the retired playbar does not appear in the listing at all — `panel.list` projects the
+    // ROSTER, and the roster no longer carries it (an absent entry, not a `hosted:false` one).
+    CHECK(find_panel(listing, "builtin.playbar") == nullptr);
 }
 
 // e09b-2: the gesture surface the flip turns on, driven through the REAL PanelHost the renderer

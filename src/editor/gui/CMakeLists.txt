@@ -34,7 +34,9 @@ add_subdirectory(viewport)
 # src/runtime/session/, honors the L-51 edit/play split + L-22 hot reload, and yields the rendered play
 # frame the F1 viewport observes (the SAME render::RenderSnapshot — no second render path). Added after
 # viewport (its panel test links context_gui_viewport to assert the play->viewport path) and BEFORE
-# a11y, which links + scans the registered playbar panel. Mints the reserved play.* codes.
+# a11y (which linked + scanned the docked playbar panel until editor-window-chrome e1 retired it —
+# the PlaybarModel/SessionFeed play TRANSPORT survives; see playbar/README.md). Mints the reserved
+# play.* codes.
 add_subdirectory(playbar)
 
 # The M5 GUI SESSION-state surfaces (session/) — headless affordances layered on the panel write

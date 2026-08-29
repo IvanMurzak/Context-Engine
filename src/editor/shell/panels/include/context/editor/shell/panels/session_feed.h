@@ -98,7 +98,8 @@ public:
 
     // The scene-tree panel whose RENDERED selection this feed drives, and the roster id to touch when
     // it changes. `nullptr` when the Scene tree did not bind (its provider was refused) — the feed
-    // then still drives the playbar, because one unavailable panel must not take the other down.
+    // then still drives the play transport, because one unavailable surface must not take the other
+    // down.
     void bind_scene_tree(scenetree::SceneTreePanel* panel, std::string panel_id);
 
     // --- the subscriber half ----------------------------------------------------------------------
@@ -119,19 +120,22 @@ public:
 
     // The `session.control` write path (editor-window-chrome d1): one verb token
     // (session_bridge.h's `play|pause|stop|step` vocabulary) driven through the SAME
-    // `PlaybarModel` transport write the dock panel's invoke path uses — one implementation for the
-    // strip, the palette and the panel — touching the hosted panel identically so the docked playbar
-    // re-renders while it coexists (its retirement is e1's). `step` advances 1 tick, the button
+    // `PlaybarModel` transport write the dock panel's invoke path funnelled through until
+    // editor-window-chrome e1 retired it — one implementation for the strip and the `play.*`
+    // palette commands, the ONLY press paths since e1. `step` advances 1 tick, the button
     // gesture. Returns `std::nullopt` for a verb this build does not name: nothing is dispatched,
     // and the bridge answers a handler error rather than a silent drop.
     [[nodiscard]] std::optional<playbar::PlayAction> control(const std::string& verb);
 
-    // --- the hosted playbar -----------------------------------------------------------------------
+    // --- the playbar transport (its docked panel retired by editor-window-chrome e1) --------------
 
     [[nodiscard]] playbar::PlaybarModel& playbar_model() noexcept { return playbar_; }
     [[nodiscard]] const playbar::PlaybarModel& playbar_model() const noexcept { return playbar_; }
 
-    // The provider to bind on the PanelHost. Captures `this` — the feed must OUTLIVE the binding.
+    // The provider a PanelHost can bind. Captures `this` — the feed must OUTLIVE the binding.
+    // Since e1 retired the docked playbar from the built-in roster, PRODUCTION binds no provider
+    // (`install_builtin_panels` creates the feed as pure transport); the command->verb funnel is
+    // kept as real transport surface and exercised over a synthetic roster in test_session_feed.cpp.
     // The playbar is a transport: four commands, no gestures, no persisted state (both REPORTED
     // absent rather than stubbed).
     [[nodiscard]] PanelProvider make_provider();

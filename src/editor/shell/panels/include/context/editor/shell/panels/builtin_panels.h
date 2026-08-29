@@ -13,7 +13,7 @@
 // violations by splitting the kernel-typed builders out (gui/panels/builders/, linked daemon-side);
 // this file is the seam that now hosts both.
 //
-// WHAT "HOSTABLE TODAY" MEANS. Six of the rostered panels are hostable in this build
+// WHAT "HOSTABLE TODAY" MEANS. Five of the rostered panels are hostable in this build
 // (`hostable_panel_ids()` is the ONE enumeration — this list is prose about it, and
 // `editor-shell-test_builtin_panels` asserts the two agree):
 //
@@ -23,10 +23,13 @@
 //                             split its kernel-typed builder out (gui/panels/builders/).
 //   * `builtin.inspector`   — `context_gui_panel_inspector` -> uitree + serializer. Clean since
 //                             e05d3 (builders split out + the boundary-clean gateway seam).
-//   * `builtin.playbar`     — `context_gui_playbar` -> uitree only. Clean since e08b split its
-//                             runtime-session driving out (gui/playbar/CMakeLists.txt).
 //   * `builtin.session.undo`— `context_gui_undo` -> the inspector panel + uitree + serializer. Clean
 //                             since e09c: every one of those was ALREADY on this target's closure.
+//
+// `builtin.playbar` (hostable e08b..e09) was RETIRED by editor-window-chrome e1 (D2): the d1
+// titlebar strip is the Play Bar's only home. The `SessionFeed` below survives as PURE TRANSPORT —
+// the `session` subscriber and the play/selection write seams the strip drives over
+// `session.control` — it simply no longer hosts a panel.
 //
 // The rest have no provider yet and are LISTED-BUT-UNHOSTED (panel_host.h explains why that is an
 // honest state rather than a hidden one). The e05d3 pair proves the D10 split end-to-end: both
@@ -298,9 +301,11 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
 [[nodiscard]] std::uint64_t session_control_generation(const SessionFeed& feed);
 [[nodiscard]] std::uint64_t session_state_generation(const SessionFeed& feed);
 
-// The d1 WRITE seam: drive one `session.control` verb through the feed's `PlaybarModel` — the SAME
-// transport write the dock panel's invoke path uses (`SessionFeed::control`), reported in the shape
-// the bridge relays. An unknown verb answers `error_code = kSessionControlBadVerbCode` with nothing
+// The d1 WRITE seam: drive one `session.control` verb through the feed's `PlaybarModel`
+// (`SessionFeed::control`), reported in the shape the bridge relays. Since e1 retired the docked
+// playbar this is the ONLY press path — the strip's — but the write itself is unchanged from the
+// one the dock panel's invoke funnelled through. An unknown verb answers
+// `error_code = kSessionControlBadVerbCode` with nothing
 // dispatched (belt-and-braces — the bridge validates first); a feed with no daemon client reports
 // the model's own honest "nothing to drive" (`ok:false`, no code, state unmoved).
 [[nodiscard]] SessionControlOutcome session_control(SessionFeed& feed, const std::string& verb);

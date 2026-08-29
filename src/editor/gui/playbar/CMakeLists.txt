@@ -16,7 +16,9 @@
 # Once the playbar stopped driving an in-process `SessionControl*` (the daemon owns play state now),
 # `playbar_model.h` no longer names a runtime-session or render type — so the TRANSPORT half depends
 # on nothing but the headless uitree. Keeping it in one target would have forced the Shell, which
-# hosts the playbar since e08b, to link `context_session` + `context_render` for a transport bar that
+# hosted the playbar e08b..e09 (the DOCK PANEL retired by editor-window-chrome e1 — the Shell still
+# links this target for the surviving `PlaybarModel`/`SessionFeed` transport, see README.md),
+# to link `context_session` + `context_render` for a transport bar that
 # uses neither: a heavyweight closure on the D10-audited `context_editor` target, added for types the
 # rewire had just removed. Two targets, one include tree:
 #

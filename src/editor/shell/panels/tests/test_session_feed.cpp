@@ -18,6 +18,7 @@
 #include "context/editor/client/client.h"
 #include "context/editor/shell/panels/builtin_panels.h" // the bind_session_client seam (lifetime)
 
+#include "context/editor/gui/contract/extension.h" // the synthetic roster (e1 — see the provider block)
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 #include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/uitree/panel.h"
@@ -395,8 +396,24 @@ int main()
     }
 
     // --- the provider: the four transport commands dispatch, an unknown one does not ---------------
+    // AMENDED by editor-window-chrome e1 (D2): the docked playbar came OFF the built-in roster, so a
+    // default-roster host now REFUSES to bind it — pinned first, because that refusal IS the
+    // retirement at this seam. The provider's command->verb funnel is still real transport surface
+    // (it forwards into the same `control()` the strip drives), so it is then exercised over a
+    // SYNTHETIC one-panel roster — the explicit PanelHost overload panel_host.h documents for
+    // exactly this (rosters this file has never seen).
     {
-        PanelHost host;
+        PanelHost builtin_host;
+        SessionFeed unhostable(builtin_host, playbar::PlaybarModel::kContributionId);
+        CHECK(!builtin_host.knows(playbar::PlaybarModel::kContributionId));
+        CHECK(!builtin_host.provide(playbar::PlaybarModel::kContributionId,
+                                    unhostable.make_provider()));
+
+        context::editor::gui::contract::Contribution playbar_manifest;
+        playbar_manifest.id = playbar::PlaybarModel::kContributionId;
+        playbar_manifest.kind = context::editor::gui::contract::ContributionKind::panel;
+        playbar_manifest.title = "Play Bar";
+        PanelHost host(std::vector<context::editor::gui::contract::Contribution>{playbar_manifest});
         SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
         CHECK(host.provide(playbar::PlaybarModel::kContributionId, feed.make_provider()));
         CHECK(host.hosts(playbar::PlaybarModel::kContributionId));

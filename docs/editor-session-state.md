@@ -202,7 +202,7 @@ The panels no longer own selection or play state; they are subscribers and write
 | consumer | writes | subscribes | where |
 |---|---|---|---|
 | Scene tree panel | `editor.select` via `scenetree::SelectionGateway` | `selection-changed` | `src/editor/gui/panels/scenetree/` |
-| Playbar | `editor.play\|pause\|stop\|step` via `playbar::PlayControlGateway` | `play-state` | `src/editor/gui/playbar/` |
+| Play transport (`PlaybarModel` — its docked panel retired by editor-window-chrome e1) | `editor.play\|pause\|stop\|step` via `playbar::PlayControlGateway` | `play-state` | `src/editor/gui/playbar/` |
 | editor-core `when` contexts | — (read-only) | `play-state`, via the Shell's `session.state` relay | `src/editor/webui/core/src/when.ts` (`DaemonSessionState`) + `session.ts` (the feed) + `boot.ts` (`startSession`) |
 | editor-core play-bar strip (editor-window-chrome d1) | `session.control {verb}`, relayed by the Shell through the SAME `SessionFeed` writer | `play-state` (+ `simTick`), via the same `session.state` relay | `src/editor/webui/core/src/playbar.ts` + `commands.ts` (`play.*`) + `session_bridge.{h,cpp}` (the relay's write half) |
 
@@ -224,8 +224,9 @@ suppression is not repeated there: it already happened Shell-side, in `SessionFe
 
 Since editor-window-chrome d1 the same bridge also carries the WRITE half, **`session.control
 {verb: play|pause|stop|step}`**: the Shell relays each verb to the SAME `SessionFeed` writer the
-docked playbar drives (`SessionFeed::control` -> `PlaybarModel` -> `editor.play|pause|stop|step`),
-so the strip's buttons, the `play.*` palette commands and the dock panel are one implementation with
+docked playbar drove (`SessionFeed::control` -> `PlaybarModel` -> `editor.play|pause|stop|step`;
+the dock panel itself retired with editor-window-chrome e1 — the strip is the only press path now),
+so the strip's buttons and the `play.*` palette commands are one implementation with
 one echo-suppression story, and the reply (`{changed, state, simTick, errorCode}`) is the daemon's
 own transport answer relayed through `PlaybarModel::adopt`. Because the daemon's echo of the Shell's
 OWN write is dropped by `SessionFeed`, `session.state`'s `generation` **sums the applied-fact count
