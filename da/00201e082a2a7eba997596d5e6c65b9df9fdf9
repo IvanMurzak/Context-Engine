@@ -1,0 +1,55 @@
+src/editor/webui/core/src/menu.ts
+  s_7b2854368302f3::t_95b6d485221ed0 294-295,297-300
+  s_7b2854368302f3::t_59c0278351e138 257-258,260-265
+  s_7b2854368302f3::t_bfabedef604f08 827-828
+  s_7b2854368302f3::t_08ec6c38c68d50 50
+  s_7b2854368302f3::t_b617b3079bd407 740
+  s_7b2854368302f3::t_03c4dde2f700ff 966-968
+  s_7b2854368302f3::t_4a778269b7fba8 220-222
+  s_7b2854368302f3::t_0ef15edf732ab5 326-327,329-338,343-350,355-357,364-365
+  s_7b2854368302f3::t_768fd7b1535542 1114-1123
+  s_7b2854368302f3::t_5521617b1e001b 504-511,528,530
+  s_7b2854368302f3::t_079f711e71dc46 195-204,209
+  s_7b2854368302f3::t_428382c3aaaa06 1169-1170
+  s_7b2854368302f3::t_679f719da096e5 397
+  s_7b2854368302f3::t_88863b08b6790b 1028
+  s_7b2854368302f3::t_eec987a24b74cb 639-655
+  s_7b2854368302f3::t_d1fca7b0dbf130 1186-1187
+  s_7b2854368302f3::t_d1266d5163f058 162
+  s_7b2854368302f3::t_3ea8c2dadca645 182
+  s_7b2854368302f3::t_989f23421d1b3b 591-593,597-599
+  s_7b2854368302f3::t_643c64325a28b2 277-279
+src/editor/webui/core/src/test/menu.test.ts
+  s_7b2854368302f3::t_e924e06906415b 409-414,417
+  s_7b2854368302f3::t_b1aa3a761b83f0 214
+  s_7b2854368302f3::t_76b43261837e6c 191,197-200
+  s_7b2854368302f3::t_758ebe3b026399 794-795
+src/editor/webui/core/src/window.ts
+  s_7b2854368302f3::t_2fec8432067a66 424
+  s_7b2854368302f3::t_66f523405ae5c8 215-216,218
+  s_7b2854368302f3::t_dcc36738617b9b 433
+  s_7b2854368302f3::t_f8e1b111105007 442,445-451,456
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_66c27ba4a1028e 969-972
+src/editor/shell/include/context/editor/shell/banners.h
+  s_7b2854368302f3::t_3e045c4094a018 277-279
+src/editor/shell/src/banners.cpp
+  s_7b2854368302f3::t_2afd2d6b74f164 297,299,303,306,311-315,320
+  s_7b2854368302f3::t_7189b1b212be39 433-456,458-459
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "da00201e082a2a7eba997596d5e6c65b9df9fdf9",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
