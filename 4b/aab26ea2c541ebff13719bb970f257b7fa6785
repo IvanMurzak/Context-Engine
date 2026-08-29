@@ -1,0 +1,25 @@
+.taskflow/2026-08-28-editor-window-chrome/ROADMAP.md
+  s_7b2854368302f3::t_2dd29277078605 75
+docs/shell.md
+  s_7b2854368302f3::t_de84ec8f13fb11 532,974
+src/editor/shell/smoke/shell_x11_smoke_main.cpp
+  s_7b2854368302f3::t_12d76fc536b7a8 611-613,615-618,698-702,704-705
+src/editor/shell/tests/test_window.cpp
+  s_7b2854368302f3::t_05c0ac086cf371 16,422-425,438,440-447,648-649,792
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "4baab26ea2c541ebff13719bb970f257b7fa6785",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
