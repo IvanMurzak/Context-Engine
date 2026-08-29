@@ -9,6 +9,7 @@ src/editor/webui/core/src/boot.ts
   s_2b64e2b4bfc410::t_d916b9823db071 396-399,1274-1276
 src/editor/webui/core/src/chrome.ts
   s_2b64e2b4bfc410::t_2d67951b2a52b5 138-146
+  s_7b2854368302f3::t_76bb5bd0339bd7 360
 src/editor/webui/core/src/statusbar.ts
   s_7b2854368302f3::t_2f25d1c62a48a9 16,43,88,92-98,214-217,226,237-254,289-297
 src/editor/webui/app/app.css
