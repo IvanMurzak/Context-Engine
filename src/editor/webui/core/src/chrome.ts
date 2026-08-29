@@ -296,8 +296,9 @@ function physicalRegion(
  * Render the titlebar's content and gate the strips on the chrome mode (02 §2).
  *
  * Replaces the titlebar's children wholesale (a re-mount is a re-render, like `mountBanners`), sets
- * the play-bar slot's visibility for the boot path taken, and leaves the statusbar the empty shell
- * it stays until d2. Never touches the bridge itself: dispatch goes through the injected `controls`
+ * the play-bar slot's visibility for the boot path taken, and leaves the statusbar to its own
+ * module (d2 — statusbar.ts fills it from boot). Never touches the bridge itself: dispatch goes
+ * through the injected `controls`
  * and `executeCommand`, which is what lets the DOM tier prove every mode with plain spies.
  */
 export function mountChrome(elements: ChromeStripElements, options: MountChromeOptions): ChromeMount {
@@ -429,8 +430,9 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
     applyMaximized(options.state.maximized);
 
     // --- the sibling strips ----------------------------------------------------------------------
-    // The play-bar SLOT (empty until d1) hides on the welcome screen — no session to control
-    // (02 §2). The statusbar stays the empty 24px shell until d2. Both are gated here, in one
+    // The play-bar SLOT hides on the welcome screen — no session to control (02 §2); d1's
+    // playbar.ts fills it on the editor path. The statusbar renders in BOTH modes (it is part of
+    // the frame) and is filled by d2's statusbar.ts from boot. The slot gating lives here, in one
     // place, so the welcome and project boots cannot drift apart on what the frame shows.
     //
     // f1 (02 §9 / D4): a SECONDARY window REMOVES both siblings from the document — no play bar,

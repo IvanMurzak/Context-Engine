@@ -30,6 +30,9 @@ export * from "./chrome.js";
 // d1 — the play-bar strip in the a2 slot. Same load-bearing build reason: the CEF smokes and the
 // DOM tier reach the mount/actions through these exports.
 export * from "./playbar.js";
+// d2 — the statusbar content in the a2 shell. Same load-bearing build reason: the DOM tier drives
+// the mount/feed through these exports.
+export * from "./statusbar.js";
 export * from "./editorstate.js";
 export * from "./when.js";
 export * from "./commands.js";

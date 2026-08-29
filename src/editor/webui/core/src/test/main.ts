@@ -26,6 +26,7 @@ import { bannerTests } from "./banners.test.js";
 import { uibusTests } from "./uibus.test.js";
 import { sessionTests } from "./session.test.js";
 import { playbarTests } from "./playbar.test.js";
+import { statusbarTests } from "./statusbar.test.js";
 import { windowTests } from "./window.test.js";
 import { windowA11yTests } from "./window_a11y.test.js";
 import { uimirrorBroadcastTests } from "./uimirror_broadcast.test.js";
@@ -66,6 +67,7 @@ void runTests([
     ...uibusTests,
     ...sessionTests,
     ...playbarTests,
+    ...statusbarTests,
     ...windowTests,
     ...windowA11yTests,
     ...uimirrorBroadcastTests,
