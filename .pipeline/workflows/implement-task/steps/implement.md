@@ -43,10 +43,19 @@ and leave the result committed locally on the run branch. Nothing is pushed.
    entry; a new editor panel registers its a11y coverage.
 5. Run the local gate (preamble §4) until green. `ctest` does NOT cover the
    Python tier: if the change touches any Python under `tools/` or `bench/`,
-   also run `python -m pytest tools/tests bench/tests` from the worktree root
-   until green — CI's required `python tests` check runs exactly that, so a
-   failure there is otherwise discovered only at `land`, after a full rollup is
-   spent. Any `ctest` run covering the `webui-*` family needs the browser env
+   also run `python -m pytest tools/tests bench/tests` from the worktree root —
+   CI's required `python tests` check runs exactly that, so a failure there is
+   otherwise discovered only at `land`, after a full rollup is spent. Read that
+   pytest run BASELINE-RELATIVE, never as an absolute green: this box fails ~14
+   Python tests on `origin/main` itself (a Windows-vs-CI-ubuntu toolchain gap),
+   so the bar is **no NEW FAILED test ids** plus fully-green suites over the
+   files in the diff — compare ids, never the exit code. A failure is
+   pre-existing when its test file, the tool it exercises, and the governing
+   `conftest.py` are all absent from `git diff --name-only origin/main...HEAD`;
+   that proof needs no baseline re-run. Journal the pre-existing FAILED ids in
+   your report so later steps inherit the set instead of re-deriving it — CI's
+   ubuntu `python tests` job is the authoritative gate for them. Any `ctest` run
+   covering the `webui-*` family needs the browser env
    prefixed PER COMMAND (env does not persist between Bash calls):
    `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
    — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
@@ -58,7 +67,9 @@ and leave the result committed locally on the run branch. Nothing is pushed.
 
 - The full dev-preset build and `ctest --preset dev` are green in the worktree —
   plus `python -m pytest tools/tests bench/tests` when the change touches Python
-  under `tools/` or `bench/`.
+  under `tools/` or `bench/`, read baseline-relative per step 5 (no NEW FAILED
+  ids vs `origin/main`; suites over the diff's files fully green), with the
+  pre-existing FAILED ids listed in your report.
 - All changes are committed: `git status --porcelain` is empty and
   `git log --oneline origin/main..HEAD` is non-empty.
 - Nothing was pushed: the `worktree-*` branch exists only locally and no PR

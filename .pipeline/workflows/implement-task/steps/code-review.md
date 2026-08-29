@@ -45,7 +45,16 @@ Nothing is pushed.
 4. If fixes were applied: re-run the local gate (preamble §4) to green — and,
    when the branch diff touches Python under `tools/` or `bench/`, also
    `python -m pytest tools/tests bench/tests` from the worktree root, which
-   `ctest` does not cover and CI's required `python tests` check runs. Any
+   `ctest` does not cover and CI's required `python tests` check runs. Read that
+   pytest run BASELINE-RELATIVE, never as an absolute green: this box fails ~14
+   Python tests on `origin/main` itself (a Windows-vs-CI-ubuntu toolchain gap).
+   The bar is **no NEW FAILED test ids** beyond the pre-existing set the
+   `implement` step journaled — compare ids, never the exit code — plus
+   fully-green suites over the files in the diff. If that set did not reach you,
+   prove pre-existence mechanically instead: the test file, the tool it
+   exercises, and the governing `conftest.py` are all absent from
+   `git diff --name-only origin/main...HEAD`. CI's ubuntu `python tests` job is
+   the authoritative gate for those. Any
    `ctest` run covering the `webui-*` family needs the browser env prefixed PER
    COMMAND (env does not persist between Bash calls):
    `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
@@ -67,5 +76,7 @@ Nothing is pushed.
   is empty (uncommitted `.pipeline/**` doc edits are excluded by design); the
   local gate is green over the step's final state — including
   `python -m pytest tools/tests bench/tests` when Python under `tools/` or
-  `bench/` is in the diff.
+  `bench/` is in the diff, read baseline-relative per step 4 (no NEW FAILED ids
+  beyond the journaled pre-existing set; suites over the diff's files fully
+  green).
 - Nothing was pushed and no PR exists.
