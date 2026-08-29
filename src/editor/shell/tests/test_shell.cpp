@@ -341,8 +341,12 @@ void test_a_popup_composites_through_the_loop()
     CHECK(harness.window->compositor().popup_visible());
     CHECK(harness.window->compositor().stats().popup_draws == 1);
 
+    // The composed surface is WINDOW-sized (compositor.h § the 1:1 rule), so its row stride is the
+    // window's width — not the 200-wide view frame's, which lands 1:1 at the origin inside it.
     const std::vector<std::uint8_t>& surface = harness.window->compositor().cpu_surface();
-    const std::size_t inside = (static_cast<std::size_t>(20) * 200 + 20) * 4;
+    const std::size_t stride = static_cast<std::size_t>(harness.window->compositor().size().width);
+    CHECK(surface.size() == stride * harness.window->compositor().size().height * 4u);
+    const std::size_t inside = (static_cast<std::size_t>(20) * stride + 20) * 4;
     CHECK(surface[inside + 0] == 200);
     CHECK(surface[inside + 1] == 150);
     CHECK(surface[inside + 2] == 100);
