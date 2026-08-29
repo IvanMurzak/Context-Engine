@@ -328,6 +328,20 @@ bool has_marker(const Modifiers& modifiers)
     return modifiers.shift && modifiers.control && modifiers.alt;
 }
 
+int count_marked(const std::vector<PointerEvent>& samples, std::size_t baseline,
+                 std::optional<PointerAction> action)
+{
+    int count = 0;
+    for (std::size_t i = baseline; i < samples.size(); ++i)
+    {
+        if (has_marker(samples[i].modifiers) && (!action || samples[i].action == *action))
+        {
+            ++count;
+        }
+    }
+    return count;
+}
+
 PresentSetup attach_smoke_present(EditorWindow& window, WindowMode mode)
 {
     PresentSetup setup;

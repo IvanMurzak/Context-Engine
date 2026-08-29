@@ -76,9 +76,12 @@
 #include "context/editor/shell/shell.h"
 #include "context/editor/shell/window.h"
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
+#include <optional>
 #include <string>
+#include <vector>
 
 namespace context::editor::shell::smoke
 {
@@ -176,6 +179,13 @@ struct BrowserGeometry
 // XSendEvent never touches the server's real modifier state.
 void apply_marker(Modifiers& modifiers);
 [[nodiscard]] bool has_marker(const Modifiers& modifiers);
+
+// How many MARKED samples (`has_marker`) `samples` holds at or past `baseline` — of `action`, or of
+// ANY action when `action` is nullopt — in one pass. THE predicate every windowed chrome claim is
+// judged by, so it is defined once for both smokes: a suppression claim needs zero marked samples
+// past its baseline, a forwarding claim waits for one.
+[[nodiscard]] int count_marked(const std::vector<PointerEvent>& samples, std::size_t baseline,
+                               std::optional<PointerAction> action = std::nullopt);
 
 // What `attach_smoke_present` resolved to. `ok` is the whole verdict.
 //
