@@ -1,0 +1,23 @@
+src/editor/shell/panels/tests/test_builtin_panels.cpp
+  s_7b2854368302f3::t_8f184a4aee3d2b 173-176
+src/tests/integration/test_m5exit1_walkthrough.cpp
+  s_7b2854368302f3::t_98dffcc0541f65 401
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_7b2854368302f3::t_8e14f7e636b13a 691-693
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "32da1a2901ff60ba0e665db487efe4677bf92f23",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
