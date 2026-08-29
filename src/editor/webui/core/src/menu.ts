@@ -47,7 +47,7 @@ import type { UpdateState } from "./banners.js";
 import { evaluateWhen, type WhenContext } from "./when.js";
 import { isRecord } from "./bridge.js";
 import { UI_TOPIC_MENU, type EditorUiBus, type EditorUiSubscription } from "./uibus.js";
-import type { ChromeWindowControls } from "./chrome.js";
+import { LABEL_MAXIMIZE, LABEL_RESTORE, type ChromeWindowControls } from "./chrome.js";
 import {
     CHROME_MODE_HYBRID,
     type ChromeMode,
@@ -107,8 +107,6 @@ export interface MenuCommandEntry {
     readonly label: string;
     /** The DISPLAY chord from DEFAULT_KEYBINDINGS (`""` = none) — fact 3 above. */
     readonly accelerator: string;
-    /** The applicability guard (when.ts), mirroring the backing command's own. `""` = always. */
-    readonly when: string;
     /** The tooltip shown while DISABLED — the ⏳ reason. `""` renders the generic reason. */
     readonly disabledReason: string;
 }
@@ -161,18 +159,12 @@ export interface MenuModelOptions {
     readonly selfWindowId: number;
 }
 
-function command(
-    commandId: string,
-    label: string,
-    when = "",
-    disabledReason = "",
-): MenuCommandEntry {
+function command(commandId: string, label: string, disabledReason = ""): MenuCommandEntry {
     return {
         kind: "command",
         commandId,
         label,
         accelerator: menuAcceleratorFor(commandId),
-        when,
         disabledReason,
     };
 }
@@ -187,7 +179,7 @@ function openRecentSubmenu(recents: readonly RecentProject[]): MenuSubmenuEntry 
             label: "Open Recent",
             items: [
                 // Never registered, so it renders disabled (fact 2's honesty) with its reason.
-                command("project.openRecent.none", "No Recent Projects", "", NO_RECENTS_REASON),
+                command("project.openRecent.none", "No Recent Projects", NO_RECENTS_REASON),
             ],
         };
     }
@@ -200,13 +192,21 @@ function openRecentSubmenu(recents: readonly RecentProject[]): MenuSubmenuEntry 
     };
 }
 
-/** The Window menu's window list — self first, peers after, each naming its focus command. */
+/**
+ * The window ids the Window menu names — self + peers, deduped, ascending. The ONE derivation both
+ * the model's window-list entries and the registered `window.focus.<id>` commands read, so a model
+ * entry and its backing command cannot drift apart.
+ */
+function windowMenuIds(selfWindowId: number, windows: readonly number[]): readonly number[] {
+    return [...new Set<number>([selfWindowId, ...windows])].sort((a, b) => a - b);
+}
+
+/** The Window menu's window list — one entry per live window, each naming its focus command. */
 function windowListEntries(
     windows: readonly number[],
     selfWindowId: number,
 ): readonly MenuCommandEntry[] {
-    const ids = [...new Set<number>([selfWindowId, ...windows])].sort((a, b) => a - b);
-    return ids.map((id) =>
+    return windowMenuIds(selfWindowId, windows).map((id) =>
         command(
             `${WINDOW_FOCUS_COMMAND_PREFIX}${String(id)}`,
             `Window ${String(id + 1)}${id === selfWindowId ? " (this window)" : ""}`,
@@ -217,8 +217,9 @@ function windowListEntries(
 /**
  * Build the ONE menu model — exactly 03's table (fact 2), shaped by platform: `hybrid` (macOS)
  * carries the App menu (About / Settings… / Quit) and no File>Exit / Help>About; every other mode
- * carries Exit in File and About in Help. Every entry's `when` mirrors its backing command's, so
- * the menu and the palette can never disagree about applicability.
+ * carries Exit in File and About in Help. An entry carries NO applicability guard of its own:
+ * enablement reads the backing command's registered `when` through `CommandAvailability`, so the
+ * menu and the palette can never disagree about applicability.
  */
 export function buildMenuModel(options: MenuModelOptions): MenuModel {
     const mac = options.mode === CHROME_MODE_HYBRID;
@@ -253,14 +254,15 @@ export function buildMenuModel(options: MenuModelOptions): MenuModel {
         id: "edit",
         label: "Edit",
         items: [
-            command("session.undo", "Undo", "!textInputFocus"),
-            command("session.redo", "Redo", "!textInputFocus"),
+            command("session.undo", "Undo"),
+            command("session.redo", "Redo"),
             SEPARATOR,
-            // The ⏳ rows (03): enabled ONLY under textInputFocus, where they delegate to the
-            // browser's native editing; disabled elsewhere with the reason in the tooltip.
-            command(EDIT_CUT_COMMAND_ID, "Cut", "textInputFocus", CLIPBOARD_DISABLED_REASON),
-            command(EDIT_COPY_COMMAND_ID, "Copy", "textInputFocus", CLIPBOARD_DISABLED_REASON),
-            command(EDIT_PASTE_COMMAND_ID, "Paste", "textInputFocus", CLIPBOARD_DISABLED_REASON),
+            // The ⏳ rows (03): enabled ONLY under textInputFocus (their registered `when`), where
+            // they delegate to the browser's native editing; disabled elsewhere with the reason in
+            // the tooltip.
+            command(EDIT_CUT_COMMAND_ID, "Cut", CLIPBOARD_DISABLED_REASON),
+            command(EDIT_COPY_COMMAND_ID, "Copy", CLIPBOARD_DISABLED_REASON),
+            command(EDIT_PASTE_COMMAND_ID, "Paste", CLIPBOARD_DISABLED_REASON),
         ],
     });
 
@@ -272,9 +274,9 @@ export function buildMenuModel(options: MenuModelOptions): MenuModel {
             command("view.theme.toggle", "Toggle Theme"),
             SEPARATOR,
             // Honest-refusal implementations today (boot.ts) — the menu inherits that honesty (03).
-            command("view.panel.focusNext", "Focus Next Panel", "!textInputFocus"),
-            command("view.panel.focusPrevious", "Focus Previous Panel", "!textInputFocus"),
-            command("view.panel.close", "Close Panel", "panelFocus && !textInputFocus"),
+            command("view.panel.focusNext", "Focus Next Panel"),
+            command("view.panel.focusPrevious", "Focus Previous Panel"),
+            command("view.panel.close", "Close Panel"),
         ],
     });
 
@@ -289,17 +291,13 @@ export function buildMenuModel(options: MenuModelOptions): MenuModel {
         id: "panel",
         label: "Panel",
         items: [
-            command("view.window.tearOut", "Tear Out Panel", "panelFocus && !textInputFocus"),
-            command(
-                "view.window.moveToPrimary",
-                "Move Panel to Primary",
-                "panelFocus && !textInputFocus",
-            ),
+            command("view.window.tearOut", "Tear Out Panel"),
+            command("view.window.moveToPrimary", "Move Panel to Primary"),
             SEPARATOR,
-            command("view.panel.move.left", "Move Panel Left", "panelFocus && !textInputFocus"),
-            command("view.panel.move.right", "Move Panel Right", "panelFocus && !textInputFocus"),
-            command("view.panel.move.up", "Move Panel Up", "panelFocus && !textInputFocus"),
-            command("view.panel.move.down", "Move Panel Down", "panelFocus && !textInputFocus"),
+            command("view.panel.move.left", "Move Panel Left"),
+            command("view.panel.move.right", "Move Panel Right"),
+            command("view.panel.move.up", "Move Panel Up"),
+            command("view.panel.move.down", "Move Panel Down"),
         ],
     });
 
@@ -325,28 +323,46 @@ export function buildMenuModel(options: MenuModelOptions): MenuModel {
     return { menus };
 }
 
-/** The Maximize item's live label (02 §5: it flips on the `maximized` fact, never on a poll). */
+/** The Maximize item's live label (02 §5: it flips on the `maximized` fact, never on a poll) —
+ *  the SAME label pair the caption button renders (chrome.ts), so the two spellings cannot drift. */
 export function toggleMaximizeLabel(maximized: boolean): string {
-    return maximized ? "Restore" : "Maximize";
+    return maximized ? LABEL_RESTORE : LABEL_MAXIMIZE;
+}
+
+/** One entry's LIVE label — the single home of the Maximize/Restore flip, read by BOTH renderings
+ *  (the wire serializer and the web dropdown), so a state-dependent label can never show stale in
+ *  exactly one of the two. */
+function menuEntryLabel(entry: MenuCommandEntry, maximized: boolean): string {
+    return entry.commandId === WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID
+        ? toggleMaximizeLabel(maximized)
+        : entry.label;
 }
 
 // ------------------------------------------------------------------------------- the enablement
 
-/** How the renderer/serializer asks whether a command id currently resolves (the late-bound registry). */
-export type CommandAvailability = (commandId: string) => boolean;
+/**
+ * How the renderer/serializer resolves a command id against the late-bound registry: the backing
+ * command's own `when` guard (`""` = always applicable) when the id resolves, `null` when it does
+ * not. Sourcing the guard HERE — instead of carrying a copy on each model entry — keeps every
+ * command's applicability in its ONE registration site, so the menu and the palette read the same
+ * truth by construction.
+ */
+export type CommandAvailability = (commandId: string) => string | null;
 
 /**
  * One entry's enablement (fact 2): the backing command must EXIST in the registry (a window-list
  * entry for a closed window, the recents placeholder, a command layer still coming up — all read
- * as "not available") AND its `when` guard must hold in the CURRENT context — the same
- * `evaluateWhen` the palette filters with, so the two can never disagree.
+ * as "not available") AND its registered `when` guard must hold in the CURRENT context — the same
+ * `evaluateWhen` over the same registered clause the palette filters with, so the two can never
+ * disagree.
  */
 export function menuEntryEnabled(
     entry: MenuCommandEntry,
     context: WhenContext,
     available: CommandAvailability,
 ): boolean {
-    return available(entry.commandId) && evaluateWhen(entry.when, context);
+    const when = available(entry.commandId);
+    return when !== null && evaluateWhen(when, context);
 }
 
 /** The tooltip a DISABLED entry carries — its declared reason, or the honest generic one. */
@@ -375,14 +391,10 @@ function entryJson(entry: MenuEntry, options: MenuSerializeOptions): Record<stri
         };
     }
     const enabled = menuEntryEnabled(entry, options.context, options.available);
-    const label =
-        entry.commandId === WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID
-            ? toggleMaximizeLabel(options.maximized)
-            : entry.label;
     const out: Record<string, unknown> = {
         type: MENU_ITEM_TYPE_COMMAND,
         id: entry.commandId,
-        label,
+        label: menuEntryLabel(entry, options.maximized),
         enabled,
     };
     if (entry.accelerator !== "") {
@@ -489,6 +501,14 @@ export function makeMenuActions(deps: MenuActionDeps): MenuCommandActions {
         const picked = await deps.project.pickFolder();
         return picked !== null && picked.picked && picked.path !== "" ? picked.path : null;
     };
+    // The ONE open-outcome mapping — File > Open Project… and every Open Recent entry ride it, so
+    // the "what counts as opened" wording cannot drift between them.
+    const openPath = async (path: string): Promise<CommandOutcome> => {
+        const result = await deps.project.open(path);
+        return result !== null && result.opened
+            ? { ok: true, note: `opened ${result.path} (${result.action})` }
+            : { ok: false, note: "open refused (no welcome surface behind this Shell)" };
+    };
     return {
         newProject: async (): Promise<CommandOutcome> => {
             const path = await pickFolder();
@@ -505,17 +525,9 @@ export function makeMenuActions(deps: MenuActionDeps): MenuCommandActions {
             if (path === null) {
                 return { ok: false, note: "no folder picked" };
             }
-            const result = await deps.project.open(path);
-            return result !== null && result.opened
-                ? { ok: true, note: `opened ${result.path} (${result.action})` }
-                : { ok: false, note: "open refused (no welcome surface behind this Shell)" };
+            return openPath(path);
         },
-        openRecent: async (path: string): Promise<CommandOutcome> => {
-            const result = await deps.project.open(path);
-            return result !== null && result.opened
-                ? { ok: true, note: `opened ${result.path} (${result.action})` }
-                : { ok: false, note: "open refused (no welcome surface behind this Shell)" };
-        },
+        openRecent: openPath,
         editClipboard: (verb): CommandOutcome =>
             exec(verb)
                 ? { ok: true, note: `${verb} delegated to the browser's native editing` }
@@ -576,17 +588,15 @@ export function makeMenuActions(deps: MenuActionDeps): MenuCommandActions {
     };
 }
 
-/** What `menuCommands` needs beyond the actions: the boot data the per-entry commands close over. */
-export interface MenuCommandData {
-    readonly recents: readonly RecentProject[];
-    readonly windows: readonly number[];
-    readonly selfWindowId: number;
-}
+/** What `menuCommands` needs beyond the actions: the boot data the per-entry commands close over —
+ *  exactly the model's own options minus the platform shape. */
+export type MenuCommandData = Omit<MenuModelOptions, "mode">;
 
 /**
  * The d3 command set (03's table, "new" column) — registered through `buildCommandRegistry`'s
- * `menuCommands` source, BEFORE the panel source, so incumbent-wins protects the ids. Every `when`
- * mirrors the matching menu entry's, so the palette and the menu agree about applicability.
+ * `menuCommands` source, BEFORE the panel source, so incumbent-wins protects the ids. Each
+ * registration HERE is the single home of its command's `when` guard — the menu model carries no
+ * copy (`menuEntryEnabled` reads the registry), so the palette and the menu agree by construction.
  */
 export function menuCommands(
     actions: MenuCommandActions,
@@ -626,32 +636,23 @@ export function menuCommands(
                 "spawn-vs-focus)",
             () => actions.openProject(),
         ),
-        editor(
-            EDIT_CUT_COMMAND_ID,
-            "Cut",
-            "textInputFocus",
-            "Cut the selection in the focused text field",
-            "edit action (d3, the 03 ⏳ row): delegates to the browser's native editing inside a " +
-                "focused text field; app-level clipboard is future work",
-            () => actions.editClipboard("cut"),
-        ),
-        editor(
-            EDIT_COPY_COMMAND_ID,
-            "Copy",
-            "textInputFocus",
-            "Copy the selection in the focused text field",
-            "edit action (d3, the 03 ⏳ row): delegates to the browser's native editing inside a " +
-                "focused text field; app-level clipboard is future work",
-            () => actions.editClipboard("copy"),
-        ),
-        editor(
-            EDIT_PASTE_COMMAND_ID,
-            "Paste",
-            "textInputFocus",
-            "Paste into the focused text field",
-            "edit action (d3, the 03 ⏳ row): delegates to the browser's native editing inside a " +
-                "focused text field; app-level clipboard is future work",
-            () => actions.editClipboard("paste"),
+        // The three ⏳ clipboard rows differ only in verb, id, and summary — one table, one stanza.
+        ...(
+            [
+                ["cut", EDIT_CUT_COMMAND_ID, "Cut", "Cut the selection in the focused text field"],
+                ["copy", EDIT_COPY_COMMAND_ID, "Copy", "Copy the selection in the focused text field"],
+                ["paste", EDIT_PASTE_COMMAND_ID, "Paste", "Paste into the focused text field"],
+            ] as const
+        ).map(([verb, id, title, summary]) =>
+            editor(
+                id,
+                title,
+                "textInputFocus",
+                summary,
+                "edit action (d3, the 03 ⏳ row): delegates to the browser's native editing inside a " +
+                    "focused text field; app-level clipboard is future work",
+                () => actions.editClipboard(verb),
+            ),
         ),
         editor(
             SELECTION_CLEAR_COMMAND_ID,
@@ -736,7 +737,7 @@ export function menuCommands(
             ),
         );
     });
-    for (const id of [...new Set<number>([data.selfWindowId, ...data.windows])]) {
+    for (const id of windowMenuIds(data.selfWindowId, data.windows)) {
         commands.push(
             editor(
                 `${WINDOW_FOCUS_COMMAND_PREFIX}${String(id)}`,
@@ -823,7 +824,8 @@ export interface MountMenubarOptions {
     readonly contextProvider: () => WhenContext;
     /** Dispatch through the late-bound registry (boot closes over the holder — the a2 pattern). */
     readonly executeCommand: (commandId: string) => void;
-    /** Does a command id currently resolve? (`liveRegistry.current?.has` — late-bound too.) */
+    /** Resolve a command id to its registered `when` guard, or `null` when it does not resolve
+     *  (`liveRegistry.current?.get` — late-bound too). */
     readonly commandAvailable: CommandAvailability;
     /** The maximized fact the Maximize/Restore label flips on (chrome.ts mount's own state). */
     readonly isMaximized: () => boolean;
@@ -961,6 +963,9 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                     if (depth >= 1) {
                         return; // deeper than the shipped nesting — the header stays inert
                     }
+                    if (!submenu.hidden) {
+                        return; // already open — freshness is "at open", so no rebuild on re-hover
+                    }
                     renderEntries(submenu, entry.items, depth + 1);
                     submenu.hidden = false;
                     header.setAttribute("aria-expanded", "true");
@@ -1020,10 +1025,7 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
             }
             const label = doc.createElement("span");
             label.className = MENU_ITEM_LABEL_CLASS;
-            label.textContent =
-                entry.commandId === WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID
-                    ? toggleMaximizeLabel(options.isMaximized())
-                    : entry.label;
+            label.textContent = menuEntryLabel(entry, options.isMaximized());
             item.append(label);
             if (entry.accelerator !== "") {
                 item.setAttribute("aria-keyshortcuts", entry.accelerator);
@@ -1109,6 +1111,16 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
         const topIndex = topLevel.findIndex((entry) => entry.button === active);
         const inTopLevel = topIndex !== -1;
         const openIndex = topLevel.findIndex((entry) => entry.menu.id === openId);
+        // The items of the INNERMOST open menu the focus is in (submenu-aware) — the ONE scope rule
+        // vertical navigation and Home/End share; `null` while no dropdown is open.
+        const scopedItems = (): HTMLButtonElement[] | null => {
+            const dropdown = openIndex === -1 ? undefined : topLevel[openIndex]?.dropdown;
+            if (dropdown === undefined) {
+                return null;
+            }
+            const scope = active instanceof Element ? active.closest(`.${MENU_CLASS}`) : null;
+            return menuItems(scope instanceof HTMLElement && !scope.hidden ? scope : dropdown);
+        };
         switch (event.key) {
             case "ArrowRight":
             case "ArrowLeft": {
@@ -1154,20 +1166,8 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                     }
                     return;
                 }
-                if (openIndex === -1) {
-                    return;
-                }
-                const dropdown = topLevel[openIndex]?.dropdown;
-                if (dropdown === undefined) {
-                    return;
-                }
-                // Navigate within the INNERMOST open menu the focus is in (submenu-aware).
-                const scope =
-                    active instanceof Element ? active.closest(`.${MENU_CLASS}`) : null;
-                const items = menuItems(
-                    scope instanceof HTMLElement && !scope.hidden ? scope : dropdown,
-                );
-                if (items.length === 0) {
+                const items = scopedItems();
+                if (items === null || items.length === 0) {
                     return;
                 }
                 const current = items.findIndex((item) => item === active);
@@ -1183,19 +1183,11 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
             }
             case "Home":
             case "End": {
-                if (openIndex === -1) {
+                const items = scopedItems();
+                if (items === null) {
                     return;
                 }
                 event.preventDefault();
-                const dropdown = topLevel[openIndex]?.dropdown;
-                if (dropdown === undefined) {
-                    return;
-                }
-                const scope =
-                    active instanceof Element ? active.closest(`.${MENU_CLASS}`) : null;
-                const items = menuItems(
-                    scope instanceof HTMLElement && !scope.hidden ? scope : dropdown,
-                );
                 focusItem(items, event.key === "Home" ? 0 : items.length - 1);
                 return;
             }

@@ -274,6 +274,9 @@ public:
 
 private:
     void adopt(const HttpResponse& response);
+    // The ONE opener path both click-throughs ride: false when no opener is bound or `url` is
+    // empty; bumps `counter` only on a real open.
+    [[nodiscard]] bool open_url(const std::string& url, std::size_t& counter);
 
     std::string current_ = editor_version();
     std::string endpoint_ = kReleaseCheckEndpoint;

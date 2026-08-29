@@ -188,12 +188,16 @@ interface MenubarHarness {
 
 function menubarHarness(options?: {
     readonly model?: MenuModel;
-    readonly available?: (id: string) => boolean;
+    readonly available?: (id: string) => string | null;
     readonly execute?: (id: string) => void;
 }): MenubarHarness {
     const slot = document.createElement("div");
     document.body.append(slot);
     const executed: string[] = [];
+    // The default availability mirrors boot's real wiring: a REAL registry's own `when` guards
+    // (the single-home rule), so enablement here rides the same truth the palette reads.
+    const registry = registryWith(actionSpies());
+    const registryAvailability = (id: string): string | null => registry.get(id)?.when ?? null;
     const harness: MenubarHarness = {
         slot,
         executed,
@@ -207,7 +211,7 @@ function menubarHarness(options?: {
                 ((id: string): void => {
                     executed.push(id);
                 }),
-            commandAvailable: options?.available ?? ((): boolean => true),
+            commandAvailable: options?.available ?? registryAvailability,
             isMaximized: () => harness.maximized,
         }),
         dispose: (): void => {
@@ -402,10 +406,15 @@ export const menuTests: readonly TestCase[] = [
     {
         name: "menu model: menuModelJson serializes the publish-time enablement snapshot",
         run: () => {
-            const available = new Set([EDIT_CUT_COMMAND_ID, WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID]);
+            // The fixture registry: two resolvable ids (with their real guards); everything else
+            // unregistered (null) — the CommandAvailability shape boot wires.
+            const available = new Map<string, string>([
+                [EDIT_CUT_COMMAND_ID, "textInputFocus"],
+                [WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID, ""],
+            ]);
             const json = menuModelJson(model(), {
                 context: { textInputFocus: true },
-                available: (id) => available.has(id),
+                available: (id) => available.get(id) ?? null,
                 maximized: true,
             });
             const menus = json["menus"];
@@ -782,7 +791,8 @@ export const menuTests: readonly TestCase[] = [
         name: "menubar: a command the registry does not hold renders disabled (never a dead click)",
         run: async () => {
             const h = menubarHarness({
-                available: (id: string): boolean => id !== SELECTION_CLEAR_COMMAND_ID,
+                available: (id: string): string | null =>
+                    id === SELECTION_CLEAR_COMMAND_ID ? null : "",
             });
             try {
                 h.mount.openMenu("selection");

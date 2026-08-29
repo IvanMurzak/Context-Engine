@@ -294,34 +294,30 @@ bool ReleaseNotice::dismiss()
     return changed;
 }
 
-bool ReleaseNotice::open_downloads()
+bool ReleaseNotice::open_url(const std::string& url, std::size_t& counter)
 {
-    if (!opener_ || downloads_.empty())
+    if (!opener_ || url.empty())
     {
         return false;
     }
-    const bool opened = opener_(downloads_);
+    const bool opened = opener_(url);
     if (opened)
     {
-        ++opens_;
+        ++counter;
     }
     return opened;
+}
+
+bool ReleaseNotice::open_downloads()
+{
+    return open_url(downloads_, opens_);
 }
 
 bool ReleaseNotice::open_docs()
 {
     // The downloads click-through, re-pointed (d3): same opener seam, same honest false when no
     // opener is wired on this platform.
-    if (!opener_ || docs_.empty())
-    {
-        return false;
-    }
-    const bool opened = opener_(docs_);
-    if (opened)
-    {
-        ++docs_opens_;
-    }
-    return opened;
+    return open_url(docs_, docs_opens_);
 }
 
 contract::Json ReleaseNotice::state_json() const
@@ -434,49 +430,33 @@ bool BannerBridge::install(BridgeRouter& router)
                  return BridgeResult::ok(std::move(result));
              }) &&
          ok;
-    ok = router.register_method(
-             kUpdateOpenDownloadsMethod,
-             [this](const BridgeRequest&) -> BridgeResult
-             {
-                 if (notice_ == nullptr)
-                 {
-                     return BridgeResult::error(kErrUpdateNoOpener,
-                                                "this build has no downloads page wired");
-                 }
-                 const bool opened = notice_->open_downloads();
-                 if (!opened)
-                 {
-                     return BridgeResult::error(
-                         kErrUpdateNoOpener,
-                         "opening the downloads page is not wired on this platform yet");
-                 }
-                 contract::Json result = contract::Json::object();
-                 result.set("opened", contract::Json(true));
-                 return BridgeResult::ok(std::move(result));
-             }) &&
+    // The two URL click-throughs (update.openDownloads, and d3's help.openDocs re-pointed through
+    // the same opener seam) share ONE handler shape: refuse with kErrUpdateNoOpener when nothing
+    // is wired, report `{opened:true}` otherwise. `noun` names the page in both refusal messages.
+    const auto open_route = [this](bool (ReleaseNotice::*open)(), const std::string& noun)
+    {
+        return [this, open, noun](const BridgeRequest&) -> BridgeResult
+        {
+            if (notice_ == nullptr)
+            {
+                return BridgeResult::error(kErrUpdateNoOpener, "this build has no " + noun + " wired");
+            }
+            if (!(notice_->*open)())
+            {
+                return BridgeResult::error(
+                    kErrUpdateNoOpener,
+                    "opening the " + noun + " is not wired on this platform yet");
+            }
+            contract::Json result = contract::Json::object();
+            result.set("opened", contract::Json(true));
+            return BridgeResult::ok(std::move(result));
+        };
+    };
+    ok = router.register_method(kUpdateOpenDownloadsMethod,
+                                open_route(&ReleaseNotice::open_downloads, "downloads page")) &&
          ok;
-    // d3: the documentation click-through — the openDownloads handler re-pointed through the same
-    // opener seam, with the same honest kErrUpdateNoOpener degrade.
-    ok = router.register_method(
-             kHelpOpenDocsMethod,
-             [this](const BridgeRequest&) -> BridgeResult
-             {
-                 if (notice_ == nullptr)
-                 {
-                     return BridgeResult::error(kErrUpdateNoOpener,
-                                                "this build has no documentation page wired");
-                 }
-                 const bool opened = notice_->open_docs();
-                 if (!opened)
-                 {
-                     return BridgeResult::error(
-                         kErrUpdateNoOpener,
-                         "opening the documentation page is not wired on this platform yet");
-                 }
-                 contract::Json result = contract::Json::object();
-                 result.set("opened", contract::Json(true));
-                 return BridgeResult::ok(std::move(result));
-             }) &&
+    ok = router.register_method(kHelpOpenDocsMethod,
+                                open_route(&ReleaseNotice::open_docs, "documentation page")) &&
          ok;
     return ok;
 }

@@ -966,8 +966,10 @@ async function startMenu(bridge: ShellBridge, options: StartMenuOptions): Promis
     const executeCommand = (commandId: string): void => {
         void liveRegistry.current?.execute(commandId);
     };
-    const commandAvailable = (commandId: string): boolean =>
-        liveRegistry.current?.has(commandId) ?? false;
+    // The menu's availability seam (menu.ts CommandAvailability): the registered command's own
+    // `when` guard, or null when the id does not resolve — the guard's ONE home is the registry.
+    const commandAvailable = (commandId: string): string | null =>
+        liveRegistry.current?.get(commandId)?.when ?? null;
     const isMaximized = (): boolean =>
         chromeStrips?.mount.isMaximized() ?? chromeState.maximized;
 

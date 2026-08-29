@@ -212,11 +212,10 @@ export interface WindowControlResult {
 /**
  * The outcome of a `menu.publish` (d3). `accepted:false` is the ORDINARY answer everywhere but a
  * live macOS window — the web menubar is the rendering on Windows/Linux, and every smoke's Shell
- * binds no native menu host — so a caller treats it as information, never as an error.
+ * binds no native menu host — so a caller treats it as information, never as an error. The same
+ * `{accepted}` wire shape as every control verb; the name carries the distinct semantics.
  */
-export interface MenuPublishResult {
-    readonly accepted: boolean;
-}
+export type MenuPublishResult = WindowControlResult;
 
 /**
  * The outcome of a `window.toggle-maximize`. `maximized` is the NEW state and is meaningful only
@@ -422,12 +421,7 @@ export class WindowClient {
      * `windowId` it targets the named peer (d3 — the Window menu's window-list entries).
      */
     async focus(windowId?: number): Promise<WindowControlResult> {
-        return this.#tolerant(
-            WINDOW_FOCUS_METHOD,
-            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
-            { accepted: false },
-            windowId === undefined ? undefined : { windowId },
-        );
+        return this.#control(WINDOW_FOCUS_METHOD, windowId === undefined ? undefined : { windowId });
     }
 
     /**
@@ -436,12 +430,7 @@ export class WindowClient {
      * the ordinary non-macOS answer — see `MenuPublishResult`.
      */
     async publishMenu(model: Record<string, unknown>): Promise<MenuPublishResult> {
-        return this.#tolerant(
-            MENU_PUBLISH_METHOD,
-            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
-            { accepted: false },
-            model,
-        );
+        return this.#control(MENU_PUBLISH_METHOD, model);
     }
 
     /**
@@ -450,20 +439,21 @@ export class WindowClient {
      * it resolves to `accepted:false` and the frame keeps the system tint — the pre-b1 behaviour.
      */
     async setAppearance(appearance: WindowAppearance): Promise<WindowControlResult> {
-        return this.#tolerant(
-            WINDOW_SET_APPEARANCE_METHOD,
-            (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
-            { accepted: false },
-            { appearance },
-        );
+        return this.#control(WINDOW_SET_APPEARANCE_METHOD, { appearance });
     }
 
-    /** One `{accepted}` control verb (`window.minimize` / `window.focus`), on the shared policy. */
-    async #control(method: string): Promise<WindowControlResult> {
+    /** One `{accepted}` verb on the shared refusal policy — the single home of the `{accepted}`
+     *  parse + fallback every control-shaped method (`window.minimize` / `window.focus` /
+     *  `menu.publish` / `window.set-appearance`) rides. */
+    async #control(
+        method: string,
+        params?: Record<string, unknown>,
+    ): Promise<WindowControlResult> {
         return this.#tolerant(
             method,
             (result) => ({ accepted: isRecord(result) && readBoolean(result, "accepted") }),
             { accepted: false },
+            params,
         );
     }
 
