@@ -1,0 +1,36 @@
+src/editor/shell/src/window.cpp
+  s_7b2854368302f3::t_59e85a1b5ddff8 110-121
+  s_7b2854368302f3::t_dfbb17f6086735 436-438,454
+  s_7b2854368302f3::t_e306be7eb38667 323-327,330
+  s_7b2854368302f3::t_f38e548d147e19 410-419,422-424,426,428,430,432
+  s_7b2854368302f3::t_e88ae879071d5e 468-480,482-486,517-520,526
+  s_7b2854368302f3::t_b79a37fca625f9 272
+src/editor/shell/src/input.cpp
+  s_7b2854368302f3::t_617de4fd9c7865 50-53
+src/editor/webui/core/src/boot.ts
+  s_7b2854368302f3::t_e4883334af08a8 322-326
+src/editor/shell/src/win32_window.cpp
+  s_7b2854368302f3::t_724e647899197d 584
+  s_7b2854368302f3::t_9c26d62774f6e8 193-195,198-215
+  s_7b2854368302f3::t_7aa77209f7f7ca 527-528
+  s_7b2854368302f3::t_b4379f469daa3f 196-197
+  s_7b2854368302f3::t_7c6d4fbe4acd59 556
+  s_7b2854368302f3::t_f2adec0f52001a 769
+  s_7b2854368302f3::t_0d0b7ca6135978 568-569
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2d2a845be41937b61f45fc1d06a3041a78048787",
+  "prompts": {},
+  "sessions": {
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
