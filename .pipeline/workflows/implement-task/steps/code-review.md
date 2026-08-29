@@ -59,7 +59,12 @@ Nothing is pushed.
    COMMAND (env does not persist between Bash calls):
    `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
    — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
-   fails "no Chromium-family browser found" alone in a green suite. A review fix
+   fails "no Chromium-family browser found" alone in a green suite. And if the
+   fixes touched any webui TS source, rebuild the browser-test bundle FIRST —
+   `cmake --build --preset dev --target context_editor_webui_test` — that target
+   is deliberately not in ALL, so a plain dev build leaves the bundle stale and
+   `webui-ts-unit` then scores a false green (or a false red) over the OLD code.
+   A review fix
    that reddens the build or tests must be repaired — or reverted, with the
    reasoning included in your report — never left red.
 5. Commit the applied fixes as one or more conventional commits (`fix:` for

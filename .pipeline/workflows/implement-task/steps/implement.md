@@ -47,7 +47,12 @@ and leave the result committed locally on the run branch. Nothing is pushed.
    CI's required `python tests` check runs exactly that, so a failure there is
    otherwise discovered only at `land`, after a full rollup is spent. Read that
    pytest run BASELINE-RELATIVE, never as an absolute green: this box fails ~14
-   Python tests on `origin/main` itself (a Windows-vs-CI-ubuntu toolchain gap),
+   Python tests on `origin/main` itself (a Windows-vs-CI-ubuntu toolchain gap —
+   known set 2026-08-28, 14 ids: `tools/tests/test_measure_cef_smoke_rate.py`
+   (11), `tools/tests/test_fetch_cef.py::test_offline_happy_path_stages_distribution`,
+   `bench/tests/test_build_time.py::test_measure_writes_result` and
+   `::test_measure_reports_failed_phase_command` — all Windows-only spawn
+   failures of stub executables their fixtures create),
    so the bar is **no NEW FAILED test ids** plus fully-green suites over the
    files in the diff — compare ids, never the exit code. A failure is
    pre-existing when its test file, the tool it exercises, and the governing
@@ -59,7 +64,13 @@ and leave the result committed locally on the run branch. Nothing is pushed.
    prefixed PER COMMAND (env does not persist between Bash calls):
    `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
    — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
-   fails "no Chromium-family browser found" alone in a green suite.
+   fails "no Chromium-family browser found" alone in a green suite. And after
+   editing ANY webui TS source (`core/src`, `kit`, `test`), rebuild the
+   browser-test bundle explicitly BEFORE that `ctest`:
+   `cmake --build --preset dev --target context_editor_webui_test` — that target
+   is deliberately not in ALL (`src/editor/webui/CMakeLists.txt`), so the plain
+   dev-preset build leaves the bundle stale and `webui-ts-unit` then scores a
+   false green — or a false red — over the OLD code.
 6. Commit the work as one conventional commit, or a few logically separate
    ones. Do NOT push, and do NOT open a PR.
 

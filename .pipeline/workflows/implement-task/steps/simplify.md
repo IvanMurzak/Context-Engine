@@ -61,7 +61,12 @@ owned bugs) and leave the applied cleanups committed locally. Nothing is pushed.
    COMMAND (env does not persist between Bash calls):
    `CONTEXT_WEBUI_TEST_BROWSER="C:/Program Files (x86)/Microsoft/Edge/Application/msedge.exe" ctest --preset dev …`
    — nothing Chromium-family is on this box's PATH, so `webui-ts-unit` otherwise
-   fails "no Chromium-family browser found" alone in a green suite. A
+   fails "no Chromium-family browser found" alone in a green suite. And if the
+   cleanups touched any webui TS source, rebuild the browser-test bundle FIRST —
+   `cmake --build --preset dev --target context_editor_webui_test` — that target
+   is deliberately not in ALL, so a plain dev build leaves the bundle stale and
+   `webui-ts-unit` then scores a false green (or a false red) over the OLD code.
+   A
    simplification that changes behavior or reddens the suite is wrong by
    definition — repair or revert it, and say so in your report.
 5. Commit the applied cleanups as one or more `refactor:` conventional commits.
