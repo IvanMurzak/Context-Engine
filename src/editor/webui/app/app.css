@@ -262,22 +262,36 @@ html[data-theme-transition="true"] * {
     gap: var(--ctx-shape-space-sm, 8px);
 }
 
-/* The status DOT: decoration (aria-hidden), hue bound 1:1 to the reserved status semantics via
- * `data-tone` (06 §2) — the same indirection the kit's tones use. NO animation here: motion rules
- * belong to the theme layer's flourish derivation, and the strip adds none. */
-.ctx-playbar__dot {
-    width: 8px;
-    height: 8px;
+/* The status DOTS (playbar + statusbar): decoration (aria-hidden), hue bound 1:1 to the reserved
+ * status semantics via `data-tone` (06 §2) — the same indirection the kit's tones use, spelled as
+ * ONE tone→hue table shared by every strip dot so the binding cannot drift per strip (`warn` is
+ * the statusbar's tone — a read-only link a user must know about; the playbar never sets it,
+ * harmlessly). NO animation here: motion rules belong to the theme layer's flourish derivation,
+ * and the strips add none. Size stays per strip, below. */
+.ctx-playbar__dot,
+.ctx-statusbar__dot {
     border-radius: 50%;
     background: var(--ctx-colors-semantic-idle, #8b949e);
 }
 
-.ctx-playbar__dot[data-tone="good"] {
+.ctx-playbar__dot[data-tone="good"],
+.ctx-statusbar__dot[data-tone="good"] {
     background: var(--ctx-colors-semantic-good, #3fb950);
 }
 
-.ctx-playbar__dot[data-tone="wait"] {
+.ctx-playbar__dot[data-tone="wait"],
+.ctx-statusbar__dot[data-tone="wait"] {
     background: var(--ctx-colors-semantic-wait, #a855f7);
+}
+
+.ctx-playbar__dot[data-tone="warn"],
+.ctx-statusbar__dot[data-tone="warn"] {
+    background: var(--ctx-colors-semantic-warn, #d29922);
+}
+
+.ctx-playbar__dot {
+    width: 8px;
+    height: 8px;
 }
 
 .ctx-playbar__timer {
@@ -328,26 +342,11 @@ html[data-theme-transition="true"] * {
     display: none;
 }
 
-/* The link DOT: decoration (aria-hidden), hue bound 1:1 to the reserved status semantics via
- * `data-tone` (06 §2) — the `.ctx-playbar__dot` indirection, one tone wider (`warn`: a read-only
- * link a user must know about, the daemon banner's own tone for it). NO animation here either. */
+/* The link DOT: sized here; its tone→hue binding is the ONE shared strip-dot table beside
+ * `.ctx-playbar__dot` above (06 §2). */
 .ctx-statusbar__dot {
     width: 7px;
     height: 7px;
-    border-radius: 50%;
-    background: var(--ctx-colors-semantic-idle, #8b949e);
-}
-
-.ctx-statusbar__dot[data-tone="good"] {
-    background: var(--ctx-colors-semantic-good, #3fb950);
-}
-
-.ctx-statusbar__dot[data-tone="wait"] {
-    background: var(--ctx-colors-semantic-wait, #a855f7);
-}
-
-.ctx-statusbar__dot[data-tone="warn"] {
-    background: var(--ctx-colors-semantic-warn, #d29922);
 }
 
 .ctx-statusbar__problems {

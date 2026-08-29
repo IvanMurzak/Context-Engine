@@ -34,8 +34,8 @@ import {
 import type { DaemonLinkState } from "../banners.js";
 import { DEFAULT_TITLE } from "../chrome.js";
 import { NODE_ID_ATTRIBUTE } from "../hydration.js";
-import type { SessionScheduler } from "../session.js";
 import { EditorUiBus, UI_TOPIC_THEME_CHANGED } from "../uibus.js";
+import { ManualScheduler } from "./session.test.js";
 
 // --------------------------------------------------------------------------- the DOM harness
 
@@ -98,32 +98,6 @@ function problemsFixture(rows: number): HTMLElement {
     }
     document.body.append(list);
     return list;
-}
-
-// --------------------------------------------------------------------------- a manual scheduler
-
-interface ManualScheduler extends SessionScheduler {
-    tick(): void;
-    readonly cleared: number[];
-}
-
-function manualScheduler(): ManualScheduler {
-    let callback: (() => void) | null = null;
-    const cleared: number[] = [];
-    return {
-        cleared,
-        setInterval: (cb: () => void): number => {
-            callback = cb;
-            return 7;
-        },
-        clearInterval: (handle: number): void => {
-            cleared.push(handle);
-            callback = null;
-        },
-        tick: (): void => {
-            callback?.();
-        },
-    };
 }
 
 export const statusbarTests: TestCase[] = [
@@ -405,7 +379,7 @@ export const statusbarTests: TestCase[] = [
     {
         name: "d2 statusbar: the link feed polls, applies, and SELF-STOPS when the surface refuses",
         run: async () => {
-            const scheduler = manualScheduler();
+            const scheduler = new ManualScheduler();
             const answers: (DaemonLinkState | null)[] = [
                 link({ readOnly: true, reconnectAttempts: 1 }),
                 null,
@@ -426,14 +400,14 @@ export const statusbarTests: TestCase[] = [
             assertEqual(applied[0]?.reconnectAttempts, 1, "…the answer it read");
             assert(feed.polling, "a served read keeps polling");
 
-            scheduler.tick();
+            scheduler.fire();
             // The tick's refresh is fire-and-forget; one microtask turn settles the resolved read.
             await Promise.resolve();
             await Promise.resolve();
             assertEqual(applied.length, 2, "the tick read too");
             assertEqual(applied[1], null, "…and applied the refusal (the field hides on it)");
             assert(!feed.polling, "a refusal self-stops the poll — no payoff in asking again");
-            assertEqual(scheduler.cleared, [7], "the interval was actually cleared");
+            assertEqual(scheduler.cleared, [1], "the interval was actually cleared");
         },
     },
     {
@@ -456,7 +430,7 @@ export const statusbarTests: TestCase[] = [
                 (state): void => {
                     applied.push(state);
                 },
-                manualScheduler(),
+                new ManualScheduler(),
             );
             const first = feed.refresh();
             const second = feed.refresh();

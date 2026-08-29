@@ -135,6 +135,15 @@ export const LABEL_PALETTE = "Command palette";
 /** The product name the title falls back to when no project name is known (the welcome screen). */
 export const DEFAULT_TITLE = "Context Editor";
 
+/**
+ * The ONE fallback rule for a project's display name: the product name when no project is known.
+ * The titlebar and the statusbar's project field both render THROUGH this, so the two spellings of
+ * "which name shows" cannot drift.
+ */
+export function projectDisplayName(projectName: string): string {
+    return projectName !== "" ? projectName : DEFAULT_TITLE;
+}
+
 // ------------------------------------------------------------------------------- the fact parser
 
 /** The `editor.ui.chrome` payload (chrome_facts.cpp): which window, and its new maximized state. */
@@ -348,7 +357,7 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
         doc,
         "span",
         TITLEBAR_TITLE_CLASS,
-        options.projectName !== "" ? options.projectName : DEFAULT_TITLE,
+        projectDisplayName(options.projectName),
     );
     drag.append(title);
     titlebar.append(drag);

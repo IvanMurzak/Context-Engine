@@ -13,7 +13,7 @@
 //      that rationale). The theme field rides the RETAINED `editor.ui.theme-changed` envelope
 //      (uibus.ts snapshot-on-subscribe), so subscribing after boot's theme apply is handed the
 //      current theme immediately. The project field is the SAME `welcome.state` projectName the
-//      titlebar renders, with the same fallback (chrome.ts DEFAULT_TITLE).
+//      titlebar renders, through the same fallback (chrome.ts projectDisplayName).
 //
 //   2. THE PROBLEMS COUNT IS DERIVED FROM THE HYDRATED PROBLEMS PANEL, editor-core's only view of
 //      the diagnostics feed. The C++ `ProblemsPanel` (problems_panel.cpp) receives the daemon's
@@ -40,7 +40,7 @@
 
 import { createBadge, TONE_ATTRIBUTE, type KitBadge, type SemanticTone } from "../../kit/src/index.js";
 import { DAEMON_OWNERSHIP_OWNED, type DaemonLinkState } from "./banners.js";
-import { DEFAULT_TITLE } from "./chrome.js";
+import { projectDisplayName } from "./chrome.js";
 import { NODE_ID_ATTRIBUTE } from "./hydration.js";
 import { defaultSessionScheduler, type SessionScheduler } from "./session.js";
 import type { ThemeChangedPayload } from "./theme.js";
@@ -85,10 +85,17 @@ export const PROBLEMS_ROW_NODE_ID_PREFIX = "problems.row.";
  * (problems_panel.cpp `build_panel`), so counting rows IS counting diagnostics.
  */
 export function problemsCountFrom(doc: Document): number | null {
-    const list = doc.querySelector(`[${NODE_ID_ATTRIBUTE}="${PROBLEMS_LIST_NODE_ID}"]`);
+    const list = doc.querySelector(PROBLEMS_LIST_SELECTOR);
     if (list === null) {
         return null;
     }
+    return problemsRowCount(list);
+}
+
+const PROBLEMS_LIST_SELECTOR = `[${NODE_ID_ATTRIBUTE}="${PROBLEMS_LIST_NODE_ID}"]`;
+
+/** Count a mounted problems list's rows (one row per diagnostic, the C++ model's rendering rule). */
+function problemsRowCount(list: Element): number {
     return list.querySelectorAll(`[${NODE_ID_ATTRIBUTE}^="${PROBLEMS_ROW_NODE_ID_PREFIX}"]`).length;
 }
 
@@ -138,8 +145,6 @@ export interface MountStatusbarOptions {
 export interface StatusbarMount {
     /** Render a `daemon.linkState` answer. `null` (no surface) hides the field. Idempotent. */
     applyLink(link: DaemonLinkState | null): void;
-    /** Render a problems count. `null` (no mounted Problems panel) hides the field. Idempotent. */
-    applyProblems(count: number | null): void;
     /** Render the active theme's display name. `""` (no theme engine) hides the field. Idempotent. */
     applyTheme(name: string): void;
     /** Re-derive the problems count from the document the strip lives in (fact 2 above). */
@@ -206,9 +211,10 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
     const projectField = el("span", STATUSBAR_PROJECT_CLASS);
     projectField.setAttribute("role", "group");
     projectField.title = LABEL_PROJECT;
-    // The titlebar's exact fallback rule (chrome.ts): the product name when no project is known —
-    // the welcome screen's state, and an older Shell with no welcome surface.
-    const projectText = options.projectName !== "" ? options.projectName : DEFAULT_TITLE;
+    // The titlebar's exact fallback rule — literally its function (chrome.ts): the product name
+    // when no project is known — the welcome screen's state, and an older Shell with no welcome
+    // surface.
+    const projectText = projectDisplayName(options.projectName);
     projectField.textContent = projectText;
     projectField.setAttribute("aria-label", `${LABEL_PROJECT}: ${projectText}`);
     slot.append(projectField);
@@ -217,6 +223,7 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
     let renderedLink = "";
     let renderedProblems: number | null = null;
     let renderedTheme = "";
+    let problemsList: Element | null = null;
     const report = (): void => {
         doc.documentElement.setAttribute(
             STATUSBAR_ATTRIBUTE,
@@ -227,7 +234,24 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
     };
     report();
 
-    const mount: StatusbarMount = {
+    // Render a problems count; `null` (no mounted Problems panel) hides the field. Idempotent.
+    // Module-local by design: every caller reaches it through `refreshProblems`' derivation, so a
+    // count the DOM does not back cannot be applied — the honesty rule, enforced by surface.
+    const applyProblems = (count: number | null): void => {
+        if (count === renderedProblems) {
+            return;
+        }
+        renderedProblems = count;
+        if (count === null) {
+            problems.hidden = true;
+        } else {
+            problems.hidden = false;
+            problemsBadge.setLabel(problemsLabel(count));
+        }
+        report();
+    };
+
+    return {
         applyLink: (state: DaemonLinkState | null): void => {
             // Compared on the RENDERED label (tone derives from the same table row), so a poll
             // tick that read the same state repaints nothing and the live badge stays silent.
@@ -247,19 +271,6 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
             }
             report();
         },
-        applyProblems: (count: number | null): void => {
-            if (count === renderedProblems) {
-                return;
-            }
-            renderedProblems = count;
-            if (count === null) {
-                problems.hidden = true;
-            } else {
-                problems.hidden = false;
-                problemsBadge.setLabel(problemsLabel(count));
-            }
-            report();
-        },
         applyTheme: (name: string): void => {
             if (name === renderedTheme) {
                 return;
@@ -275,10 +286,17 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
             report();
         },
         refreshProblems: (): void => {
-            mount.applyProblems(problemsCountFrom(doc));
+            // O(1) on the steady 500ms tick (boot's runtime tick drives this for the life of the
+            // window): the document-wide list lookup re-runs only while no mounted list is cached.
+            // A panel re-render REPLACES the node (`isConnected` flips false), so the next tick
+            // re-resolves; a closed panel keeps the cache empty — exactly the `null` the field
+            // hides on.
+            if (problemsList === null || !problemsList.isConnected) {
+                problemsList = doc.querySelector(PROBLEMS_LIST_SELECTOR);
+            }
+            applyProblems(problemsList === null ? null : problemsRowCount(problemsList));
         },
     };
-    return mount;
 }
 
 /**

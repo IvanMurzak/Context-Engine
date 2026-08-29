@@ -393,7 +393,10 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // when the Shell actually serves it — the session feed's bargain); the theme rides the
         // retained `theme-changed` envelope; the project is the titlebar's own `welcome.state`
         // name. The problems count arrives later, on the editor path's panel refresh tick (d2's
-        // hook in startPanels). NEVER fatal, like every boot feed.
+        // hook in startPanels). NEVER fatal, like every boot feed. The slot is looked up directly
+        // rather than through `findChromeStripElements`: that lookup is all-or-nothing over the
+        // full strip set, and the statusbar mounts even in a frame where a sibling strip is
+        // missing.
         let statusbarMount: StatusbarMount | undefined;
         try {
             const statusbarSlot =
@@ -1268,7 +1271,9 @@ async function startWindowMechanism(
                 // plus a DOM replace), so a diagnostic that moved the model on this tick is usually
                 // counted on the NEXT one; the unconditional re-derivation is what makes the count
                 // converge rather than needing the settle.
-                // Cheap: one scoped querySelectorAll plus the mount's unchanged short-circuit.
+                // Cheap: the mount caches the list node (the document-wide lookup re-runs only
+                // while none is cached), so the steady tick pays a scoped row count plus the
+                // unchanged short-circuit.
                 void host.pollRevisions().then((): void => {
                     statusbar?.refreshProblems();
                 });
