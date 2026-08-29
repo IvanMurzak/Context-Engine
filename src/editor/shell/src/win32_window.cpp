@@ -190,6 +190,29 @@ HANDLE per_monitor_aware_v2_context()
     return reinterpret_cast<HANDLE>(static_cast<INT_PTR>(-4));
 }
 
+// This window's CURRENT dpi through the delay-load-tolerant table above — ONE statement of the
+// fallback policy (kReferenceDpi when GetDpiForWindow is unresolved) for every site that needs a
+// live answer: create()'s post-create correction and the b1 frame messages, which re-query rather
+// than read the tracked dpi_ because both WM_NCCALCSIZE and WM_GETMINMAXINFO are already sent
+// INSIDE CreateWindowExW, before create() has computed dpi_ at all.
+[[nodiscard]] UINT current_hwnd_dpi(HWND hwnd)
+{
+    const Win32DpiApi& api = win32_dpi_api();
+    return api.get_dpi_for_window != nullptr ? api.get_dpi_for_window(hwnd) : kReferenceDpi;
+}
+
+// A SCREEN-relative mouse lParam (the NC family's convention) decoded into the client space every
+// other pointer message — and the region map — is expressed in. The per-word sign extension is the
+// multi-monitor subtlety (coordinates left/above the primary are negative), stated once for
+// WM_NCHITTEST and the NC mouse family alike.
+[[nodiscard]] PointI screen_lparam_to_client(HWND hwnd, LPARAM lparam)
+{
+    POINT point{static_cast<int>(static_cast<std::int16_t>(LOWORD(lparam))),
+                static_cast<int>(static_cast<std::int16_t>(HIWORD(lparam)))};
+    ::ScreenToClient(hwnd, &point);
+    return PointI{point.x, point.y};
+}
+
 [[nodiscard]] std::wstring widen(std::string_view utf8)
 {
     if (utf8.empty())
@@ -501,11 +524,8 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
         {
             break;
         }
-        const Win32DpiApi& api = win32_dpi_api();
-        const UINT dpi_now =
-            api.get_dpi_for_window != nullptr ? api.get_dpi_for_window(hwnd) : kReferenceDpi;
-        const Win32FrameInsets insets =
-            win32_frameless_client_insets(::IsZoomed(hwnd) != FALSE, make_dpi_scale(dpi_now));
+        const Win32FrameInsets insets = win32_frameless_client_insets(
+            ::IsZoomed(hwnd) != FALSE, make_dpi_scale(current_hwnd_dpi(hwnd)));
         rect->left += insets.left;
         rect->top += insets.top;
         rect->right -= insets.right;
@@ -527,16 +547,13 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
         {
             break; // no monitor to ask: the OS defaults beat a guess
         }
-        const Win32DpiApi& api = win32_dpi_api();
-        const UINT dpi_now =
-            api.get_dpi_for_window != nullptr ? api.get_dpi_for_window(hwnd) : kReferenceDpi;
         const Win32MaxGeometry geometry = win32_frameless_max_geometry(
             PointI{monitor_info.rcWork.left - monitor_info.rcMonitor.left,
                    monitor_info.rcWork.top - monitor_info.rcMonitor.top},
             render::Extent2D{
                 static_cast<std::uint32_t>(monitor_info.rcWork.right - monitor_info.rcWork.left),
                 static_cast<std::uint32_t>(monitor_info.rcWork.bottom - monitor_info.rcWork.top)},
-            make_dpi_scale(dpi_now));
+            make_dpi_scale(current_hwnd_dpi(hwnd)));
         info->ptMaxPosition.x = geometry.position.x;
         info->ptMaxPosition.y = geometry.position.y;
         info->ptMaxSize.x = static_cast<LONG>(geometry.size.width);
@@ -548,11 +565,8 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
     {
         // Decided by the pure hit_test_frame over the pushed-down chrome regions (02 §3). The
         // lParam is SCREEN-relative — the one conversion this OS-side arm owns.
-        POINT point{static_cast<int>(static_cast<std::int16_t>(LOWORD(lparam))),
-                    static_cast<int>(static_cast<std::int16_t>(HIWORD(lparam)))};
-        ::ScreenToClient(hwnd, &point);
-        return hit_test_frame(PointI{point.x, point.y}, size_, dpi_, ::IsZoomed(hwnd) != FALSE,
-                              chrome_regions_);
+        return hit_test_frame(screen_lparam_to_client(hwnd, lparam), size_, dpi_,
+                              ::IsZoomed(hwnd) != FALSE, chrome_regions_);
     }
     case WM_NCMOUSEMOVE:
     case WM_NCLBUTTONDOWN:
@@ -567,10 +581,7 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
         PointI position{};
         if (message != WM_NCMOUSELEAVE)
         {
-            POINT point{static_cast<int>(static_cast<std::int16_t>(LOWORD(lparam))),
-                        static_cast<int>(static_cast<std::int16_t>(HIWORD(lparam)))};
-            ::ScreenToClient(hwnd, &point);
-            position = PointI{point.x, point.y};
+            position = screen_lparam_to_client(hwnd, lparam);
         }
         const std::int32_t hit =
             message == WM_NCMOUSELEAVE ? kHtNowhere : static_cast<std::int32_t>(wparam);
@@ -755,11 +766,7 @@ bool Win32WindowBackend::create(const WindowDesc& desc, std::string& error)
     }
     hwnd_ = hwnd;
 
-    if (api.get_dpi_for_window != nullptr)
-    {
-        initial_dpi = api.get_dpi_for_window(hwnd_);
-    }
-    dpi_ = make_dpi_scale(initial_dpi);
+    dpi_ = make_dpi_scale(current_hwnd_dpi(hwnd_));
 
     // b1: re-assert a dark-mode choice recorded before this window existed (today the appearance
     // report always arrives after boot, but the ordering must not be load-bearing).

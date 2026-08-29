@@ -107,6 +107,18 @@ inline constexpr std::uint64_t kMkMButton = 0x0010;
     return event;
 }
 
+// The pointer-leave shape, shared by the kWmMouseLeave decode and the b1 NC-synthesized leave —
+// ONE constructor, so the browser cannot tell a "left the NC controls" from a "left the client
+// area" by construction rather than by hand-synced copies.
+[[nodiscard]] ShellEvent make_leave_event(const Win32ModifierState& keys)
+{
+    ShellEvent event;
+    event.kind = ShellEventKind::pointer;
+    event.pointer.action = PointerAction::leave;
+    event.pointer.modifiers = make_key_modifiers(keys);
+    return event;
+}
+
 } // namespace
 
 // ------------------------------------------------------------------------------- IWindowBackend
@@ -257,13 +269,7 @@ std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
     case kWmMButtonDblClk:
         return make_pointer_event(PointerAction::down, MouseButton::middle, message, keys, 2);
     case kWmMouseLeave:
-    {
-        ShellEvent event;
-        event.kind = ShellEventKind::pointer;
-        event.pointer.action = PointerAction::leave;
-        event.pointer.modifiers = make_key_modifiers(keys);
-        return event;
-    }
+        return make_leave_event(keys);
     case kWmMouseWheel:
     case kWmMouseHWheel:
     {
@@ -314,12 +320,14 @@ std::optional<ShellEvent> translate_win32_message(const Win32Message& message,
 namespace
 {
 
-// A 96-dpi metric scaled to `dpi`, round-to-nearest — the same arithmetic dpi.cpp's to_physical
-// uses, inlined over ints so a border can never round differently from the insets built on it.
+// A 96-dpi metric scaled to `dpi` through the Shell's ONE rounding policy (dpi.cpp's
+// round-to-nearest, via to_physical_point) — so a frame border can never round differently from
+// any other DPI-scaled quantity in the Shell, pointer conversion included. Exact by construction
+// for these metrics: every halfway case of 8/16 over the clamped DPI range is exactly
+// representable in the float path, so this equals the plain-integer form digit for digit.
 [[nodiscard]] std::int32_t scale_frame_metric(std::int32_t at_96, DpiScale dpi)
 {
-    return static_cast<std::int32_t>(
-        (static_cast<std::int64_t>(at_96) * dpi.dpi + kReferenceDpi / 2) / kReferenceDpi);
+    return to_physical_point(PointI{at_96, 0}, dpi).x;
 }
 
 // SM_CXSIZEFRAME + SM_CXPADDEDBORDER at the 96-dpi reference (4 + 4). One constant, deliberately,
@@ -348,17 +356,6 @@ inline constexpr std::int32_t kResizeCorner96 = 16;
     event.pointer.position = position;
     event.pointer.modifiers = make_key_modifiers(keys);
     event.pointer.modifiers.left_button_down = left_down;
-    return event;
-}
-
-// The synthesized mouse-leave: byte-for-byte the shape kWmMouseLeave decodes to, so the browser
-// cannot tell a "left the NC controls" from a "left the client area".
-[[nodiscard]] ShellEvent make_nc_leave_event(const Win32ModifierState& keys)
-{
-    ShellEvent event;
-    event.kind = ShellEventKind::pointer;
-    event.pointer.action = PointerAction::leave;
-    event.pointer.modifiers = make_key_modifiers(keys);
     return event;
 }
 
@@ -410,69 +407,35 @@ std::int32_t hit_test_frame(PointI point, render::Extent2D client_size, DpiScale
 
     // Resize bands FIRST — but only restored: a maximized window cannot be edge-resized, and
     // keeping bands there would steal the top rows of the caption for a grip that does nothing.
-    if (!maximized)
+    // The bands are the l/r/b NC strips OUTSIDE the client rect the insets carved, plus the top
+    // band: the first `border` rows INSIDE the client (there is no top NC strip to put it in —
+    // the top inset is zero), which win over the caption AND the controls, the same priority a
+    // stock titlebar's top edge has. Within a band, a point within `corner` of either end
+    // resolves to the diagonal — ONE statement of the corner rule for all four strips, sound
+    // because band membership already implies the matching zone (x < 0 lands in the left `corner`,
+    // y >= height in the bottom one, ...) for any client taller and wider than `corner`, which
+    // the OS minimum track size guarantees.
+    if (!maximized && (point.y >= height || point.x < 0 || point.x >= width ||
+                       point.y < win32_resize_border_thickness(dpi)))
     {
-        const std::int32_t border = win32_resize_border_thickness(dpi);
         const std::int32_t corner = win32_resize_corner_extent(dpi);
-        if (point.y >= height)
+        const bool near_left = point.x < corner;
+        const bool near_right = point.x >= width - corner;
+        if (point.y < corner)
         {
-            // The bottom NC strip (and, at its ends, the bottom corners — an x outside the client
-            // is by construction within `corner` of the matching edge, so the diagonal wins there).
-            if (point.x < corner)
-            {
-                return kHtBottomLeft;
-            }
-            if (point.x >= width - corner)
-            {
-                return kHtBottomRight;
-            }
-            return kHtBottom;
+            return near_left ? kHtTopLeft : near_right ? kHtTopRight : kHtTop;
         }
-        if (point.x < 0)
+        if (point.y >= height - corner)
         {
-            // The left NC strip.
-            if (point.y < corner)
-            {
-                return kHtTopLeft;
-            }
-            if (point.y >= height - corner)
-            {
-                return kHtBottomLeft;
-            }
-            return kHtLeft;
+            return near_left ? kHtBottomLeft : near_right ? kHtBottomRight : kHtBottom;
         }
-        if (point.x >= width)
-        {
-            // The right NC strip.
-            if (point.y < corner)
-            {
-                return kHtTopRight;
-            }
-            if (point.y >= height - corner)
-            {
-                return kHtBottomRight;
-            }
-            return kHtRight;
-        }
-        if (point.y < border)
-        {
-            // The top band: the first `border` rows INSIDE the client (there is no top NC strip to
-            // put it in — the top inset is zero). It wins over the caption AND the controls, the
-            // same priority a stock titlebar's top edge has.
-            if (point.x < corner)
-            {
-                return kHtTopLeft;
-            }
-            if (point.x >= width - corner)
-            {
-                return kHtTopRight;
-            }
-            return kHtTop;
-        }
+        return near_left ? kHtLeft : kHtRight;
     }
 
     // Then the published chrome regions, by the map's own back-to-front last-match-wins — a control
-    // published after the caption wins over it with no carve-out token (input.h).
+    // published after the caption wins over it with no carve-out token (input.h). Exhaustive over
+    // RegionKind with no default arm, so -Wswitch makes a future kind's frame answer a deliberate
+    // choice here (its InputArbiter routing gets the same treatment in input.cpp's target_for).
     if (const ShellRegion* hit = regions.hit_test(point))
     {
         switch (hit->kind)
@@ -487,9 +450,8 @@ std::int32_t hit_test_frame(PointI point, render::Extent2D client_size, DpiScale
             return kHtClose;
         case RegionKind::viewport:
         case RegionKind::native:
-        default:
             // Client content: its routing is the InputArbiter's concern, not the OS frame's.
-            return kHtClient;
+            break;
         }
     }
     return kHtClient;
@@ -503,7 +465,25 @@ Win32NcMouseDecision translate_win32_nc_mouse(std::uint32_t message, std::int32_
     Win32NcMouseDecision decision;
     decision.hover = hover_live;
     decision.pressed = pressed_live;
+    if (message != kWmNcMouseMove && message != kWmNcLButtonDown &&
+        message != kWmNcLButtonDblClk && message != kWmNcLButtonUp && message != kWmNcMouseLeave)
+    {
+        return decision; // not the NC mouse family's: nothing forwarded, nothing consumed
+    }
+
+    // The hover/leave choreography, stated ONCE for the whole family: after any family message the
+    // forwarded-hover state is simply "is the pointer over a control NOW" (kWmNcMouseLeave's
+    // caller pins its hit to kHtNowhere, so a leave always clears it), and sliding off the
+    // controls — onto the caption, the bands, or off the window — synthesizes the leave a
+    // client-area exit would have produced, or the last hovered button stays lit (ROADMAP risk
+    // 3). A case below only ever ADDS its own forwarded event on top; the up overwrites the leave
+    // slot deliberately — "release wherever it lands" supersedes the goodbye.
     const bool control = is_caption_control_hit(hit_code);
+    decision.hover = control;
+    if (hover_live && !control)
+    {
+        decision.event = make_leave_event(keys);
+    }
 
     switch (message)
     {
@@ -514,14 +494,6 @@ Win32NcMouseDecision translate_win32_nc_mouse(std::uint32_t message, std::int32_
             // (the Snap Layouts flyout timing rides it) keeps running.
             decision.event =
                 make_nc_pointer_event(PointerAction::move, client_position, keys, pressed_live);
-            decision.hover = true;
-        }
-        else if (hover_live)
-        {
-            // Slid off the controls onto the caption/bands: synthesize the leave a client-area
-            // exit would have produced, or the last hovered button stays lit (ROADMAP risk 3).
-            decision.event = make_nc_leave_event(keys);
-            decision.hover = false;
         }
         break;
     case kWmNcLButtonDown:
@@ -533,14 +505,8 @@ Win32NcMouseDecision translate_win32_nc_mouse(std::uint32_t message, std::int32_
             // tracking can never fire the system command a web button is about to dispatch.
             decision.event = make_nc_pointer_event(PointerAction::down, client_position, keys, true,
                                                    message == kWmNcLButtonDblClk ? 2 : 1);
-            decision.hover = true;
             decision.pressed = true;
             decision.consume = true;
-        }
-        else if (hover_live)
-        {
-            decision.event = make_nc_leave_event(keys);
-            decision.hover = false;
         }
         break;
     case kWmNcLButtonUp:
@@ -548,32 +514,16 @@ Win32NcMouseDecision translate_win32_nc_mouse(std::uint32_t message, std::int32_
         {
             // Release a forwarded press WHEREVER it lands — a browser holding a phantom pressed
             // button would drag-select from the next hover. Consumed: the press never reached
-            // DefWindowProc, so the release is not its to interpret either.
+            // DefWindowProc, so the release is not its to interpret either. (Without a live
+            // forwarded press there is nothing to close — a release whose press predates the
+            // region publish, or was the OS's to track, forwards nothing; the hoisted rule above
+            // still records where the pointer is.)
             decision.event = make_nc_pointer_event(PointerAction::up, client_position, keys, false);
             decision.pressed = false;
-            decision.hover = control;
             decision.consume = true;
         }
-        else if (control)
-        {
-            // A release whose press predates the region publish (or was the OS's to track): no
-            // event to forward, but the pointer IS over a control now.
-            decision.hover = true;
-        }
-        else if (hover_live)
-        {
-            decision.event = make_nc_leave_event(keys);
-            decision.hover = false;
-        }
         break;
-    case kWmNcMouseLeave:
-        if (hover_live)
-        {
-            decision.event = make_nc_leave_event(keys);
-            decision.hover = false;
-        }
-        break;
-    default:
+    default: // kWmNcMouseLeave: the hoisted choreography above is the whole behaviour
         break;
     }
     return decision;

@@ -45,9 +45,12 @@ namespace
         return InputTarget::browser;
     case RegionKind::caption:
     case RegionKind::native:
-    default:
         return InputTarget::native;
     }
+    // Exhaustive above with no default arm, so -Wswitch makes a future kind's routing a deliberate
+    // choice here (its OS-frame answer gets the same treatment in window.cpp's hit_test_frame);
+    // an out-of-range value still lands on the suppressing native arm.
+    return InputTarget::native;
 }
 
 } // namespace

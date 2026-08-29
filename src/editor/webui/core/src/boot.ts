@@ -319,7 +319,11 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // subscribing here — after startTheme's boot apply above — is handed the current appearance
         // immediately, and a live Dark → Light toggle re-reports through the same listener.
         // Fire-and-forget by design: the client is refusal-tolerant, and a frame tint must never
-        // gate the boot.
+        // gate the boot. The ternary below is NOT a redundant re-derivation of the payload's
+        // already-closed "dark" | "light" type: it is boot's only PRODUCTION value-reference to
+        // the two token constants, which is what keeps them in the shipped bundle for
+        // check_webui_assets' cross-check — a test-only reference gets tree-shaken out (the
+        // WELCOME_MODE_PROJECT precedent in that gate's own comments).
         if (theme !== undefined) {
             theme.bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, (event): void => {
                 void chromeClient.setAppearance(
