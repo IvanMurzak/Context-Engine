@@ -170,15 +170,12 @@ void binds_every_hostable_panel_and_nothing_else()
     // reachable path (R-CLI-001).
     CHECK(host.hosts("builtin.session.undo"));
 
-    // THE e1 RETIREMENT, pinned both ways (D2 — the strip is the Play Bar's only home): the docked
-    // playbar is not hosted, not claimed hostable, and not even ON the roster any more — so the
-    // hydration runtime cannot reach it through any `panel.*` verb.
+    // THE e1 RETIREMENT, pinned (D2 — the strip is the Play Bar's only home): the docked playbar is
+    // not hosted and not even ON the roster any more — so the hydration runtime cannot reach it
+    // through any `panel.*` verb. (Non-membership in `hostable_panel_ids()` follows: every id in
+    // that list was asserted hosted above, and this one is not.)
     CHECK(!host.hosts("builtin.playbar"));
     CHECK(!host.knows("builtin.playbar"));
-    for (const std::string& id : panels::hostable_panel_ids())
-    {
-        CHECK(id != "builtin.playbar");
-    }
 
     // The feed owners came back, so every provider's captures stay alive.
     CHECK(bound.problems != nullptr);

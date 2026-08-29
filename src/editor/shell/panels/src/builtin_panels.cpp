@@ -688,8 +688,9 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         // wired when both bound, so a dangling capture cannot survive this scope.
 
         // e08b: point the session feed at the panel whose rendered selection it drives. Done AFTER
-        // the move, so the pointer is into the feed that will actually live in the bag.
-        if (out.session != nullptr && out.scenetree != nullptr)
+        // the move, so the pointer is into the feed that will actually live in the bag. (The feed
+        // itself is unconditional since e1 — only the Scene tree's binding can have been refused.)
+        if (out.scenetree != nullptr)
         {
             out.session->bind_scene_tree(&out.scenetree->panel(),
                                          gui::panels::scenetree::SceneTreePanel::kContributionId);

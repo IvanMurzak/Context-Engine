@@ -398,7 +398,7 @@ int main()
     // model+RPC path (`SessionFeed::control` -> `PlaybarModel` -> `editor.play|pause|stop|step`).
     // This leg therefore RE-POINTS at that surviving truth: the model-over-gateway transitions below
     // ARE the walkthrough's "play it", and the retired dock surface leaves the rendered-panel sweep
-    // at the end (the strip's own DOM a11y is the `webui-ts-*` browser tier's gate).
+    // at the end (see the sweep's own note).
     WalkthroughSession session;
     session.drawables = 4;
     session.directional_lights = 1;
