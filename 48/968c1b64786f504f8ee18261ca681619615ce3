@@ -1,0 +1,46 @@
+src/editor/shell/smoke/shell_cocoa_smoke_main.cpp
+  s_7b2854368302f3::t_2143e3e36d00a1 1035-1036
+  s_7b2854368302f3::t_984e031b8e78b2 986-1018
+src/editor/webui/core/src/test/chrome.test.ts
+  s_7b2854368302f3::t_7559f87415f201 743-750
+  s_7b2854368302f3::t_6a24bcfc9f9163 73
+  s_7b2854368302f3::t_50f5787524f32c 33,46
+  s_7b2854368302f3::t_b7a81816461d17 713-742,751-840,846-976
+  s_7b2854368302f3::t_695c279f81f46f 841-845
+src/editor/shell/cef/src/cef_shell_tearout_smoke.cpp
+  s_7b2854368302f3::t_3f33f1e30c8824 62
+  s_7b2854368302f3::t_5348bef6e43263 710-711
+  s_7b2854368302f3::t_449867f7c9a9e4 683-697
+  s_7b2854368302f3::t_5df74a1102e5e0 257-261
+  s_7b2854368302f3::t_c9965a5b40a2a6 23-31
+  s_7b2854368302f3::t_a5bbb189ac3a8e 537-629
+  s_7b2854368302f3::t_bd9dad1010bb0f 237-249
+src/editor/webui/core/src/boot.ts
+  s_2b64e2b4bfc410::t_b403f78bf38f9a 602-611
+src/editor/webui/core/src/chrome.ts
+  s_7b2854368302f3::t_469d5aa8b105be 36-46,65,93-94,238-243,306-309,315,339-350,352,359-371,435-445,452-454,681-689,691
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "48968c1b64786f504f8ee18261ca681619615ce3",
+  "prompts": {},
+  "sessions": {
+    "s_2b64e2b4bfc410": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "00f09d59-c437-4bad-8764-2e7ced0ebc74",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_7b2854368302f3": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "099f6f0a-9cbe-4dea-b36d-40f90ef7646d",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
