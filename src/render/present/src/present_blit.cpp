@@ -80,6 +80,28 @@ BlitPlan compute_blit_plan(Extent2D src, Extent2D dst)
     return plan;
 }
 
+BlitBars compute_blit_bars(const BlitPlan& plan, Extent2D dst)
+{
+    BlitBars bars;
+    if (plan.empty)
+    {
+        return bars;
+    }
+    // compute_blit_plan guarantees plan.{x,y} >= 0 and plan.{x,y} + plan.{width,height} <= dst, so
+    // every subtraction below is non-negative.
+    const auto plan_x = static_cast<std::uint32_t>(plan.x);
+    const auto plan_y = static_cast<std::uint32_t>(plan.y);
+    const std::uint32_t plan_right = plan_x + plan.width;
+    const std::uint32_t plan_bottom = plan_y + plan.height;
+    // Top and bottom span the FULL width; left and right fill only the rows beside the image, so
+    // the four never overlap and together tile exactly the uncovered area.
+    bars.top = Rect2D{Origin2D{0, 0}, Extent2D{dst.width, plan_y}};
+    bars.bottom = Rect2D{Origin2D{0, plan_bottom}, Extent2D{dst.width, dst.height - plan_bottom}};
+    bars.left = Rect2D{Origin2D{0, plan_y}, Extent2D{plan_x, plan.height}};
+    bars.right = Rect2D{Origin2D{plan_right, plan_y}, Extent2D{dst.width - plan_right, plan.height}};
+    return bars;
+}
+
 std::uint32_t blit_source_index(std::uint32_t offset_in_plan, std::uint32_t src_extent,
                                 std::uint32_t plan_extent)
 {
@@ -145,10 +167,21 @@ bool MemoryBlitter::blit(const BlitImage& src, Extent2D dst)
     target_.resize(static_cast<std::size_t>(dst.width) * dst.height * 4u);
     if (plan.letterboxed)
     {
-        // Only a letterboxed present leaves pixels the loop below does not write — the bars. An
-        // unconditional zero-fill would memset the entire target every frame and then overwrite all
-        // of it, which at 2560x1440 is ~15 MB of dead writes per paint.
-        std::fill(target_.begin(), target_.end(), std::uint8_t{0});
+        // Only a letterboxed present leaves pixels the loop below does not write — the bars — and
+        // exactly those are zeroed, through the same compute_blit_bars the GDI path fills, so this
+        // oracle pins the bar geometry the OS blitters draw. (A whole-target fill would also be
+        // ~15 MB of dead writes per paint at 2560x1440.)
+        const BlitBars bars = compute_blit_bars(plan, dst);
+        for (const Rect2D* bar : {&bars.top, &bars.bottom, &bars.left, &bars.right})
+        {
+            for (std::uint32_t y = 0; y < bar->size.height; ++y)
+            {
+                std::uint8_t* row =
+                    target_.data() +
+                    (static_cast<std::size_t>(bar->origin.y + y) * dst.width + bar->origin.x) * 4u;
+                std::fill_n(row, static_cast<std::size_t>(bar->size.width) * 4u, std::uint8_t{0});
+            }
+        }
     }
     const auto* base = static_cast<const std::uint8_t*>(src.pixels);
 
@@ -236,11 +269,25 @@ public:
         info.bmiHeader.biBitCount = 32;
         info.bmiHeader.biCompression = BI_RGB;
 
-        // Bars first, so a letterboxed present does not leave the previous frame's edges on screen.
+        // Bars first, so a letterboxed present does not leave the previous frame's edges on screen —
+        // and ONLY the bars. GDI is immediate-mode: a full-surface FillRect here, followed by the
+        // StretchDIBits below, is two operations DWM can compose between, and it did — the editor
+        // flashed black at the paint rate whenever a frame was one pixel off the window
+        // (2026-08-29). The bars never overlap the image, so filling them cannot flash.
         if (plan.letterboxed)
         {
-            RECT full{0, 0, static_cast<LONG>(dst.width), static_cast<LONG>(dst.height)};
-            ::FillRect(dc, &full, static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH)));
+            const BlitBars bars = compute_blit_bars(plan, dst);
+            for (const Rect2D* bar : {&bars.top, &bars.bottom, &bars.left, &bars.right})
+            {
+                if (bar->size.width == 0 || bar->size.height == 0)
+                {
+                    continue;
+                }
+                RECT rect{static_cast<LONG>(bar->origin.x), static_cast<LONG>(bar->origin.y),
+                          static_cast<LONG>(bar->origin.x + bar->size.width),
+                          static_cast<LONG>(bar->origin.y + bar->size.height)};
+                ::FillRect(dc, &rect, static_cast<HBRUSH>(::GetStockObject(BLACK_BRUSH)));
+            }
         }
 
         ::SetStretchBltMode(dc, HALFTONE);

@@ -21,6 +21,16 @@
 //     never REQUIRES a GPU" mechanized rather than aspirational. The popup is composited into the
 //     view buffer on the CPU first, so the fallback is not silently popup-less.
 //
+// THE 1:1 RULE (both paths). The CEF layer is presented at ONE TEXEL PER PIXEL, anchored at the
+// window's origin and cropped by the window's edge; whatever the frame does not reach shows the
+// clear colour. It is never scaled to fit. The browser paints ceil(DIP × scale) physical pixels for
+// a DIP view rect that is itself a rounding of the client, so on a non-integral scale the frame is
+// routinely one pixel wider or taller than the window — and in the transient after a resize it lags
+// the window by a whole paint. Fitting such a frame (an aspect-preserving blit on the CPU path, a
+// whole-rect stretch on the GPU path) resampled every glyph, drew a 1px bar, and on GDI flashed the
+// whole window black before each present (2026-08-29). Cropping is what a native toolkit does; the
+// pixel the crop drops is the rounding remainder, never content.
+//
 // REDRAW IS DAMAGE-DRIVEN, not a frame loop. Engine render rate is decoupled from CEF's paint rate
 // (measured in the spike), so an undamaged frame is SKIPPED rather than re-presented — a shell that
 // presented unconditionally would burn a GPU queue submit per vsync on a completely static editor.
