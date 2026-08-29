@@ -1,0 +1,32 @@
+.github/actions/windows-python/action.yml
+  s_e41fb4e3d28067::t_13a55431aff259 1-100
+cmake/ContextPython.cmake
+  s_e41fb4e3d28067::t_f9f29c04316a5b 1-48
+tools/tests/test_context_python_cmake.py
+  s_e41fb4e3d28067::t_923ba264789b2f 1-88
+docs/self-hosted-runners.md
+  s_e41fb4e3d28067::t_13bf5d0f339728 125-170
+  s_e41fb4e3d28067::t_f0c69b0327488a 89-91
+.github/actions/pinned-toolchain/action.yml
+  s_e41fb4e3d28067::t_9b9db162f7dbf4 130-134,136-138
+.github/workflows/ci.yml
+  s_e41fb4e3d28067::t_6a1094afd42674 180-186,435-441,827-833,906-912,1057-1063,1243-1249,1850-1856,1958-1964
+src/CMakeLists.txt
+  s_e41fb4e3d28067::t_b8771fe4482cce 137-143
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "449d46ae1479137dfa4be9d90996bd4ab925a8fb",
+  "prompts": {},
+  "sessions": {
+    "s_e41fb4e3d28067": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a85e025-6cd0-47d4-9438-1cffcaf6f151",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
