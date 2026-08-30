@@ -286,6 +286,73 @@ NativeWindowDesc native_window(NativeWindowKind kind, void* handle, void* displa
     return native;
 }
 
+// ------------------------------------------------------------------------------------- the bars
+
+// The bars of a plan, checked structurally: pairwise disjoint, disjoint from the plan rect, and
+// tiling exactly the uncovered area — so a blitter that fills precisely these can neither flash a
+// pixel the image is about to cover nor leave a stale one beside it.
+void check_bars_tile_the_uncovered_surface(Extent2D src_size, Extent2D dst_size)
+{
+    const BlitPlan plan = compute_blit_plan(src_size, dst_size);
+    const BlitBars bars = compute_blit_bars(plan, dst_size);
+    const Rect2D* rects[] = {&bars.top, &bars.bottom, &bars.left, &bars.right};
+    const Rect2D image{Origin2D{static_cast<std::uint32_t>(plan.x),
+                                static_cast<std::uint32_t>(plan.y)},
+                       Extent2D{plan.width, plan.height}};
+    const auto overlap = [](const Rect2D& a, const Rect2D& b) {
+        if (a.size.width == 0 || a.size.height == 0 || b.size.width == 0 || b.size.height == 0)
+        {
+            return false;
+        }
+        return a.origin.x < b.origin.x + b.size.width && b.origin.x < a.origin.x + a.size.width &&
+               a.origin.y < b.origin.y + b.size.height && b.origin.y < a.origin.y + a.size.height;
+    };
+    std::uint64_t bar_area = 0;
+    for (const Rect2D* bar : rects)
+    {
+        CHECK(!overlap(*bar, image));
+        CHECK(bar->origin.x + bar->size.width <= dst_size.width);
+        CHECK(bar->origin.y + bar->size.height <= dst_size.height);
+        bar_area += static_cast<std::uint64_t>(bar->size.width) * bar->size.height;
+        for (const Rect2D* other : rects)
+        {
+            CHECK(bar == other || !overlap(*bar, *other));
+        }
+    }
+    const std::uint64_t dst_area = static_cast<std::uint64_t>(dst_size.width) * dst_size.height;
+    const std::uint64_t image_area = static_cast<std::uint64_t>(plan.width) * plan.height;
+    CHECK(bar_area == dst_area - image_area);
+    CHECK(plan.letterboxed == (bar_area != 0));
+}
+
+void test_bars_tile_exactly_the_uncovered_surface()
+{
+    // The 1:1 case (what the Shell hands every blitter in steady state): no bars at all.
+    const BlitBars none = compute_blit_bars(compute_blit_plan(Extent2D{800, 600}, Extent2D{800, 600}),
+                                            Extent2D{800, 600});
+    CHECK(none.top.size.height == 0 && none.bottom.size.height == 0);
+    CHECK(none.left.size.width == 0 && none.right.size.width == 0);
+    // The DPI-rounding shape that flashed the editor: one column wider than the window → a 1px
+    // bar along the BOTTOM (the fit keeps the width, drops a row) and nothing anywhere else.
+    const BlitPlan one_wider = compute_blit_plan(Extent2D{1502, 827}, Extent2D{1501, 827});
+    CHECK(one_wider.letterboxed);
+    const BlitBars bottom_only = compute_blit_bars(one_wider, Extent2D{1501, 827});
+    CHECK(bottom_only.bottom.origin.y == 826 && bottom_only.bottom.size.height == 1);
+    CHECK(bottom_only.bottom.size.width == 1501);
+    CHECK(bottom_only.top.size.height == 0 && bottom_only.left.size.width == 0 &&
+          bottom_only.right.size.width == 0);
+    // Letterbox (wide source), pillarbox (tall source), and an odd remainder that centres unevenly.
+    check_bars_tile_the_uncovered_surface(Extent2D{400, 200}, Extent2D{400, 400});
+    check_bars_tile_the_uncovered_surface(Extent2D{200, 400}, Extent2D{400, 400});
+    check_bars_tile_the_uncovered_surface(Extent2D{1000, 1}, Extent2D{10, 10});
+    check_bars_tile_the_uncovered_surface(Extent2D{1502, 828}, Extent2D{1501, 827});
+    check_bars_tile_the_uncovered_surface(Extent2D{7, 5}, Extent2D{16, 16});
+    // An empty plan clears nothing: four empty rects.
+    const BlitBars empty = compute_blit_bars(BlitPlan{}, Extent2D{10, 10});
+    CHECK(empty.top.size.height == 0 && empty.bottom.size.height == 0 &&
+          empty.left.size.width == 0 && empty.right.size.width == 0);
+}
+
 void test_platform_selection_is_never_silent()
 {
     int window = 0;
@@ -405,6 +472,7 @@ int main()
     test_memory_blit_refuses_malformed_input();
     test_refused_blit_drops_the_previous_frame();
     test_repack_tight_removes_row_padding();
+    test_bars_tile_exactly_the_uncovered_surface();
     test_platform_selection_is_never_silent();
     RENDER_TEST_MAIN_END();
 }

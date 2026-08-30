@@ -78,6 +78,25 @@ struct BlitPlan
 
 [[nodiscard]] BlitPlan compute_blit_plan(Extent2D src, Extent2D dst);
 
+// The destination rects a plan leaves UNCOVERED — the letterbox / pillarbox bars — as four
+// non-overlapping rects that together tile exactly `dst` minus the plan rect. A side with no bar is
+// an empty rect; an empty plan yields four empty rects (nothing is drawn, so nothing is cleared).
+//
+// Why bars rather than "clear the surface, then draw": on an IMMEDIATE-MODE primitive (GDI) those
+// are two separate operations the compositor can show in between, so a full-surface clear before
+// every letterboxed present is a black flash at the paint rate — measured on the editor
+// (2026-08-29) once a DPI-rounding remainder made every frame one pixel wider than the window.
+// Filling only the bars never touches a pixel the image is about to cover, so nothing can flash.
+struct BlitBars
+{
+    Rect2D top;
+    Rect2D bottom;
+    Rect2D left;
+    Rect2D right;
+};
+
+[[nodiscard]] BlitBars compute_blit_bars(const BlitPlan& plan, Extent2D dst);
+
 // The nearest-neighbour source index for one axis: floor(offset * src_extent / plan_extent), clamped
 // to the last source texel. `offset_in_plan` is measured from the plan's origin, so a caller
 // iterating DESTINATION space passes `x - plan.x` while one iterating plan space passes `x`.
@@ -112,7 +131,7 @@ public:
     [[nodiscard]] const char* name() const override { return "memory"; }
     bool blit(const BlitImage& src, Extent2D dst) override;
 
-    // The composed surface (RGBA8, target_size()), with untouched bar regions left at zero.
+    // The composed surface (RGBA8, target_size()), with the bar regions (compute_blit_bars) zeroed.
     [[nodiscard]] const std::vector<std::uint8_t>& target() const { return target_; }
     [[nodiscard]] Extent2D target_size() const { return target_size_; }
     [[nodiscard]] const BlitPlan& last_plan() const { return last_plan_; }

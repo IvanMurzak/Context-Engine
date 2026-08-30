@@ -519,14 +519,149 @@ void test_cpu_path_composes_and_presents_through_the_blitter()
     CHECK(raw->blit_count() == 1);
     CHECK(shelltest::extent_eq(raw->target_size(), render::Extent2D{200, 100}));
 
-    // The composed surface carries the browser's pixels — this is the "software-OSR path works"
-    // assertion, at the level of actual bytes.
+    // The composed surface is WINDOW-sized (the 1:1 rule) and carries the browser's pixels from
+    // the origin — this is the "software-OSR path works" assertion, at the level of actual bytes.
     const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
-    CHECK(surface.size() == static_cast<std::size_t>(100) * 50 * 4);
+    CHECK(surface.size() == static_cast<std::size_t>(200) * 100 * 4);
     CHECK(surface[0] == 10);
     CHECK(surface[1] == 20);
     CHECK(surface[2] == 30);
     CHECK(surface[3] == 255);
+    // ...and the blit was 1:1, never an aspect fit of a smaller image.
+    CHECK(!raw->last_plan().letterboxed);
+}
+
+// A coordinate-encoding view frame (B = x, G = y) so a crop, an offset or a scale is identifiable.
+BrowserFrame make_coordinate_view_frame(std::vector<std::uint8_t>& storage, render::Extent2D size)
+{
+    storage.assign(static_cast<std::size_t>(size.width) * size.height * 4u, 0u);
+    for (std::uint32_t y = 0; y < size.height; ++y)
+    {
+        for (std::uint32_t x = 0; x < size.width; ++x)
+        {
+            std::uint8_t* p = storage.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
+            p[0] = static_cast<std::uint8_t>(x);
+            p[1] = static_cast<std::uint8_t>(y);
+            p[2] = 0x7F;
+            p[3] = 0xFF;
+        }
+    }
+    BrowserFrame frame;
+    frame.layer = BrowserLayer::view;
+    frame.frame.pixels = storage.data();
+    frame.frame.byte_size = storage.size();
+    frame.frame.bytes_per_row = size.width * 4u;
+    frame.frame.coded_size = size;
+    frame.frame.visible_rect = render::Rect2D{render::Origin2D{}, size};
+    return frame;
+}
+
+[[nodiscard]] const std::uint8_t* surface_px(const std::vector<std::uint8_t>& surface,
+                                             render::Extent2D size, std::uint32_t x,
+                                             std::uint32_t y)
+{
+    return surface.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
+}
+
+void test_cpu_path_presents_the_view_1_to_1_cropped_to_the_window()
+{
+    // THE DPI-ROUNDING SHAPE: the browser painted one pixel more than the client on both axes
+    // (ceil(DIP × 1.5) against a round-to-nearest DIP rect). The frame is CROPPED, never fitted:
+    // every window pixel is the frame's pixel at the same coordinate, the extra column and row are
+    // dropped, and the blitter sees an image of exactly the window's size — the plant that reddens
+    // this is the old aspect-fit compose (surface 5x4, plan letterboxed, a black bar on screen).
+    WindowCompositor compositor(software_config());
+    auto blitter = std::make_unique<present::MemoryBlitter>();
+    present::MemoryBlitter* raw = blitter.get();
+    const render::Extent2D window{4, 3};
+    compositor.attach_cpu(std::move(blitter), window);
+
+    std::vector<std::uint8_t> storage;
+    compositor.on_browser_frame(make_coordinate_view_frame(storage, render::Extent2D{5, 4}));
+    CHECK(compositor.render_frame());
+
+    const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
+    CHECK(surface.size() == static_cast<std::size_t>(4) * 3 * 4);
+    CHECK(surface_px(surface, window, 0, 0)[0] == 0 && surface_px(surface, window, 0, 0)[1] == 0);
+    CHECK(surface_px(surface, window, 3, 2)[0] == 3 && surface_px(surface, window, 3, 2)[1] == 2);
+    CHECK(surface_px(surface, window, 3, 2)[3] == 0xFF);
+    CHECK(shelltest::extent_eq(raw->target_size(), window));
+    CHECK(!raw->last_plan().letterboxed);
+    CHECK(raw->last_plan().width == 4 && raw->last_plan().height == 3);
+}
+
+void test_cpu_path_fills_an_uncovered_remainder_with_the_clear_colour()
+{
+    // The transient after a resize: the window grew, the browser has not repainted yet, so its
+    // frame is SMALLER than the window. The frame still lands 1:1 at the origin (no stretch, no
+    // centring) and the strip it does not reach is the clear colour — opaque black, so nothing of
+    // the desktop and nothing of a previous frame shows through.
+    WindowCompositor compositor(software_config());
+    auto blitter = std::make_unique<present::MemoryBlitter>();
+    present::MemoryBlitter* raw = blitter.get();
+    const render::Extent2D window{4, 3};
+    compositor.attach_cpu(std::move(blitter), window);
+
+    std::vector<std::uint8_t> storage;
+    compositor.on_browser_frame(make_coordinate_view_frame(storage, render::Extent2D{3, 2}));
+    CHECK(compositor.render_frame());
+
+    const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
+    CHECK(surface.size() == static_cast<std::size_t>(4) * 3 * 4);
+    // Covered: the frame's own pixel at the same coordinate.
+    CHECK(surface_px(surface, window, 2, 1)[0] == 2 && surface_px(surface, window, 2, 1)[1] == 1);
+    // Uncovered column and row: the clear colour, premultiplied BGRA (0, 0, 0, 255).
+    const std::uint8_t* right = surface_px(surface, window, 3, 0);
+    CHECK(right[0] == 0 && right[1] == 0 && right[2] == 0 && right[3] == 0xFF);
+    const std::uint8_t* below = surface_px(surface, window, 0, 2);
+    CHECK(below[0] == 0 && below[1] == 0 && below[2] == 0 && below[3] == 0xFF);
+    // And the blit is still the identity — the CLEAR is what fills the window, never a fit.
+    CHECK(!raw->last_plan().letterboxed);
+}
+
+void test_gpu_path_draws_the_view_1_to_1_cropped_to_the_window()
+{
+    rendertest::FakeDevice device;
+    rendertest::FakeSurface surface(rendertest::fake_default_surface_caps());
+    WindowCompositor compositor(software_config());
+    CHECK(compositor.attach_gpu(device, surface, render::Extent2D{800, 600}));
+
+    // The same DPI-rounding shape on the GPU path: one pixel more than the client on both axes.
+    std::vector<std::uint8_t> storage;
+    compositor.on_browser_frame(make_view_frame(storage, render::Extent2D{1024, 1024},
+                                                shelltest::rect(0, 0, 801, 601), 0, 0, 0, 255));
+    CHECK(compositor.render_frame());
+
+    const rendertest::FakePassLog& log = device.pass_log();
+    CHECK(log.draws == 1);
+    CHECK(log.scissors.size() == 1u);
+    CHECK(shelltest::rect_eq(log.scissors[0], shelltest::rect(0, 0, 800, 600)));
+    // ONE TEXEL PER PIXEL: the window's 800 columns span 800/1024 of the allocation — not the
+    // 801/1024 a whole-visible-rect stretch uploads, which is the plant that reddens this line.
+    CHECK(log.buffer_writes.size() == 1u);
+    CHECK(log.buffer_writes[0].size() == sizeof(present::CompositeUv));
+    present::CompositeUv uv;
+    std::memcpy(&uv, log.buffer_writes[0].data(), sizeof(uv));
+    CHECK(shelltest::near_eq(uv.u0, 0.0f));
+    CHECK(shelltest::near_eq(uv.v0, 0.0f));
+    CHECK(shelltest::near_eq(uv.u1, 800.0f / 1024.0f));
+    CHECK(shelltest::near_eq(uv.v1, 600.0f / 1024.0f));
+
+    // A frame SMALLER than the window (the post-resize transient) is drawn 1:1 too: the SCISSOR
+    // shrinks to the frame and the rest keeps the pass clear, rather than the frame being stretched.
+    // The uploaded UV is still the window's one-texel-per-pixel mapping (compute_layer_uv
+    // extrapolates it across the whole target so the interpolation is right INSIDE the scissor) —
+    // a stretch would upload 799/1024 here.
+    std::vector<std::uint8_t> smaller;
+    compositor.on_browser_frame(make_view_frame(smaller, render::Extent2D{1024, 1024},
+                                                shelltest::rect(0, 0, 799, 599), 0, 0, 0, 255));
+    CHECK(compositor.render_frame());
+    CHECK(log.scissors.size() == 2u);
+    CHECK(shelltest::rect_eq(log.scissors[1], shelltest::rect(0, 0, 799, 599)));
+    CHECK(log.buffer_writes.size() == 2u);
+    std::memcpy(&uv, log.buffer_writes[1].data(), sizeof(uv));
+    CHECK(shelltest::near_eq(uv.u1, 800.0f / 1024.0f));
+    CHECK(shelltest::near_eq(uv.v1, 600.0f / 1024.0f));
 }
 
 void test_cpu_path_composites_the_popup_rather_than_skipping_it()
@@ -648,6 +783,9 @@ int main()
     test_suboptimal_presents_first_then_reconfigures();
     test_attach_gpu_refuses_an_unpresentable_surface();
     test_cpu_path_composes_and_presents_through_the_blitter();
+    test_cpu_path_presents_the_view_1_to_1_cropped_to_the_window();
+    test_cpu_path_fills_an_uncovered_remainder_with_the_clear_colour();
+    test_gpu_path_draws_the_view_1_to_1_cropped_to_the_window();
     test_cpu_path_composites_the_popup_rather_than_skipping_it();
     test_cpu_path_without_a_blitter_is_reported_not_silent();
     test_a_malformed_producer_frame_is_refused();

@@ -119,9 +119,21 @@ The promise is "the editor UI never REQUIRES a GPU". When `can_present` is false
 swapchain and no composite pass; the Shell blits the software-OSR buffer through an OS 2D primitive
 and viewport panels draw their diagnostic placeholder.
 
+**The compositor hands every blitter an image of EXACTLY the window's size** (compositor.h § the
+1:1 rule): the view frame is composed one texel per pixel from the window's origin, cropped by the
+window's edge, with the clear colour wherever the frame does not reach. A blitter's aspect-fit plan
+is therefore the identity in steady state — no bars, no resample — and the letterbox arithmetic
+below is a defence of the primitive, not a state the Shell produces. That rule exists because the
+browser paints `ceil(DIP × scale)` physical pixels: on a non-integral scale the frame is routinely
+one pixel wider or taller than the client, and fitting it drew a 1px bar, resampled every glyph, and
+on GDI cleared the whole window to black before each present — the editor "flickering" at the paint
+rate (2026-08-29).
+
 `present/present_blit.h` lands the seam plus the **Windows GDI** implementation (`StretchDIBits` into
-the window DC, top-down DIB, tight repack for a padded stride, bars filled before a letterboxed
-present) and, since **e12a**, the **X11** one (`XShmPutImage` through a MIT-SHM `XImage`, degrading to
+the window DC, top-down DIB, tight repack for a padded stride, and — for a letterboxed present —
+ONLY the bars filled beforehand, through the same `compute_blit_bars` the portable oracle zeroes: a
+full-surface clear is a second immediate-mode operation the compositor can show, i.e. a flash) and,
+since **e12a**, the **X11** one (`XShmPutImage` through a MIT-SHM `XImage`, degrading to
 `XPutImage` where the server refuses shared memory). Since **e12b** it also lands the **macOS** one
 (`present_blit_mac.mm`: a CGImage assigned to `CALayer.contents`, implicit animations disabled by a
 `CATransaction` so a present does not cross-fade into the previous frame). All three v1 window

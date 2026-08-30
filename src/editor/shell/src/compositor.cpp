@@ -4,6 +4,8 @@
 #include "context/editor/shell/compositor.h"
 
 #include <algorithm>
+#include <array>
+#include <cmath>
 #include <cstring>
 #include <utility>
 
@@ -14,6 +16,18 @@ namespace
 
 using render::present::clip_rect;
 using render::present::CompositeUv;
+
+// The clear colour as one premultiplied BGRA8 texel — what the CPU path writes where the view frame
+// does not reach, matching the GPU path's pass clear.
+[[nodiscard]] std::array<std::uint8_t, 4> premultiplied_bgra8(const render::Color& colour)
+{
+    const double alpha = std::clamp(colour.a, 0.0, 1.0);
+    const auto channel = [alpha](double value) {
+        return static_cast<std::uint8_t>(std::lround(std::clamp(value, 0.0, 1.0) * alpha * 255.0));
+    };
+    return {channel(colour.b), channel(colour.g), channel(colour.r),
+            static_cast<std::uint8_t>(std::lround(alpha * 255.0))};
+}
 
 // A producer frame's visible area inside its OWN allocation, clipped to that allocation.
 //
@@ -491,14 +505,24 @@ bool WindowCompositor::render_gpu_frame()
         }
     }
 
-    // 3. the full-window CEF layer.
+    // 3. the CEF layer, 1:1 (compositor.h § the 1:1 rule): its visible rect is drawn from the
+    //    window's origin at one texel per pixel and CROPPED by the window edge — dst and src share
+    //    the fitted extent, so compute_layer_uv maps texels onto pixels one-for-one and the scissor
+    //    is the crop; whatever the frame does not reach keeps the pass clear. Sampling the whole
+    //    visible rect across the whole window instead resampled the UI by the DPI-rounding
+    //    remainder (up to a pixel per axis) and softened every glyph on the far half of the window.
     if (have_view_frame_ && view_importer_.texture() != nullptr)
     {
         view_layer = view_importer_.texture()->create_view();
         if (view_layer != nullptr)
         {
-            const render::Rect2D whole{render::Origin2D{}, size_};
-            if (draw_layer(*pass, whole, *view_layer, view_visible_rect_, view_coded_size_, slot))
+            const render::Rect2D visible = visible_within(view_visible_rect_, view_coded_size_);
+            const render::Extent2D fit{std::min(visible.size.width, size_.width),
+                                       std::min(visible.size.height, size_.height)};
+            const render::Rect2D dst{render::Origin2D{}, fit};
+            const render::Rect2D src{visible.origin, fit};
+            if (!render::is_empty(fit) &&
+                draw_layer(*pass, dst, *view_layer, src, view_coded_size_, slot))
             {
                 ++slot;
             }
@@ -547,31 +571,53 @@ bool WindowCompositor::render_cpu_frame()
         return false;
     }
 
-    // Compose in WINDOW space: the view frame's VISIBLE area only, tightly packed, then blit.
+    // Compose in WINDOW space, at the WINDOW'S size, with the view frame 1:1 (compositor.h § the
+    // 1:1 rule): the frame's VISIBLE pixels land on the window's pixels one-for-one from the
+    // origin, a frame wider or taller than the window is CROPPED by its edge, and any part of the
+    // window the frame does not reach is the clear colour — the two answers the GPU path gives
+    // through its scissor and pass clear. The blitter therefore always receives an image of EXACTLY
+    // the window's size, so its aspect-fit plan is the identity: no bars, no resample.
     //
-    // Composing the whole coded allocation instead would present the allocation's unused margin
-    // stretched across the window, and would offset the popup — whose rect is in WINDOW
-    // coordinates — by the visible rect's origin. This mirrors the GPU path, which samples exactly
-    // visible_rect via compute_layer_uv. The popup is composited HERE rather than skipped, so the
-    // GPU-less fallback is not silently popup-less.
+    // Why the size matters: on a non-integral DPI scale the browser paints ceil(DIP × scale)
+    // physical pixels — up to one more than the client on either axis, for two widths in three at
+    // 150%. Handing that frame to the aspect-fit blit put a 1px black bar on screen, resampled the
+    // whole UI through HALFTONE, and on GDI cleared the ENTIRE window to black before every present,
+    // which read as the editor flickering at the paint rate (2026-08-29).
+    //
+    // Composing the whole coded allocation instead would present the allocation's unused margin,
+    // and would offset the popup — whose rect is in WINDOW coordinates — by the visible rect's
+    // origin. The popup is composited HERE rather than skipped, so the GPU-less fallback is not
+    // silently popup-less.
     const render::Rect2D view_visible = visible_within(cpu_view_.visible_rect, cpu_view_.coded_size);
     if (render::is_empty(view_visible.size))
     {
         return false;
     }
-    const std::uint32_t stride = view_visible.size.width * 4u;
-    // resize, not assign: the loop below writes every byte, so zero-filling first is a full-surface
-    // memset of dead writes per presented frame (~8 MB at 1080p). Same rule present_blit.cpp states
-    // for its own repack.
-    cpu_surface_.resize(static_cast<std::size_t>(stride) * view_visible.size.height);
-    for (std::uint32_t y = 0; y < view_visible.size.height; ++y)
+    const std::uint32_t stride = size_.width * 4u;
+    // resize, not assign: the loop below writes every byte (copied or cleared), so zero-filling
+    // first is a full-surface memset of dead writes per presented frame (~8 MB at 1080p). Same rule
+    // present_blit.cpp states for its own repack.
+    cpu_surface_.resize(static_cast<std::size_t>(stride) * size_.height);
+    const std::uint32_t copy_width = std::min(view_visible.size.width, size_.width);
+    const std::uint32_t copy_height = std::min(view_visible.size.height, size_.height);
+    const std::array<std::uint8_t, 4> clear = premultiplied_bgra8(config_.clear);
+    for (std::uint32_t y = 0; y < size_.height; ++y)
     {
-        const std::uint8_t* src = cpu_view_.pixels.data() +
-                                  static_cast<std::size_t>(view_visible.origin.y + y) *
-                                      cpu_view_.bytes_per_row +
-                                  static_cast<std::size_t>(view_visible.origin.x) * 4u;
         std::uint8_t* dst = cpu_surface_.data() + static_cast<std::size_t>(y) * stride;
-        std::memcpy(dst, src, stride);
+        std::uint32_t x = 0;
+        if (y < copy_height)
+        {
+            const std::uint8_t* src = cpu_view_.pixels.data() +
+                                      static_cast<std::size_t>(view_visible.origin.y + y) *
+                                          cpu_view_.bytes_per_row +
+                                      static_cast<std::size_t>(view_visible.origin.x) * 4u;
+            std::memcpy(dst, src, static_cast<std::size_t>(copy_width) * 4u);
+            x = copy_width;
+        }
+        for (; x < size_.width; ++x)
+        {
+            std::memcpy(dst + static_cast<std::size_t>(x) * 4u, clear.data(), clear.size());
+        }
     }
 
     if (popup_visible_ && have_popup_frame_ && cpu_popup_.valid &&
@@ -591,8 +637,8 @@ bool WindowCompositor::render_cpu_frame()
                 cpu_popup_.pixels.data() +
                 static_cast<std::size_t>(popup_visible.origin.y) * cpu_popup_.bytes_per_row +
                 static_cast<std::size_t>(popup_visible.origin.x) * 4u;
-            blend_premultiplied_bgra(cpu_surface_.data(), view_visible.size, stride, popup_src,
-                                     popup_size, cpu_popup_.bytes_per_row, popup_rect_.origin);
+            blend_premultiplied_bgra(cpu_surface_.data(), size_, stride, popup_src, popup_size,
+                                     cpu_popup_.bytes_per_row, popup_rect_.origin);
             ++stats_.popup_draws;
         }
     }
@@ -604,7 +650,7 @@ bool WindowCompositor::render_cpu_frame()
     render::present::BlitImage image;
     image.pixels = cpu_surface_.data();
     image.byte_size = cpu_surface_.size();
-    image.size = view_visible.size;
+    image.size = size_;
     image.bytes_per_row = stride;
     return blitter_->blit(image, size_);
 }
