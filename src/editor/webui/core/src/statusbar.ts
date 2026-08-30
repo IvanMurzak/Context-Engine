@@ -50,6 +50,7 @@ import { UI_TOPIC_THEME_CHANGED, type EditorUiBus, type EditorUiSubscription } f
 
 export const STATUSBAR_LINK_CLASS = "ctx-statusbar__link";
 export const STATUSBAR_DOT_CLASS = "ctx-statusbar__dot";
+export const STATUSBAR_LINK_COUNT_CLASS = "ctx-statusbar__link-count";
 export const STATUSBAR_PROBLEMS_CLASS = "ctx-statusbar__problems";
 export const STATUSBAR_FILL_CLASS = "ctx-statusbar__fill";
 export const STATUSBAR_THEME_CLASS = "ctx-statusbar__theme";
@@ -65,14 +66,13 @@ export const LABEL_THEME = "Active theme";
 export const LABEL_PROJECT = "Project";
 
 // ------------------------------------------------------------------------- the problems node ids
-// MIRROR `problems_panel.cpp`'s uitree node ids (`build_panel`): the list container and the
-// per-diagnostic row prefix. ⚠ MIRRORED, NOT GATED: unlike the banners vocabulary (which
-// `check_webui_assets.py --welcome-contract` byte-compares against banners.h in the built bundle),
-// NOTHING cross-checks these two constants against the C++ side — the tests below build their
-// fixtures from these same constants, so they stay green across a C++ rename. The C++ half is
-// pinned on its own side (`problems_feed.h kProblemsRowPrefix` + the gui/shell suites), so a rename
-// there reds C++ first; until a contract-gate entry exists, a rename that slips through hides the
-// count field (honestly, via the `null` path below) with every JS test green.
+// MIRROR `problems_panel.h`'s uitree node ids (`kProblemsListNodeId` / `kProblemsRowNodeIdPrefix`,
+// the ids `build_panel` gives the list container and every diagnostic row) — and GATED: the
+// `webui-panel-contract` ctest (`check_webui_assets.py --panel-contract`, PROBLEMS_CONSTANTS)
+// byte-compares both against the C++ header in the built bundle, so a rename on either side is a
+// red check. That gate exists because the tests below build their fixtures from these same
+// constants and so stay green across a C++ rename, which would otherwise hide the count field
+// (honestly, via the `null` path below) with every JS test green (d2 review 3c).
 
 export const PROBLEMS_LIST_NODE_ID = "problems.list";
 export const PROBLEMS_ROW_NODE_ID_PREFIX = "problems.row.";
@@ -109,10 +109,16 @@ export function problemsLabel(count: number): string {
 
 // --------------------------------------------------------------------------- the link presentation
 
-/** What the link field renders for one `daemon.linkState` answer — dot tone + label, in one table. */
+/**
+ * What the link field renders for one `daemon.linkState` answer — dot tone + label + count, in one
+ * table. `label` is the STATE word and is the only part the live region carries; `count` is the
+ * reconnect-attempt counter (`"(3)"`, or `""`) rendered beside it OUTSIDE the live region, so a
+ * ladder counting up is one announcement ("Reconnecting"), not one per attempt (d2 review 3b).
+ */
 export interface LinkPresentation {
     readonly tone: SemanticTone;
     readonly label: string;
+    readonly count: string;
 }
 
 /**
@@ -125,13 +131,20 @@ export interface LinkPresentation {
  */
 export function linkPresentation(link: DaemonLinkState): LinkPresentation {
     if (!link.readOnly) {
-        return { tone: "good", label: "Live" };
+        return { tone: "good", label: "Live", count: "" };
     }
     if (link.reconnectAttempts > 0) {
         const verb = link.ownership === DAEMON_OWNERSHIP_OWNED ? "Reconnecting" : "Waiting";
-        return { tone: "wait", label: `${verb} (${String(link.reconnectAttempts)})` };
+        return { tone: "wait", label: verb, count: `(${String(link.reconnectAttempts)})` };
     }
-    return { tone: "warn", label: "Read-only" };
+    return { tone: "warn", label: "Read-only", count: "" };
+}
+
+/** The label and the count as one string — what the report attribute and a sighted user read. */
+export function linkText(presentation: LinkPresentation): string {
+    return presentation.count === ""
+        ? presentation.label
+        : `${presentation.label} ${presentation.count}`;
 }
 
 // ------------------------------------------------------------------------------- the strip mount
@@ -168,11 +181,15 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
         return node;
     };
 
-    // --- the daemon-link field: dot + live badge -------------------------------------------------
+    // --- the daemon-link field: dot + live badge + count -----------------------------------------
     // A labelled GROUP (the banners worked example's ARIA discipline): "Live" alone is ambiguous to
     // a screen reader browsing the strip; the group says what the value belongs to. The dot is
     // DECORATION (aria-hidden, styled off `data-tone` in app.css); the badge is the live kit
-    // primitive — a link transition is a legitimate, rare announcement.
+    // primitive — a link transition is a legitimate, rare announcement. The attempt COUNT is a
+    // plain span OUTSIDE the live region (d2 review 3b): it is inside the group, so a screen reader
+    // browsing the strip still reads "Daemon link, Reconnecting, (3)", but a ladder counting up
+    // through its backoff steps (200 ms → 5 s) no longer produces an announcement per step —
+    // only the state word is live, and it changes once per transition.
     const link = el("span", STATUSBAR_LINK_CLASS);
     link.setAttribute("role", "group");
     link.setAttribute("aria-label", LABEL_LINK);
@@ -180,7 +197,9 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
     const dot = el("span", STATUSBAR_DOT_CLASS);
     dot.setAttribute("aria-hidden", "true");
     const linkBadge: KitBadge = createBadge({ label: "", tone: "idle", live: true });
-    link.append(dot, linkBadge.element);
+    const linkCount = el("span", STATUSBAR_LINK_COUNT_CLASS);
+    linkCount.hidden = true;
+    link.append(dot, linkBadge.element, linkCount);
     slot.append(link);
 
     // --- the problems field: a live badge --------------------------------------------------------
@@ -221,6 +240,7 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
 
     // --- the render state + report ---------------------------------------------------------------
     let renderedLink = "";
+    let renderedLinkLabel = "";
     let renderedProblems: number | null = null;
     let renderedTheme = "";
     let problemsList: Element | null = null;
@@ -253,10 +273,10 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
 
     return {
         applyLink: (state: DaemonLinkState | null): void => {
-            // Compared on the RENDERED label (tone derives from the same table row), so a poll
+            // Compared on the RENDERED text (tone derives from the same table row), so a poll
             // tick that read the same state repaints nothing and the live badge stays silent.
             const next = state === null ? null : linkPresentation(state);
-            const key = next === null ? "" : next.label;
+            const key = next === null ? "" : linkText(next);
             if (key === renderedLink) {
                 return;
             }
@@ -266,8 +286,17 @@ export function mountStatusbar(slot: HTMLElement, options: MountStatusbarOptions
             } else {
                 link.hidden = false;
                 dot.setAttribute(TONE_ATTRIBUTE, next.tone);
-                linkBadge.setLabel(next.label);
-                linkBadge.setTone(next.tone);
+                // The LIVE badge is written only when the state word itself changed: a ladder
+                // step (same word, next count) touches the count span alone, so the live region's
+                // text node stays untouched and nothing is re-announced (the 3b rule; the
+                // MutationObserver test pins it).
+                if (next.label !== renderedLinkLabel) {
+                    renderedLinkLabel = next.label;
+                    linkBadge.setLabel(next.label);
+                    linkBadge.setTone(next.tone);
+                }
+                linkCount.hidden = next.count === "";
+                linkCount.textContent = next.count;
             }
             report();
         },
@@ -321,14 +350,32 @@ export function subscribeStatusbarTheme(
 export const STATUSBAR_LINK_POLL_INTERVAL_MS = 1_000;
 
 /**
+ * The most ticks a faulting reader is skipped between retries: 1, 2, 4 ticks after the first,
+ * second and third consecutive fault, then this ceiling — 5 s between reads at the poll interval,
+ * the C++ reconnect ladder's own `max_ms` (daemon_lifecycle.h ReconnectPolicy).
+ */
+export const STATUSBAR_LINK_MAX_BACKOFF_TICKS = 5;
+
+/**
  * The link field's update channel: re-read `daemon.linkState` on a tick and apply the answer.
  *
  * A POLL, deliberately — the bridge accepts no persistent queries (fact 1 above), so link
  * transitions (a daemon lost mid-session, the reconnect ladder counting up, the link coming back)
- * can only be observed by asking again. SELF-STOPPING on a refusal, the session feed's rule: `null`
- * means the Shell does not serve the surface (an older build — the method cannot be withdrawn
- * mid-session by a Shell that has it), so a refusal per tick for the life of the window is a cost
- * with no possible payoff; the field is hidden by that same `null` and stays honest.
+ * can only be observed by asking again.
+ *
+ * TWO KINDS OF "NO ANSWER", told apart (d2 review 3a — `PackageEventPump.poll`'s refused/faults
+ * split):
+ *
+ *   * a REFUSAL (`null`): the Shell does not serve the surface — an older build; the method cannot
+ *     be withdrawn mid-session by a Shell that has it. SELF-STOPPING, the session feed's rule: a
+ *     refusal per tick for the life of the window is a cost with no possible payoff, and the field
+ *     is hidden by that same `null` and stays honest.
+ *   * a FAULT (the reader THROWS): one read failed — a transport hiccup, a malformed reply. The
+ *     C++ link machine underneath reconnects on its own (daemon_lifecycle.cpp), so the state will
+ *     be readable again; the field KEEPS its last state (hiding it would claim "no surface", which
+ *     is false) and the poll continues with exponential backoff, resetting on the next good read.
+ *     Before this split every fault was folded into a refusal, and a single lost query hid the
+ *     indicator for the life of the window — precisely while it had something to say.
  */
 export class StatusbarLinkFeed {
     readonly #read: () => Promise<DaemonLinkState | null>;
@@ -336,6 +383,10 @@ export class StatusbarLinkFeed {
     readonly #scheduler: SessionScheduler | undefined;
     #handle: number | null = null;
     #inFlight = false;
+    /** Consecutive faults so far; 0 after every successful read. */
+    #faults = 0;
+    /** Ticks still to skip before the next read after a fault. */
+    #skip = 0;
 
     constructor(
         read: () => Promise<DaemonLinkState | null>,
@@ -352,7 +403,15 @@ export class StatusbarLinkFeed {
         return this.#handle !== null;
     }
 
-    /** Read once and apply. A `null` answer stops the poll (see the class doc). Never throws. */
+    /** Consecutive reads that FAULTED (threw); 0 after a good read. The T1 tier's backoff observable. */
+    get faults(): number {
+        return this.#faults;
+    }
+
+    /**
+     * Read once and apply. A `null` answer (a refusal) stops the poll; a THROW (a fault) keeps the
+     * last applied state and arms the backoff — see the class doc. Never throws itself.
+     */
     async refresh(): Promise<void> {
         if (this.#inFlight) {
             return;
@@ -366,11 +425,15 @@ export class StatusbarLinkFeed {
                 // TOTAL, the `SessionFeed.refresh` rule: this method's steady caller is the timer
                 // tick's bare `void this.refresh()`, so an unguarded reject here is an unhandled
                 // rejection EVERY TICK in a renderer whose only diagnostic channel is a DOM
-                // attribute (`PanelHost.pollRevisions` documents the same hazard). A reader that
-                // THROWS (a broken transport) rather than answering `null` (a refusal) gets the
-                // same honest rendering: no source, hide the field, stop asking.
-                link = null;
+                // attribute (`PanelHost.pollRevisions` documents the same hazard). A fault applies
+                // NOTHING — the field keeps the last state it could vouch for — and schedules the
+                // next read further out: 1, 2, 4 … STATUSBAR_LINK_MAX_BACKOFF_TICKS ticks.
+                this.#faults += 1;
+                this.#skip = Math.min(2 ** (this.#faults - 1), STATUSBAR_LINK_MAX_BACKOFF_TICKS);
+                return;
             }
+            this.#faults = 0;
+            this.#skip = 0;
             this.#apply(link);
             if (link === null) {
                 this.stop();
@@ -386,6 +449,12 @@ export class StatusbarLinkFeed {
             return;
         }
         this.#handle = this.#scheduler.setInterval((): void => {
+            // The backoff is counted in TICKS of the one interval rather than re-armed as a new
+            // timer, so a fault never changes the handle the T1 tier and stop() observe.
+            if (this.#skip > 0) {
+                this.#skip -= 1;
+                return;
+            }
             void this.refresh();
         }, intervalMs);
     }

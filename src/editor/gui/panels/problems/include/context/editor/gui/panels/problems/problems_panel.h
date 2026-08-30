@@ -36,6 +36,15 @@ struct ProblemNavigation
 // R-A11Y-001 — every GUI action reachable without a pointer).
 inline constexpr const char* kNavigateCommand = "problems.navigate";
 
+// The uitree NODE IDS `build_panel` gives the diagnostic list and every diagnostic row
+// (`problems.row.<n>`, indexed in the model's grouped/row order). Named constants rather than
+// inline literals because two other places depend on the exact spelling: the Shell's row-id →
+// diagnostic resolver (`shell/panels/problems_feed.h`) and editor-core's statusbar, which COUNTS
+// the hydrated rows (`statusbar.ts`). The `webui-panel-contract` gate holds these against the TS
+// constants, so a rename on either side is a red check, not a count that silently reads zero.
+inline constexpr const char* kProblemsListNodeId = "problems.list";
+inline constexpr const char* kProblemsRowNodeIdPrefix = "problems.row.";
+
 class ProblemsPanel
 {
 public:

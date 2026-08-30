@@ -582,6 +582,14 @@ html[data-theme-transition="true"] * {
     height: 7px;
 }
 
+/* The reconnect-attempt count beside the link badge: a plain readout outside the live region
+ * (statusbar.ts § the daemon-link field), muted so the state word stays the thing you read first. */
+.ctx-statusbar__link-count {
+    color: var(--ctx-colors-muted, var(--editor-fg));
+    font-size: var(--ctx-typography-size-2xs, 11px);
+    font-variant-numeric: tabular-nums;
+}
+
 .ctx-statusbar__problems {
     flex: none;
 }

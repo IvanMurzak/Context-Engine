@@ -323,7 +323,9 @@ add_test(NAME webui-panel-contract
             --contract-include-dir
                 "${CMAKE_CURRENT_SOURCE_DIR}/../gui/contract/include/context/editor/gui/contract"
             --package-json "${_ctx_webui_core}/package.json"
-            --shell-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/src")
+            --shell-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/src"
+            --panels-include-dir
+                "${CMAKE_CURRENT_SOURCE_DIR}/../gui/panels/problems/include/context/editor/gui/panels/problems")
 
 # 1d) The e14c WELCOME CONTRACT gate. The welcome surface adds four `welcome.*` method names plus the
 # `welcome`/`project` mode tokens, each declared once in welcome.h (C++) and once in welcome.ts. A rename

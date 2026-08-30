@@ -88,9 +88,10 @@ parse_diagnostics_snapshot(const contract::Json& snapshot, std::uint64_t generat
 // ------------------------------------------------------------- the node-id -> diagnostic mapping
 
 // The prefix `ProblemsPanel::build_panel` gives every diagnostic row (`problems.row.<n>`, indexed in
-// the model's grouped/row order). Named here rather than spelled inline so the one place that
-// depends on it is greppable from both sides.
-inline constexpr const char* kProblemsRowPrefix = "problems.row.";
+// the model's grouped/row order) — the panel's OWN constant, not a second spelling of it, so the
+// resolver below and the panel cannot drift apart (problems_panel.h names the third consumer, the
+// statusbar's row count, and the gate that holds all of them together).
+inline constexpr const char* kProblemsRowPrefix = gui::panels::problems::kProblemsRowNodeIdPrefix;
 
 // Resolve an activated NODE id to the diagnostic identity `ProblemsPanel::navigate` expects.
 //

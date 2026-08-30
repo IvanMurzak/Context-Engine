@@ -242,7 +242,7 @@ uitree::Panel ProblemsPanel::build_panel() const
                        .set_label("Problems status")
                        .set_text(status_text(model, stability_, generation_)));
 
-    UiNode list(Role::list, "problems.list");
+    UiNode list(Role::list, kProblemsListNodeId);
     list.set_label("Problem list");
 
     std::size_t row_index = 0;
@@ -258,7 +258,7 @@ uitree::Panel ProblemsPanel::build_panel() const
 
         for (const ProblemDiagnostic& d : group.diagnostics)
         {
-            UiNode item(Role::listitem, "problems.row." + std::to_string(row_index));
+            UiNode item(Role::listitem, kProblemsRowNodeIdPrefix + std::to_string(row_index));
             ++row_index;
 
             // Accessible name: stable + navigation-independent, so it does not churn as the current
