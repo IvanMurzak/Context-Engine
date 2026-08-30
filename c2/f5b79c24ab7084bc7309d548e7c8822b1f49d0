@@ -1,0 +1,49 @@
+src/editor/shell/tests/test_cocoa_chrome.cpp
+  s_e41fb4e3d28067::t_538c526fa0b929 81,86-88,90-108
+  s_e41fb4e3d28067::t_b2547966a00059 15-19
+  s_e41fb4e3d28067::t_8a206e7c233e35 282-283
+src/editor/shell/include/context/editor/shell/cocoa_chrome.h
+  s_e41fb4e3d28067::t_2afe1619ff247d 57-64,67-83
+  s_e41fb4e3d28067::t_a33435d0e8c02c 37
+  s_e41fb4e3d28067::t_9355ed8431863f 9-12
+  s_e41fb4e3d28067::t_9b961761fdeb9e 110-112,116
+  s_e41fb4e3d28067::t_2cb8fd9428cf86 141-147
+  s_08cc1266f4dd6d::t_0969a7d2d1971c 84
+src/editor/shell/src/cocoa_window.cpp
+  s_e41fb4e3d28067::t_17f97a1badaac8 52-56
+src/editor/shell/src/cocoa_window.mm
+  s_e41fb4e3d28067::t_913740f25fcbb6 1028-1030,1032-1049,1051
+  s_e41fb4e3d28067::t_88118f91d8e6e4 1288-1303
+  s_e41fb4e3d28067::t_8b0f337c2e7e63 566,601
+src/editor/shell/smoke/shell_cocoa_smoke_main.cpp
+  s_e41fb4e3d28067::t_a817d2c177fccd 858-863
+  s_e41fb4e3d28067::t_df17ef102a6435 882,884,887-888
+docs/shell.md
+  s_e41fb4e3d28067::t_8dcf25468f98bd 347-356
+src/editor/shell/src/cocoa_chrome.cpp
+  s_e41fb4e3d28067::t_4325ea06c0a4f1 45-63
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c2f5b79c24ab7084bc7309d548e7c8822b1f49d0",
+  "prompts": {},
+  "sessions": {
+    "s_08cc1266f4dd6d": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7cefc1ab-00b7-4be9-99fc-ad9db138c73c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e41fb4e3d28067": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a85e025-6cd0-47d4-9438-1cffcaf6f151",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
