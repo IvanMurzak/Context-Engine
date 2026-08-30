@@ -1,0 +1,72 @@
+src/editor/webui/app/app.css
+  s_e41fb4e3d28067::t_2c756b74ff4c9a 585-592
+src/editor/shell/panels/include/context/editor/shell/panels/problems_feed.h
+  s_e41fb4e3d28067::t_88048ee9bba47f 91-94
+src/editor/webui/core/src/boot.ts
+  s_e41fb4e3d28067::t_862abcf647c674 426-428,430
+src/editor/webui/core/src/statusbar.ts
+  s_e41fb4e3d28067::t_ec1a667b7e0f74 406-414,428-433,435-436,452-457
+  s_e41fb4e3d28067::t_e84fc6156a71d8 112-117,121,352
+  s_e41fb4e3d28067::t_9c5c5d44860ff0 69-75
+  s_e41fb4e3d28067::t_7915ed8e85d695 134,138,140-147
+  s_e41fb4e3d28067::t_e12f8f3cb892dd 276,279,289-299
+  s_e41fb4e3d28067::t_36c3028f2dcbc5 353-358,364-378,386-389
+  s_e41fb4e3d28067::t_62778813458205 184,188-192,200-202
+  s_e41fb4e3d28067::t_3c4de51cc112a4 53
+  s_e41fb4e3d28067::t_b133b9351823a8 243
+src/editor/webui/CMakeLists.txt
+  s_e41fb4e3d28067::t_eee8c44a103a79 326-328
+src/editor/webui/core/src/test/statusbar.test.ts
+  s_e41fb4e3d28067::t_85e946fc711f2b 162,167-168,174,179,182-187
+  s_e41fb4e3d28067::t_4ca7ae5f2c6614 23-24,30
+  s_e41fb4e3d28067::t_c925d5f829eeac 284-334
+  s_e41fb4e3d28067::t_3d82ada6e326f6 490-566
+  s_e41fb4e3d28067::t_c096b076557dd8 203-205,208-219,224
+  s_e41fb4e3d28067::t_f83e0db9136aa3 283,489
+src/editor/webui/core/src/banners.ts
+  s_e41fb4e3d28067::t_7e47b2fc3d4a49 37-41
+  s_e41fb4e3d28067::t_8da207329426e7 149-168
+tools/tests/test_check_webui_assets.py
+  s_e41fb4e3d28067::t_8d561a741da6e4 1392-1393,1396-1397
+  s_e41fb4e3d28067::t_64fe4c5ce8b792 862-865,869,873-874,876-905
+  s_e41fb4e3d28067::t_93f67fecf4e37e 1435-1436,1444,1449,1452-1453
+  s_e41fb4e3d28067::t_bd219879a98d06 827,829
+  s_e41fb4e3d28067::t_c61901f4203d17 1474-1484
+  s_e41fb4e3d28067::t_29e3e0b81daddf 619-627
+src/editor/gui/panels/problems/include/context/editor/gui/panels/problems/problems_panel.h
+  s_e41fb4e3d28067::t_55738bd8e826ed 39-47
+tools/check_webui_assets.py
+  s_e41fb4e3d28067::t_6d203c14edd263 1339,1347-1348,1354
+  s_e41fb4e3d28067::t_69f1423e9c9b4c 1459-1463
+  s_e41fb4e3d28067::t_af013afd74a307 1473
+  s_e41fb4e3d28067::t_254a2c7b49aa04 1019,1028-1041
+  s_e41fb4e3d28067::t_564680d8c73dc4 359-372
+  s_c6111c1b4eea44::t_88344bba6f6954 1042
+src/editor/gui/panels/problems/src/problems_panel.cpp
+  s_e41fb4e3d28067::t_dc68a298599b3b 245
+  s_e41fb4e3d28067::t_540f816b6ebec1 261
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "383bdaeb1a68d4e7965f43937e0597ef7461ad87",
+  "prompts": {},
+  "sessions": {
+    "s_c6111c1b4eea44": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "369c91b6-a98c-419d-9c29-8920732d17b7",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_e41fb4e3d28067": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7a85e025-6cd0-47d4-9438-1cffcaf6f151",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
