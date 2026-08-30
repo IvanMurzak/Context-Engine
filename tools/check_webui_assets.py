@@ -356,6 +356,20 @@ CHROME_CONSTANTS = (
     ("editor.ui menu topic", "menu_facts.h", "kUiTopicMenu", "UI_TOPIC_MENU"),
 )
 
+# The Problems panel's uitree NODE IDS (editor-window-chrome d2 review 3c), whose C++ home is the
+# gui panel's own header (problems_panel.h — read from --panels-include-dir, a THIRD include root:
+# the panel is a gui package, not a Shell bridge) and whose TS mirror is statusbar.ts. A different
+# failure mode from every surface above: nothing is ROUTED by these — the statusbar COUNTS the
+# hydrated rows by them. A rename on the C++ side keeps every C++ suite green (they pin the panel's
+# own constant) and every TS suite green (its fixtures are built from the TS constant), and the
+# count field simply hides via its `null` path: "no problems" read as "no Problems panel", with no
+# error anywhere. Cross-checked identically, from the header constants and the built bundle.
+PROBLEMS_CONSTANTS = (
+    ("problems list node id", "problems_panel.h", "kProblemsListNodeId", "PROBLEMS_LIST_NODE_ID"),
+    ("problems row node id prefix", "problems_panel.h", "kProblemsRowNodeIdPrefix",
+     "PROBLEMS_ROW_NODE_ID_PREFIX"),
+)
+
 # The M9 e10c CROSS-WINDOW DRAG surface (design 04 §2), whose C++ vocabulary lives on the same
 # window-management surface (window_bridge.h) and whose TS mirror is drag.ts. A rename on one side
 # leaves the TARGET window's editor-core calling a `drag.*` method the Shell no longer routes, so its
@@ -1002,7 +1016,7 @@ def run_welcome_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
 
 def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
                          contract_include_dir: Path, package_json: Path,
-                         shell_src_dir: Path) -> list[str]:
+                         shell_src_dir: Path, panels_include_dir: Path) -> list[str]:
     """Check 7 — the M9 e05d1 panel surface: cross-language vocabulary, engine loading, deps."""
     failures: list[str] = []
 
@@ -1010,6 +1024,21 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
     if not bundle.is_file():
         return [f"bundle missing: {bundle}"]
     bundle_text = bundle.read_text(encoding="utf-8", errors="replace")
+
+    # 7a0 — the Problems panel's node ids agree across the two languages (d2 review 3c). A drift
+    # here is the quietest in the family: no method refuses, the statusbar's count field just hides.
+    for human, cpp_file, cpp_name, ts_name in PROBLEMS_CONSTANTS:
+        cpp_value = _read_cpp_string_constant(panels_include_dir / cpp_file, cpp_name)
+        ts_value = _read_ts_constant_from_bundle(bundle_text, ts_name)
+        if ts_value is None:
+            failures.append(
+                f"{human}: the bundle does not declare {ts_name} — the statusbar cannot be counting "
+                f"the rows the Problems panel renders")
+        elif ts_value != cpp_value:
+            failures.append(
+                f"{human} DRIFTED: C++ {cpp_name}={cpp_value!r} but TS {ts_name}={ts_value!r}. The "
+                f"panel would render one node id and the statusbar would count another, so the "
+                f"problems count would silently hide (its `null` path) with NO error anywhere.")
 
     # 7a — the `panel.*` method names agree across the two languages.
     for human, cpp_file, cpp_name, ts_name in PANEL_CONSTANTS:
@@ -1307,7 +1336,7 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
 
 def run_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Path,
                        contract_include_dir: Path, package_json: Path,
-                       shell_src_dir: Path) -> int:
+                       shell_src_dir: Path, panels_include_dir: Path) -> int:
     """The M9 e05d1 gate (check 7). Separate entry point so a failure names the right gate."""
     if not asset_dir.is_dir():
         raise CheckError(f"asset dir does not exist: {asset_dir}")
@@ -1315,12 +1344,14 @@ def run_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: Pat
         raise CheckError(f"shell include dir does not exist: {shell_include_dir}")
     if not contract_include_dir.is_dir():
         raise CheckError(f"gui contract include dir does not exist: {contract_include_dir}")
+    if not panels_include_dir.is_dir():
+        raise CheckError(f"gui panels include dir does not exist: {panels_include_dir}")
 
     if not shell_src_dir.is_dir():
         raise CheckError(f"shell src dir does not exist: {shell_src_dir}")
 
     failures = check_panel_contract(asset_dir, bundle_name, shell_include_dir, contract_include_dir,
-                                    package_json, shell_src_dir)
+                                    package_json, shell_src_dir, panels_include_dir)
     if failures:
         for failure in failures:
             print(f"[check_webui_assets] FAIL: {failure}", file=sys.stderr)
@@ -1425,6 +1456,11 @@ def main(argv: list[str] | None = None) -> int:
                         default=REPO_ROOT / "src" / "editor" / "shell" / "src",
                         help="dir holding panel_host.cpp, whose `gesture_verb_token` switch is the "
                              "authority on the wire verbs (--panel-contract only)")
+    parser.add_argument("--panels-include-dir", type=Path,
+                        default=REPO_ROOT / "src" / "editor" / "gui" / "panels" / "problems" /
+                        "include" / "context" / "editor" / "gui" / "panels" / "problems",
+                        help="dir holding problems_panel.h, the Problems panel's node-id constants "
+                             "the statusbar counts by (--panel-contract only)")
     args = parser.parse_args(argv)
 
     try:
@@ -1434,7 +1470,7 @@ def main(argv: list[str] | None = None) -> int:
         if args.panel_contract:
             return run_panel_contract(args.asset_dir, args.bundle_name, args.shell_include_dir,
                                       args.contract_include_dir, args.package_json,
-                                      args.shell_src_dir)
+                                      args.shell_src_dir, args.panels_include_dir)
         if args.theme_contract:
             return run_theme_contract(args.shell_cef_dir, args.themes_dir)
         if args.welcome_contract:

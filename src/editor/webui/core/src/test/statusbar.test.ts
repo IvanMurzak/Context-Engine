@@ -20,11 +20,14 @@ import {
     STATUSBAR_ATTRIBUTE,
     STATUSBAR_DOT_CLASS,
     STATUSBAR_LINK_CLASS,
+    STATUSBAR_LINK_COUNT_CLASS,
+    STATUSBAR_LINK_MAX_BACKOFF_TICKS,
     STATUSBAR_PROBLEMS_CLASS,
     STATUSBAR_PROJECT_CLASS,
     STATUSBAR_THEME_CLASS,
     StatusbarLinkFeed,
     linkPresentation,
+    linkText,
     mountStatusbar,
     problemsCountFrom,
     problemsLabel,
@@ -156,26 +159,32 @@ export const statusbarTests: TestCase[] = [
         run: () => {
             assertEqual(
                 linkPresentation(link()),
-                { tone: "good", label: "Live" },
+                { tone: "good", label: "Live", count: "" },
                 "a read-write link is good",
             );
             assertEqual(
                 linkPresentation(link({ readOnly: true, reconnectAttempts: 3 })),
-                { tone: "wait", label: "Reconnecting (3)" },
-                "an OWNED daemon mid-ladder is actively reconnecting",
+                { tone: "wait", label: "Reconnecting", count: "(3)" },
+                "an OWNED daemon mid-ladder is actively reconnecting — the count is SEPARATE",
             );
             assertEqual(
                 linkPresentation(
                     link({ readOnly: true, reconnectAttempts: 2, ownership: "external" }),
                 ),
-                { tone: "wait", label: "Waiting (2)" },
+                { tone: "wait", label: "Waiting", count: "(2)" },
                 "a shared daemon can only be waited for (banners.ts's ownership distinction)",
             );
             assertEqual(
                 linkPresentation(link({ readOnly: true })),
-                { tone: "warn", label: "Read-only" },
+                { tone: "warn", label: "Read-only", count: "" },
                 "read-only with no retries yet is the warn state the banner uses",
             );
+            assertEqual(
+                linkText(linkPresentation(link({ readOnly: true, reconnectAttempts: 3 }))),
+                "Reconnecting (3)",
+                "the report / sighted reading joins the two",
+            );
+            assertEqual(linkText(linkPresentation(link())), "Live", "…with no count, no gap");
         },
     },
     {
@@ -191,13 +200,28 @@ export const statusbarTests: TestCase[] = [
                 assertEqual(dot.getAttribute("data-tone"), "good", "live is the good hue");
                 assertEqual(badge(linkField).textContent, "Live", "…said plainly");
 
+                const count = field(h.slot, STATUSBAR_LINK_COUNT_CLASS);
+                assert(count.hidden === true, "no attempts, no count");
+
                 h.mount.applyLink(link({ readOnly: true, reconnectAttempts: 2 }));
                 assertEqual(dot.getAttribute("data-tone"), "wait", "the ladder is wait");
-                assertEqual(badge(linkField).textContent, "Reconnecting (2)", "with the attempt");
+                assertEqual(badge(linkField).textContent, "Reconnecting", "the STATE word is live");
+                assert(!count.hidden, "the attempt count shows beside it");
+                assertEqual(count.textContent, "(2)", "…outside the live region (3b)");
+                assert(
+                    count.getAttribute("aria-live") === null && count.tagName !== "OUTPUT",
+                    "the count is a plain span — a ladder step must never be an announcement",
+                );
+                assertEqual(
+                    linkField.textContent,
+                    "Reconnecting(2)",
+                    "the group still reads both to a screen reader browsing the strip",
+                );
 
                 h.mount.applyLink(link({ readOnly: true }));
                 assertEqual(dot.getAttribute("data-tone"), "warn", "read-only is warn");
                 assertEqual(badge(linkField).textContent, "Read-only", "the user-visible fact");
+                assert(count.hidden === true, "a state with no ladder hides the count again");
                 assert(
                     (document.documentElement.getAttribute(STATUSBAR_ATTRIBUTE) ?? "").includes(
                         "link Read-only",
@@ -248,6 +272,58 @@ export const statusbarTests: TestCase[] = [
                         observer.takeRecords().length > 0,
                         "a real transition does rewrite the live region (the observer can see)",
                     );
+                } finally {
+                    observer.disconnect();
+                }
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "d2 statusbar: a reconnect ladder counting up re-announces NOTHING — only the state word is live",
+        run: () => {
+            // d2 review 3b. The ladder's backoff steps (200 ms → 5 s) each bump `reconnectAttempts`;
+            // with the count inside the live badge every step was an announcement. Now the count
+            // lives in its own span: the live region's text is written once, on the transition
+            // INTO "Reconnecting", and stays untouched while the count climbs.
+            const h = mountHarness();
+            try {
+                h.mount.applyLink(link({ readOnly: true, reconnectAttempts: 1 }));
+                const linkField = field(h.slot, STATUSBAR_LINK_CLASS);
+                const count = field(h.slot, STATUSBAR_LINK_COUNT_CLASS);
+                const observer = new MutationObserver(() => undefined);
+                observer.observe(badge(linkField), {
+                    childList: true,
+                    characterData: true,
+                    subtree: true,
+                });
+                try {
+                    for (const attempts of [2, 3, 4, 5]) {
+                        h.mount.applyLink(link({ readOnly: true, reconnectAttempts: attempts }));
+                        assertEqual(count.textContent, `(${String(attempts)})`, "the count moved");
+                    }
+                    assertEqual(
+                        observer.takeRecords().length,
+                        0,
+                        "four ladder steps left the live region's text untouched",
+                    );
+                    // …and the report still carries the full reading a test (boot.test.ts) or a
+                    // sighted user reads.
+                    assert(
+                        (document.documentElement.getAttribute(STATUSBAR_ATTRIBUTE) ?? "").includes(
+                            "link Reconnecting (5)",
+                        ),
+                        "the report joins state and count",
+                    );
+                    // The positive half: the ladder ENDING is a transition, and it IS announced.
+                    h.mount.applyLink(link());
+                    assert(
+                        observer.takeRecords().length > 0,
+                        "the link coming back rewrote the live region (the observer can see)",
+                    );
+                    assertEqual(badge(linkField).textContent, "Live", "…to the new state word");
+                    assert(count.hidden === true, "…and the count went away with the ladder");
                 } finally {
                     observer.disconnect();
                 }
@@ -408,6 +484,84 @@ export const statusbarTests: TestCase[] = [
             assertEqual(applied[1], null, "…and applied the refusal (the field hides on it)");
             assert(!feed.polling, "a refusal self-stops the poll — no payoff in asking again");
             assertEqual(scheduler.cleared, [1], "the interval was actually cleared");
+        },
+    },
+    {
+        name: "d2 statusbar: a FAULTING read keeps the last state, backs off, and recovers — only a refusal stops",
+        run: async () => {
+            // d2 review 3a. A throw is a transient fault (a lost bridge query while the C++ link
+            // machine reconnects underneath), NOT "no surface": the field keeps the last state it
+            // could vouch for, the poll continues on a 1, 2, 4 … STATUSBAR_LINK_MAX_BACKOFF_TICKS
+            // ladder, and the next good read resets it. Before this split one throw hid the
+            // indicator for the life of the window.
+            const scheduler = new ManualScheduler();
+            const script: (DaemonLinkState | null | Error)[] = [
+                link({ readOnly: true, reconnectAttempts: 1 }),
+                new Error("bridge.transport"),
+                new Error("bridge.transport"),
+                new Error("bridge.transport"),
+                new Error("bridge.transport"),
+                link(),
+                null,
+            ];
+            let reads = 0;
+            const applied: (DaemonLinkState | null)[] = [];
+            const feed = new StatusbarLinkFeed(
+                (): Promise<DaemonLinkState | null> => {
+                    reads += 1;
+                    const next = script.shift() ?? null;
+                    return next instanceof Error ? Promise.reject(next) : Promise.resolve(next);
+                },
+                (state): void => {
+                    applied.push(state);
+                },
+                scheduler,
+            );
+            feed.start();
+            const tick = async (): Promise<void> => {
+                scheduler.fire();
+                await Promise.resolve();
+                await Promise.resolve();
+            };
+
+            await tick(); // the good read
+            assertEqual(applied.length, 1, "the first read applied");
+            assertEqual(feed.faults, 0, "…and counts no fault");
+
+            await tick(); // fault 1 → skip 1 tick
+            assertEqual(feed.faults, 1, "a rejecting reader is a fault");
+            assertEqual(applied.length, 1, "a fault applies NOTHING — the last state stands");
+            assert(feed.polling, "a fault does not stop the poll");
+            await tick(); // skipped
+            assertEqual(reads, 2, "the tick after a fault was skipped (backoff 1)");
+            await tick(); // fault 2 → skip 2
+            assertEqual(feed.faults, 2, "the second consecutive fault");
+            assertEqual(reads, 3, "…was read on the tick after the skip");
+            await tick();
+            await tick();
+            assertEqual(reads, 3, "two ticks skipped after the second fault (backoff 2)");
+            await tick(); // fault 3 → skip 4
+            assertEqual(reads, 4, "the third read");
+            assertEqual(feed.faults, 3, "the third consecutive fault");
+            for (let i = 0; i < 4; i += 1) {
+                await tick();
+            }
+            assertEqual(reads, 4, "four ticks skipped after the third fault (backoff 4)");
+            await tick(); // fault 4 → skip min(8, MAX)
+            assertEqual(feed.faults, 4, "the fourth consecutive fault");
+            for (let i = 0; i < STATUSBAR_LINK_MAX_BACKOFF_TICKS; i += 1) {
+                await tick();
+            }
+            assertEqual(reads, 5, `the ceiling: ${String(STATUSBAR_LINK_MAX_BACKOFF_TICKS)} ticks skipped, not 8`);
+            await tick(); // the good read: recovery
+            assertEqual(reads, 6, "read again after the ceiling");
+            assertEqual(feed.faults, 0, "a good read resets the fault count");
+            assertEqual(applied.length, 2, "…and applies");
+            assertEqual(applied[1]?.readOnly, false, "…the recovered link");
+            await tick(); // no skip after a good read
+            assertEqual(reads, 7, "the very next tick reads again — the backoff was reset");
+            assertEqual(applied[2], null, "…and the refusal applied (the field hides on it)");
+            assert(!feed.polling, "a REFUSAL still self-stops — that one is not a fault");
         },
     },
     {

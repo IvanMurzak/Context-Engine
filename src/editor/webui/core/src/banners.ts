@@ -34,6 +34,11 @@ export const UPDATE_STATE_METHOD = "update.state";
 export const UPDATE_DISMISS_METHOD = "update.dismiss";
 export const UPDATE_OPEN_DOWNLOADS_METHOD = "update.openDownloads";
 export const DAEMON_LINK_STATE_METHOD = "daemon.linkState";
+/**
+ * The Shell's refusal reason for a method it does not route (`ipc_bridge.cpp`). The ONE reason a
+ * steady poller must recognise: it means "no such surface", which no retry can change.
+ */
+export const BRIDGE_UNKNOWN_METHOD_REASON = "bridge.unknown_method";
 // The DOCUMENTATION click-through (editor-window-chrome d3): the `help.docs` menu/palette command's
 // backing — the SAME native URL opener the downloads click-through rides, pointed at the docs page.
 // MUST match banners.h's kHelpOpenDocsMethod (the same `webui-welcome-contract` gate). Invoked only
@@ -139,6 +144,26 @@ export class BannerClient {
 
     async daemonLinkState(): Promise<DaemonLinkState | null> {
         return this.#call(DAEMON_LINK_STATE_METHOD, parseDaemonLinkState);
+    }
+
+    /**
+     * `daemonLinkState` for a STEADY POLLER (the statusbar's link feed): only a REFUSAL — the Shell
+     * does not serve the method, `bridge.unknown_method`, an older build — is `null`; a transport or
+     * shape fault is RETHROWN, so the caller can tell "there is no such surface" (stop asking
+     * forever) from "this one read failed" (keep the last state, try again). `daemonLinkState`
+     * folds both into `null` because a one-shot boot read has no next tick to recover on; a feed
+     * that took that answer hid the field for the life of the window after a single lost query
+     * while the C++ link machine reconnected fine underneath (d2 review 3a).
+     */
+    async daemonLinkStateOrThrow(): Promise<DaemonLinkState | null> {
+        try {
+            return parseDaemonLinkState(await this.#bridge.call(DAEMON_LINK_STATE_METHOD));
+        } catch (error) {
+            if (error instanceof BridgeError && error.reason === BRIDGE_UNKNOWN_METHOD_REASON) {
+                return null;
+            }
+            throw error;
+        }
     }
 
     /** Hide the update banner for this session. Resolves false when the surface is absent. */

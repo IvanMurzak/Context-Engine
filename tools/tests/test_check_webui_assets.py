@@ -616,6 +616,15 @@ PANEL_BUNDLE = (
     # it has no production caller yet, so esbuild tree-shakes it out of the real bundle and the gate
     # does not enroll it — a fixture that carried it would be MORE CAPABLE THAN THE REAL BUNDLE.
     'var PACKAGE_GRANTS_LIST_METHOD = "package.grants.list";\n'
+    # d2 review 3c: the Problems panel's node ids the statusbar counts by (statusbar.ts).
+    'var PROBLEMS_LIST_NODE_ID = "problems.list";\n'
+    'var PROBLEMS_ROW_NODE_ID_PREFIX = "problems.row.";\n'
+)
+
+# The Problems panel's own header (a gui package, so a THIRD include root — --panels-include-dir).
+PANEL_CPP_PANELS = (
+    'inline constexpr const char* kProblemsListNodeId = "problems.list";\n'
+    'inline constexpr const char* kProblemsRowNodeIdPrefix = "problems.row.";\n'
 )
 
 # MIRRORS THE REAL HEADER'S SHAPE. The real `panel_host.h` declares the enum and the token
@@ -815,8 +824,9 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
                    package_events: str = PANEL_CPP_PACKAGE_EVENTS,
                    package_grants: str = PANEL_CPP_PACKAGE_GRANTS,
+                   panels: str = PANEL_CPP_PANELS,
                    package: dict | None = None,
-                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path]:
+                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
     asset_dir.mkdir(parents=True, exist_ok=True)
     (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
@@ -849,16 +859,50 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     src_dir.mkdir(parents=True, exist_ok=True)
     (src_dir / "panel_host.cpp").write_text(source, encoding="utf-8")
 
+    panels_dir = tmp_path / "panelsinclude"
+    panels_dir.mkdir(parents=True, exist_ok=True)
+    (panels_dir / "problems_panel.h").write_text(panels, encoding="utf-8")
+
     package_json = tmp_path / "package.json"
     package_json.write_text(
         json.dumps(PANEL_PACKAGE if package is None else package), encoding="utf-8")
-    return asset_dir, include_dir, contract_dir, package_json, src_dir
+    return asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir
 
 
 def _run_panel(tmp_path: Path, **kwargs) -> int:
-    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path, **kwargs)
+    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(
+        tmp_path, **kwargs)
     return check_webui_assets.run_panel_contract(
-        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir)
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir, panels_dir)
+
+
+@pytest.mark.parametrize("ts_name", ["PROBLEMS_LIST_NODE_ID", "PROBLEMS_ROW_NODE_ID_PREFIX"])
+def test_problems_node_id_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """d2 review 3c: a drift here hides the statusbar's problems count with no error anywhere."""
+    drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1problems.drifted\2", PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_a_problems_node_id_fails(tmp_path: Path) -> None:
+    """An ABSENT constant is drift too — the statusbar could not be counting rows by it."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "PROBLEMS_ROW_NODE_ID_PREFIX" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_renamed_problems_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path,
+                   panels=PANEL_CPP_PANELS.replace("kProblemsListNodeId", "kProblemsListId"))
+
+
+def test_missing_panels_include_dir_is_a_config_error(tmp_path: Path) -> None:
+    asset_dir, include_dir, contract_dir, package_json, src_dir, _ = _panel_fixture(tmp_path)
+    with pytest.raises(check_webui_assets.CheckError):
+        check_webui_assets.run_panel_contract(
+            asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir,
+            tmp_path / "no-panels")
 
 
 def test_panel_contract_happy_path(tmp_path: Path, capsys) -> None:
@@ -1345,10 +1389,12 @@ def test_a_bundle_with_no_gesture_array_at_all_fails(tmp_path: Path) -> None:
 
 def test_missing_bundle_fails_the_panel_gate(tmp_path: Path) -> None:
     """Fail-closed on an absent build artifact (the scheme gate's sibling assertion)."""
-    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(
+        tmp_path)
     (asset_dir / "editor-core.js").unlink()
     assert check_webui_assets.run_panel_contract(
-        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir) == 1
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir,
+        panels_dir) == 1
 
 
 def test_renamed_panel_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
@@ -1386,7 +1432,8 @@ def test_dependency_drift_from_the_s1_approved_set_fails(tmp_path: Path, depende
 
 
 def test_main_routes_the_panel_contract_flag(tmp_path: Path) -> None:
-    asset_dir, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(
+        tmp_path)
     assert check_webui_assets.main([
         "--asset-dir", str(asset_dir), "--bundle-name", "editor-core.js",
         "--panel-contract",
@@ -1394,14 +1441,16 @@ def test_main_routes_the_panel_contract_flag(tmp_path: Path) -> None:
         "--contract-include-dir", str(contract_dir),
         "--package-json", str(package_json),
         "--shell-src-dir", str(src_dir),
+        "--panels-include-dir", str(panels_dir),
     ]) == 0
 
 
 def test_missing_asset_dir_is_a_panel_config_error(tmp_path: Path) -> None:
-    _, include_dir, contract_dir, package_json, src_dir = _panel_fixture(tmp_path)
+    _, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(tmp_path)
     with pytest.raises(check_webui_assets.CheckError):
         check_webui_assets.run_panel_contract(
-            tmp_path / "nope", "editor-core.js", include_dir, contract_dir, package_json, src_dir)
+            tmp_path / "nope", "editor-core.js", include_dir, contract_dir, package_json, src_dir,
+            panels_dir)
 
 
 def test_the_real_repo_panel_sources_agree_across_languages() -> None:
@@ -1422,6 +1471,17 @@ def test_the_real_repo_panel_sources_agree_across_languages() -> None:
         cpp_value = check_webui_assets._read_cpp_string_constant(
             contract_include / "panel_state.h", cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in ts, f"{ts_name} drifted from C++ {cpp_name}"
+    # d2 review 3c: the Problems panel's node ids, whose TS mirror is statusbar.ts (not panels.ts)
+    # and whose C++ home is the gui panel's own header — the third include root the gate reads.
+    panels_include = (REPO_ROOT / "src" / "editor" / "gui" / "panels" / "problems" / "include" /
+                      "context" / "editor" / "gui" / "panels" / "problems")
+    statusbar_ts = (REPO_ROOT / "src" / "editor" / "webui" / "core" / "src" /
+                    "statusbar.ts").read_text(encoding="utf-8")
+    for _human, cpp_file, cpp_name, ts_name in check_webui_assets.PROBLEMS_CONSTANTS:
+        cpp_value = check_webui_assets._read_cpp_string_constant(panels_include / cpp_file,
+                                                                 cpp_name)
+        assert f'{ts_name} = "{cpp_value}"' in statusbar_ts, (
+            f"{ts_name} drifted from C++ {cpp_name}")
     # The gesture vocabulary, read from BOTH real sources as SETS — the C++ wire tokens out of the
     # actual switch, the TS array out of the actual module. Asserting only `verb in ts` (the old
     # form) could not catch a .cpp token rename at all, because it never opened the .cpp.

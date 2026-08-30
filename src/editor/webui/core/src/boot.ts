@@ -423,8 +423,11 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
                     subscribeStatusbarTheme(theme.bus, statusbar);
                 }
                 if (bannerData.link !== null) {
+                    // The THROWING reader, deliberately: the feed treats a throw as a transient
+                    // fault (keep the last state, retry with backoff) and only a `null` refusal
+                    // as "no surface" (stop). banners.daemonLinkState() folds both into `null`.
                     new StatusbarLinkFeed(
-                        (): Promise<DaemonLinkState | null> => banners.daemonLinkState(),
+                        (): Promise<DaemonLinkState | null> => banners.daemonLinkStateOrThrow(),
                         (link): void => {
                             statusbar.applyLink(link);
                         },
