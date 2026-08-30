@@ -1,0 +1,58 @@
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/c3-panel-instance-runtime.md
+  s_012ad4634908ce::t_6efa24e6709df8 1-66
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/a2-osr-popup-dpi.md
+  s_012ad4634908ce::t_add719840e94e1 1-62
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/f2-verification-tables.md
+  s_012ad4634908ce::t_261125626e0f8b 1-50
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/e4-viewport-picking.md
+  s_012ad4634908ce::t_ae5706754129c4 1-58
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/d1-window-menu-panels.md
+  s_012ad4634908ce::t_d32e6ae5abce09 1-61
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/f1-uibus-boundary-denylist.md
+  s_012ad4634908ce::t_384cdcfcc0a9f9 1-51
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/README.md
+  s_012ad4634908ce::t_01e9236c729c0e 1-63
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/e3-viewport-render-camera.md
+  s_012ad4634908ce::t_4dac0d2d682823 1-69
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/e1-files-panel-read.md
+  s_012ad4634908ce::t_6e809a90de197f 1-66
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/d2-package-fact-bus.md
+  s_012ad4634908ce::t_acd451f4ef447e 1-83
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/a3-ui-state-model.md
+  s_012ad4634908ce::t_ca7ba14a6ec8e0 1-62
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/a0-osr-contract-audit.md
+  s_012ad4634908ce::t_3b0b1a0aada264 1-62
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/e2-files-panel-write.md
+  s_012ad4634908ce::t_0e38f99be6a645 1-82
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/b1-osr-html5-drag.md
+  s_012ad4634908ce::t_357a6cd771ce97 1-69
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/c1-selection-subjects.md
+  s_012ad4634908ce::t_a1a84a52ad8442 1-83
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/a4-panel-title-dedup.md
+  s_012ad4634908ce::t_abe7e246b3ee35 1-55
+.taskflow/2026-08-29-editor-ux-packages-events/ROADMAP.md
+  s_012ad4634908ce::t_91b96a4ac16d41 125
+  s_012ad4634908ce::t_523ee1fff7d915 115
+  s_012ad4634908ce::t_76d60565df7c2d 3-6,9-12
+  s_012ad4634908ce::t_c4f5b01e251bef 51-70
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/a1-osr-screen-point.md
+  s_012ad4634908ce::t_f4db3c6a882946 1-62
+.taskflow/2026-08-29-editor-ux-packages-events/tasks/c2-manifest-v3.md
+  s_012ad4634908ce::t_253a61352538a4 1-74
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0adf816ed65df7bd33c004af176cd54d53226a06",
+  "prompts": {},
+  "sessions": {
+    "s_012ad4634908ce": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "acbfeb81-1157-45fd-b818-b8b945e649b4",
+        "model": "claude-fable-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
