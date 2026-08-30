@@ -6,9 +6,10 @@
 // (NSWindowStyleMaskFullSizeContentView + titlebarAppearsTransparent), the native traffic lights
 // stay exactly where macOS puts them, and the a2 titlebar strip pads by a MEASURED inset so its
 // content never sits under the buttons. A press on the strip's published `caption` region hands the
-// drag to the OS (`performWindowDragWithEvent:`); a double-click on it is `zoom:` — the platform
-// convention. `chrome.state` flips from the a1 interim `system`/0 to `hybrid`/measured in the same
-// change that makes it true (tasks/README.md interim honesty).
+// drag to the OS (`performWindowDragWithEvent:`); a double-click on it does what the user's macOS
+// title-bar preference says (`AppleActionOnDoubleClick` — zoom by default; the owner's 2026-08-30
+// decision over 02 §4's fixed `zoom:`). `chrome.state` flips from the a1 interim `system`/0 to
+// `hybrid`/measured in the same change that makes it true (tasks/README.md interim honesty).
 //
 // THE THREE HALVES, and where each lives:
 //
@@ -33,6 +34,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <string_view>
 
 namespace context::editor::shell
 {
@@ -52,13 +54,33 @@ struct CocoaChromeState
 // What a decoded pointer PRESS over the arbiter's published region map asks the Cocoa pump to do.
 enum class CaptionPressAction
 {
-    none,    // not the caption's press — decode and dispatch as always
-    drag,    // single press on the caption drag surface: hand the NSEvent to performWindowDragWithEvent:
-    zoom,    // double-click on the caption: `zoom:` (the platform convention, 02 §4)
-    yielded, // ON the caption, but a live capture owns the press: leave it to the arbiter, which
-             // routes it to the capture target (another button's drag) or swallows it (a modal
-             // backdrop) — exactly as route_pointer will, because that verdict is what was asked
+    none,         // not the caption's press — decode and dispatch as always
+    drag,         // single press on the caption drag surface: hand the NSEvent to performWindowDragWithEvent:
+    double_click, // double-click on the caption: perform the SYSTEM's title-bar double-click action
+                  // (caption_double_click_action below — the owner's 2026-08-30 decision over 02 §4's
+                  // fixed `zoom:`)
+    yielded,      // ON the caption, but a live capture owns the press: leave it to the arbiter, which
+                  // routes it to the capture target (another button's drag) or swallows it (a modal
+                  // backdrop) — exactly as route_pointer will, because that verdict is what was asked
 };
+
+// What a double-click on the caption DOES — the user's own macOS choice (System Settings › Desktop
+// & Dock › "Double-click a window's title bar to"), which a native title bar honours because AppKit
+// draws it; ours is a web strip, so the pump reads the preference itself.
+enum class CaptionDoubleClickAction
+{
+    zoom,     // "Maximize" (the macOS default) — and "Fill" (macOS 15+), whose tile-to-screen has no
+              // public NSWindow entry point: `zoom:` is the closest public API and is documented so
+    minimize, // "Minimize" — `miniaturize:`
+    none,     // "None" ("Do nothing") — the press is still the caption's (consumed), it just does nothing
+};
+
+// Map the raw `AppleActionOnDoubleClick` user default (`NSUserDefaults`, `""` when unset) onto the
+// action. Pure and total: an unset or unknown value is the platform default, "Maximize" → zoom.
+// Matched case-sensitively on the exact tokens macOS writes ("Maximize" / "Minimize" / "Fill" /
+// "None") — the value is machine-written, never typed.
+[[nodiscard]] CaptionDoubleClickAction caption_double_click_action(
+    std::string_view apple_action_on_double_click);
 
 // Decide the caption consult for ONE decoded pointer event: the arbiter's OWN verdict, asked
 // side-effect free through InputArbiter::preview_pointer, so the pump and the arbiter can never
@@ -85,12 +107,13 @@ enum class CaptionPressAction
                                                         double width_points, DpiScale dpi);
 
 // What the pump consumed — and what it declined — for the windowed smoke's suppression assertions
-// (the same observable pattern WindowBridge's counters serve the live CEF smokes). `yields` counts
-// caption presses the consult left to the arbiter because a capture owned them.
+// (the same observable pattern WindowBridge's counters serve the live CEF smokes). `double_clicks`
+// counts consumed caption double-clicks whatever action the preference mapped them to; `yields`
+// counts caption presses the consult left to the arbiter because a capture owned them.
 struct CocoaCaptionStats
 {
     std::size_t drags = 0;
-    std::size_t zooms = 0;
+    std::size_t double_clicks = 0;
     std::size_t yields = 0;
 };
 
@@ -114,5 +137,12 @@ void cocoa_bind_caption_arbiter(IWindowBackend& backend, const InputArbiter* arb
 
 // Read what the pump consumed so far. True only for the live Cocoa backend, like the query above.
 [[nodiscard]] bool cocoa_caption_stats(const IWindowBackend& backend, CocoaCaptionStats& out);
+
+// TEST SEAM: pin this PROCESS's `AppleActionOnDoubleClick` to `apple_value` ("Maximize" /
+// "Minimize" / "None" / …) through NSUserDefaults' argument domain — the highest-precedence domain,
+// so the pump's read sees it over whatever the Mac running the smoke has in System Settings. That
+// is what keeps `editor-shell-cocoa-window`'s double-click drill deterministic on every machine
+// without touching the user's real preference. Real on macOS; false everywhere else.
+[[nodiscard]] bool cocoa_pin_double_click_preference(const char* apple_value);
 
 } // namespace context::editor::shell

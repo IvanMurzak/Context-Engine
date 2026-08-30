@@ -12,8 +12,11 @@
 //      moment that capture ends. Only a LEFT PRESS is ever the caption's — moves, releases, the
 //      right and middle buttons all flow to the browser untouched (the "for THAT press only" half
 //      of the suppression rule).
-//   2. DOUBLE-CLICK IS ZOOM. Cocoa counts clicks on the event (NsEvent::click_count), so the first
-//      press of a double-click drags and the second zooms — the platform convention 02 §4 pins.
+//   2. DOUBLE-CLICK IS THE USER'S MACOS PREFERENCE. Cocoa counts clicks on the event
+//      (NsEvent::click_count), so the first press of a double-click drags and the second is the
+//      double-click; what it DOES is `AppleActionOnDoubleClick` mapped by the pure
+//      caption_double_click_action — Maximize/unset/Fill → zoom, Minimize → minimize, None → none
+//      (the owner's 2026-08-30 decision over 02 §4's fixed zoom).
 //   3. THE MEASURED INSET ARITHMETIC. Traffic-light frames (points, window coords) become the
 //      physical `controlsInset` px: the symmetric pad, the ×scale, round-UP (one px short puts
 //      strip content under a button), the RTL mirror (macOS moves the buttons right for RTL system
@@ -75,16 +78,34 @@ namespace
     return arbiter;
 }
 
-void a_left_press_on_the_caption_drags_and_a_double_click_zooms()
+void a_left_press_on_the_caption_drags_and_a_double_click_is_the_double_click()
 {
     const InputArbiter map = titlebar_arbiter();
     CHECK(caption_press_action(press_at(400, 30), map) == CaptionPressAction::drag);
     CHECK(caption_press_action(press_at(400, 30, MouseButton::left, 2), map) ==
-          CaptionPressAction::zoom);
-    // A triple-click's press still carries click_count >= 2 — it re-zooms (a toggle), never a
-    // surprise drag mid-flurry.
+          CaptionPressAction::double_click);
+    // A triple-click's press still carries click_count >= 2 — it repeats the double-click action
+    // (a zoom toggles back), never a surprise drag mid-flurry.
     CHECK(caption_press_action(press_at(400, 30, MouseButton::left, 3), map) ==
-          CaptionPressAction::zoom);
+          CaptionPressAction::double_click);
+}
+
+void the_double_click_action_is_the_users_own_macos_preference()
+{
+    // The owner's 2026-08-30 decision: honour System Settings › Desktop & Dock › "Double-click a
+    // window's title bar to", read as the raw `AppleActionOnDoubleClick` default. The exact tokens
+    // macOS writes, and the platform default for everything else — unset included.
+    CHECK(caption_double_click_action("Maximize") == CaptionDoubleClickAction::zoom);
+    CHECK(caption_double_click_action("Minimize") == CaptionDoubleClickAction::minimize);
+    CHECK(caption_double_click_action("None") == CaptionDoubleClickAction::none);
+    CHECK(caption_double_click_action("") == CaptionDoubleClickAction::zoom);
+    // "Fill" (macOS 15) tiles to the visible screen; no public NSWindow API does exactly that, so
+    // the closest one — zoom: — is the documented answer, not a silent no-op.
+    CHECK(caption_double_click_action("Fill") == CaptionDoubleClickAction::zoom);
+    // Machine-written tokens are exact: a casing or spelling variant is NOT one of the three, and
+    // the honest answer for a token we do not know is the default, never a minimize by accident.
+    CHECK(caption_double_click_action("minimize") == CaptionDoubleClickAction::zoom);
+    CHECK(caption_double_click_action("Something new") == CaptionDoubleClickAction::zoom);
 }
 
 void a_live_capture_owns_the_press_so_the_consult_yields()
@@ -258,7 +279,8 @@ void the_surface_refuses_a_non_cocoa_backend_on_every_leg()
 
 int main()
 {
-    a_left_press_on_the_caption_drags_and_a_double_click_zooms();
+    a_left_press_on_the_caption_drags_and_a_double_click_is_the_double_click();
+    the_double_click_action_is_the_users_own_macos_preference();
     a_live_capture_owns_the_press_so_the_consult_yields();
     only_a_left_press_is_ever_the_captions();
     the_consult_is_the_arbiters_own_last_match_wins_verdict();

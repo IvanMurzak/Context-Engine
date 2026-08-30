@@ -563,7 +563,7 @@ public:
     void bind_caption_arbiter(const InputArbiter* arbiter) { caption_arbiter_ = arbiter; }
     [[nodiscard]] CocoaCaptionStats caption_stats() const
     {
-        return CocoaCaptionStats{caption_drags_, caption_zooms_, caption_yields_};
+        return CocoaCaptionStats{caption_drags_, caption_double_clicks_, caption_yields_};
     }
     [[nodiscard]] bool hybrid_chrome(CocoaChromeState& out) const;
 
@@ -598,7 +598,7 @@ private:
     // order (its arbiter dies before this backend) can never race a read.
     const InputArbiter* caption_arbiter_ = nullptr;
     std::size_t caption_drags_ = 0;
-    std::size_t caption_zooms_ = 0;
+    std::size_t caption_double_clicks_ = 0;
     std::size_t caption_yields_ = 0;
     // d3: the installed global menu bar + its one shared target. `menu_dispatch_` is the member the
     // target aims at (the mailbox discipline: the ObjC object knows one pointer, the backend owns
@@ -1025,11 +1025,30 @@ bool CocoaWindowBackend::handle(NSEvent* event)
                 [window_ makeKeyAndOrderFront:nil];
                 [window_ performWindowDragWithEvent:event];
                 return true;
-            case CaptionPressAction::zoom:
-                ++caption_zooms_;
+            case CaptionPressAction::double_click:
+            {
+                ++caption_double_clicks_;
                 [window_ makeKeyAndOrderFront:nil];
-                [window_ zoom:nil];
+                // The user's own title-bar double-click preference (cocoa_chrome.h
+                // CaptionDoubleClickAction): read at the press, not cached, so a change in System
+                // Settings applies to the next double-click like it does for every native window.
+                NSString* preference = [[NSUserDefaults standardUserDefaults]
+                    stringForKey:@"AppleActionOnDoubleClick"];
+                const std::string value =
+                    preference == nil ? std::string() : std::string([preference UTF8String]);
+                switch (caption_double_click_action(value))
+                {
+                case CaptionDoubleClickAction::zoom:
+                    [window_ zoom:nil];
+                    break;
+                case CaptionDoubleClickAction::minimize:
+                    [window_ miniaturize:nil];
+                    break;
+                case CaptionDoubleClickAction::none:
+                    break; // "Do nothing" — consumed all the same: it is still the caption's press
+                }
                 return true;
+            }
             case CaptionPressAction::yielded:
                 // Counted, NOT consumed: the press is enqueued and forwarded like any other, so
                 // the arbiter applies the verdict the consult previewed.
@@ -1264,6 +1283,22 @@ void cocoa_bind_caption_arbiter(IWindowBackend& backend, const InputArbiter* arb
     {
         cocoa->bind_caption_arbiter(arbiter);
     }
+}
+
+bool cocoa_pin_double_click_preference(const char* apple_value)
+{
+    if (apple_value == nullptr)
+    {
+        return false;
+    }
+    // The ARGUMENT domain: what `-AppleActionOnDoubleClick Maximize` on the command line would
+    // set, and the highest-precedence domain NSUserDefaults consults — above the app's own domain
+    // and the global (System Settings) domain — so the pump's `stringForKey:` sees this value on
+    // any machine. Process-local and volatile: nothing is written to the user's preferences.
+    [[NSUserDefaults standardUserDefaults]
+        setVolatileDomain:@{@"AppleActionOnDoubleClick" : [NSString stringWithUTF8String:apple_value]}
+                  forName:NSArgumentDomain];
+    return true;
 }
 
 bool cocoa_caption_stats(const IWindowBackend& backend, CocoaCaptionStats& out)
