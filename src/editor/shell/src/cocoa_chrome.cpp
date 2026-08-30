@@ -42,8 +42,25 @@ CaptionPressAction caption_press_action(const PointerEvent& pointer, const Input
     }
     // Cocoa counts clicks for us (NsEvent::click_count): the second press of a double-click
     // arrives with click_count 2, so the first press starts a drag — exactly what a native
-    // titlebar does — and the second becomes the zoom.
-    return pointer.click_count >= 2 ? CaptionPressAction::zoom : CaptionPressAction::drag;
+    // titlebar does — and the second becomes the double-click, whose ACTION the pump reads from
+    // the user's preference (caption_double_click_action).
+    return pointer.click_count >= 2 ? CaptionPressAction::double_click : CaptionPressAction::drag;
+}
+
+CaptionDoubleClickAction caption_double_click_action(std::string_view apple_action_on_double_click)
+{
+    if (apple_action_on_double_click == "Minimize")
+    {
+        return CaptionDoubleClickAction::minimize;
+    }
+    if (apple_action_on_double_click == "None")
+    {
+        return CaptionDoubleClickAction::none;
+    }
+    // "Maximize" (the platform default, also what an UNSET preference means), "Fill" (no public
+    // NSWindow API for the tile — `zoom:` is the closest), and any token a future macOS adds: the
+    // default. A wrong guess here is a zoom, which the next double-click undoes.
+    return CaptionDoubleClickAction::zoom;
 }
 
 CocoaChromeState ns_hybrid_controls_inset(double min_x_points, double max_x_points,

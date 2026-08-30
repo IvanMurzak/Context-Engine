@@ -49,6 +49,11 @@ bool cocoa_caption_stats(const IWindowBackend& /*backend*/, CocoaCaptionStats& /
     return false;
 }
 
+bool cocoa_pin_double_click_preference(const char* /*apple_value*/)
+{
+    return false;
+}
+
 // The d3 native-menu seam (cocoa_menu.h), same linkable-symbol rule as everything above: off macOS
 // no backend can be the Cocoa one, so the install and the programmatic perform REFUSE and the stats
 // query answers false — behaviour tests/test_menu_facts.cpp asserts as a VALUE on every leg. That

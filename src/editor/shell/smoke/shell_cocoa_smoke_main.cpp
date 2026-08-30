@@ -855,7 +855,12 @@ int main(int argc, char** argv)
     // consumed presses below must never appear after it.
     const std::size_t chrome_samples_baseline = browser->pointers().size();
 
-    // --- double-click on the caption = zoom: (the platform convention) ---------------------------
+    // --- double-click on the caption = the user's title-bar preference ----------------------------
+    // Pinned to "Maximize" for THIS process (the argument domain — cocoa_chrome.h's test seam), so
+    // the drill asserts the same `zoom:` on every Mac regardless of what its System Settings say;
+    // the mapping of the other tokens is the pure T1's (test_cocoa_chrome.cpp).
+    COCOA_CHECK(shell::cocoa_pin_double_click_preference("Maximize"),
+                "the process's AppleActionOnDoubleClick was pinned to Maximize for the drill");
     shell::ShellEvent zoom_press;
     zoom_press.kind = shell::ShellEventKind::pointer;
     zoom_press.pointer.action = shell::PointerAction::down;
@@ -874,12 +879,13 @@ int main(int argc, char** argv)
     const bool zoom_consumed = pump_until(manager, clock_us, [&] {
         shell::CocoaCaptionStats stats;
         return shell::cocoa_caption_stats(*backend, stats) &&
-               stats.zooms >= caption_before.zooms + 1;
+               stats.double_clicks >= caption_before.double_clicks + 1;
     });
-    COCOA_CHECK(zoom_consumed, "the double-click reached the pump's caption consult as zoom:");
+    COCOA_CHECK(zoom_consumed, "the double-click reached the pump's caption consult");
     const bool zoom_observed =
         pump_until(manager, clock_us, [&] { return backend->placement().maximized; });
-    COCOA_CHECK(zoom_observed, "zoom: really zoomed - placement().maximized flipped true");
+    COCOA_CHECK(zoom_observed,
+                "the pinned Maximize preference really zoomed - placement().maximized flipped true");
 
     // Restore the frame before the drag drill, so its caption rect is published against a settled
     // geometry (a posted location is resolved against the frame at DEQUEUE time — claim 2).

@@ -344,9 +344,16 @@ keep it, as arbitration does. (c1 shipped with the consult reading only the regi
 such a press a window drag its owner never saw — closed 2026-08-29.) It runs in
 `editor-shell-test_cocoa_chrome` on all three legs, `preview_pointer`'s agreement with
 `route_pointer` across every capture shape in `editor-shell-test_input`; the windowed proof rides
-`editor-shell-cocoa-window`'s c1 step on the macOS `editor-cef-smoke` job. The double-click is
-`zoom:` by design (02 §4) — the system's `AppleActionOnDoubleClick` preference is deliberately not
-consulted.
+`editor-shell-cocoa-window`'s c1 step on the macOS `editor-cef-smoke` job. **A double-click on the
+caption does what the user's macOS says** (owner decision 2026-08-30, superseding 02 §4's fixed
+`zoom:`): the pump reads `AppleActionOnDoubleClick` at the press and maps it through the pure
+`caption_double_click_action` — "Maximize" (and an unset preference) → `zoom:`, "Minimize" →
+`miniaturize:`, "None" → consumed but nothing happens, "Fill" → `zoom:` (no public NSWindow API
+tiles to the screen; the closest one is documented, not silently dropped). A native title bar
+honours the same setting because AppKit draws it; ours is a web strip, so the read is ours. The
+windowed smoke pins the preference to "Maximize" for its own process through NSUserDefaults'
+argument domain (`cocoa_pin_double_click_preference`), so its zoom assertion holds on any Mac
+without touching the user's real setting.
 
 **The macOS native menu (editor-window-chrome d3, menu structure 03).** editor-core publishes its
 ONE declarative menu model over `menu.publish` (`window_bridge.h` — installed on every window that
