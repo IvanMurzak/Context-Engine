@@ -751,6 +751,26 @@ int main(int argc, char** argv)
         // without pinning the exact tree (which menu.test.ts owns). The handler is deliberately
         // UNBOUND here (no native menu host in an OSR smoke): the claim is the ROUTING + the
         // model, exactly like the control verbs above.
+        //
+        // ⚠ WAITED FOR, NOT ASSUMED SETTLED (CE #494). The hydration loop above breaks on the
+        // panels' first painted frame, and on the GitHub macOS runners the menu publish was
+        // observed to trail that frame — 1 run in 3 read the counter at 0 and went red at this
+        // line with nothing wrong (the same SHA passed on rerun, and `main` failed identically).
+        // So wait for the publish the way every other asynchronous fact in this smoke is waited
+        // for: bounded, pumping, then assert. A genuine no-publish regression still runs the clock
+        // out and fails below — the wait is not vacuous.
+        {
+            const auto menu_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+            while (window_move_bridge.menu_publishes() < 1 &&
+                   std::chrono::steady_clock::now() < menu_deadline)
+            {
+                if (!manager.pump_once(now_us()))
+                {
+                    break;
+                }
+                std::this_thread::sleep_for(std::chrono::milliseconds(5));
+            }
+        }
         SMOKE_CHECK(window_move_bridge.menu_publishes() >= 1,
                     "the live renderer published its d3 menu model at boot");
         SMOKE_CHECK(window_move_bridge.last_menu_commands() >= 10,
