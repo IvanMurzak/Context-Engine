@@ -939,6 +939,45 @@ int main(int argc, char** argv)
     COCOA_CHECK(!editor->input().has_pointer_capture(),
                 "no implicit pointer capture leaked from a consumed press");
 
+    // --- a caption press while a capture is LIVE is the arbiter's, not the OS's ------------------
+    //
+    // The gap c1 shipped with: the consult read only the region map, so a caption press during a
+    // modal capture (an open dropdown's backdrop) became a window drag the dropdown never saw.
+    // Now the consult previews the arbiter's verdict, capture included: the press is YIELDED
+    // (counted, not consumed), reaches route_pointer, and is swallowed there as the modal backdrop
+    // press it is. Live proof on the real NSEvent path, since the pure T1 cannot see the pump.
+    {
+        shell::CocoaCaptionStats before_yield;
+        COCOA_CHECK(shell::cocoa_caption_stats(*backend, before_yield),
+                    "caption stats readable before the yield drill");
+        const int swallowed_before = editor->input().swallowed();
+        shell::Capture modal;
+        modal.region_id = "smoke.modal";
+        modal.target = shell::InputTarget::native;
+        modal.modal = true;
+        editor->input().push_capture(modal);
+        COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
+                    "a caption press under a modal capture was accepted for injection");
+        const bool yielded = pump_until(manager, clock_us, [&] {
+            shell::CocoaCaptionStats stats;
+            return shell::cocoa_caption_stats(*backend, stats) &&
+                   stats.yields >= before_yield.yields + 1 &&
+                   editor->input().swallowed() > swallowed_before;
+        });
+        COCOA_CHECK(yielded, "the press was yielded by the consult and swallowed by the arbiter's "
+                             "modal capture - never handed to performWindowDragWithEvent:");
+        shell::CocoaCaptionStats after_yield;
+        COCOA_CHECK(shell::cocoa_caption_stats(*backend, after_yield),
+                    "caption stats readable after the yield drill");
+        COCOA_CHECK(after_yield.drags == before_yield.drags,
+                    "no window drag started from a press a live capture owned");
+        COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_release),
+                    "the yielded press's release was accepted for injection");
+        (void)pump_until(manager, clock_us,
+                         [&] { return editor->input().swallowed() > swallowed_before + 1; });
+        COCOA_CHECK(editor->input().pop_capture("smoke.modal"), "the drill's modal capture popped");
+    }
+
     // --- and a NON-caption press still reaches the browser afterwards ----------------------------
     const std::size_t forward_baseline = browser->pointers().size();
     shell::ShellEvent forward_press = drag_press;

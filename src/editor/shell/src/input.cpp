@@ -183,6 +183,42 @@ PointerDispatch InputArbiter::route_pointer(const PointerEvent& event, std::uint
         button_capture_button_ = event.button;
     }
 
+    bool via_capture = false;
+    const PointerPreview verdict = resolve_pointer(event, via_capture);
+    dispatch.target = verdict.target;
+    dispatch.region_id = verdict.region_id;
+    fill_positions(dispatch, event, verdict.region);
+    if (verdict.target == InputTarget::swallowed)
+    {
+        ++swallowed_;
+        return dispatch;
+    }
+    ++pointer_dispatches_;
+    if (via_capture && event.action == PointerAction::up && button_capture_.has_value() &&
+        event.button == button_capture_button_)
+    {
+        button_capture_.reset();
+        button_capture_button_ = MouseButton::none;
+    }
+    return dispatch;
+}
+
+PointerPreview InputArbiter::preview_pointer(const PointerEvent& event) const
+{
+    // No implicit capture is established for a preview — and none is needed: the capture a press
+    // would establish is the hit-test under it (or the browser), and route_pointer then routes the
+    // press BY that capture, which resolves to exactly what plain arbitration returns for the same
+    // point. With a modal live no press establishes one either way. So resolving against the LIVE
+    // state is the press's own verdict, not an approximation of it.
+    bool via_capture = false;
+    return resolve_pointer(event, via_capture);
+}
+
+PointerPreview InputArbiter::resolve_pointer(const PointerEvent& event, bool& via_capture) const
+{
+    PointerPreview verdict;
+    via_capture = false;
+
     const Capture* capture = active_capture();
     if (capture != nullptr)
     {
@@ -194,24 +230,18 @@ PointerDispatch InputArbiter::route_pointer(const PointerEvent& event, std::uint
         // a non-modal (overlay) capture falls through to normal arbitration instead.
         if (!inside && capture->modal)
         {
-            dispatch.target = InputTarget::swallowed;
-            fill_positions(dispatch, event, region);
-            ++swallowed_;
-            return dispatch;
+            verdict.target = InputTarget::swallowed;
+            verdict.region = region;
+            via_capture = true;
+            return verdict;
         }
         if (inside || capture->target == InputTarget::browser || button_capture_.has_value())
         {
-            dispatch.target = capture->target;
-            dispatch.region_id = capture->region_id;
-            fill_positions(dispatch, event, region);
-            ++pointer_dispatches_;
-            if (event.action == PointerAction::up && button_capture_.has_value() &&
-                event.button == button_capture_button_)
-            {
-                button_capture_.reset();
-                button_capture_button_ = MouseButton::none;
-            }
-            return dispatch;
+            verdict.target = capture->target;
+            verdict.region_id = capture->region_id;
+            verdict.region = region;
+            via_capture = true;
+            return verdict;
         }
     }
 
@@ -219,16 +249,15 @@ PointerDispatch InputArbiter::route_pointer(const PointerEvent& event, std::uint
     const ShellRegion* hit = regions_.hit_test(event.position);
     if (hit != nullptr)
     {
-        dispatch.target = target_for(hit->kind);
-        dispatch.region_id = hit->id;
+        verdict.target = target_for(hit->kind);
+        verdict.region_id = hit->id;
     }
     else
     {
-        dispatch.target = InputTarget::browser;
+        verdict.target = InputTarget::browser;
     }
-    fill_positions(dispatch, event, hit);
-    ++pointer_dispatches_;
-    return dispatch;
+    verdict.region = hit;
+    return verdict;
 }
 
 KeyDispatch InputArbiter::route_key(const KeyEvent& event, std::uint64_t now_us)

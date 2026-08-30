@@ -193,6 +193,21 @@ struct KeyDispatch
     std::uint64_t dispatch_timestamp_us = 0;
 };
 
+// route_pointer's VERDICT for a sample, with none of its effects: no capture established, released
+// or swallowed, no counter bumped. What an OS-side consumer asks before deciding whether a press is
+// its own — the macOS caption consult (cocoa_chrome.h) runs at NSEvent time, BEFORE the sample can
+// reach route_pointer, and must reach the same answer the arbiter would.
+struct PointerPreview
+{
+    InputTarget target = InputTarget::browser;
+    // The region the arbiter would credit (empty for the browser / swallowed).
+    std::string region_id;
+    // The published region behind `region_id`, when it is currently published; valid until the
+    // next publish. Null for the browser, for a swallowed sample, and for a capture whose region
+    // has since been unpublished (the capture still routes; only the rect is gone).
+    const ShellRegion* region = nullptr;
+};
+
 // A capture entry. `modal` is the `UiInputRouter` capturing/non-capturing distinction: a modal
 // capture SWALLOWS a miss (the backdrop behind an open dropdown), an overlay capture lets it fall
 // through to normal arbitration.
@@ -242,6 +257,12 @@ public:
     // --- routing ---------------------------------------------------------------------------------
     [[nodiscard]] PointerDispatch route_pointer(const PointerEvent& event, std::uint64_t now_us);
     [[nodiscard]] KeyDispatch route_key(const KeyEvent& event, std::uint64_t now_us);
+    // The verdict route_pointer WOULD give `event` right now, side-effect free (PointerPreview).
+    // Exact by construction: both run the same resolver against the same live capture state, and
+    // the implicit capture a press would establish is the hit-test the press then routes by, so a
+    // preview needs no stand-in for it. test_input.cpp pins the two agreeing across every capture
+    // shape.
+    [[nodiscard]] PointerPreview preview_pointer(const PointerEvent& event) const;
 
     // Counters the smoke asserts an input round-trip from.
     [[nodiscard]] int pointer_dispatches() const { return pointer_dispatches_; }
@@ -252,6 +273,9 @@ private:
     // Fill a dispatch's positions from a physical sample + the claiming region (nullptr == browser).
     void fill_positions(PointerDispatch& out, const PointerEvent& event,
                         const ShellRegion* region) const;
+    // The ONE routing resolver (§6.2 + capture): `via_capture` reports whether the live capture
+    // claimed the sample, which is what route_pointer's release bookkeeping keys on.
+    [[nodiscard]] PointerPreview resolve_pointer(const PointerEvent& event, bool& via_capture) const;
 
     RegionMap regions_;
     DpiScale dpi_;

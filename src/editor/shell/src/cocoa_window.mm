@@ -560,10 +560,10 @@ public:
 
     // --- the c1 hybrid-chrome surface (cocoa_chrome.h; reached via the name()-keyed free
     // --- functions at the bottom of this file) ---------------------------------------------------
-    void bind_caption_regions(const RegionMap* regions) { caption_regions_ = regions; }
+    void bind_caption_arbiter(const InputArbiter* arbiter) { caption_arbiter_ = arbiter; }
     [[nodiscard]] CocoaCaptionStats caption_stats() const
     {
-        return CocoaCaptionStats{caption_drags_, caption_zooms_};
+        return CocoaCaptionStats{caption_drags_, caption_zooms_, caption_yields_};
     }
     [[nodiscard]] bool hybrid_chrome(CocoaChromeState& out) const;
 
@@ -592,13 +592,14 @@ private:
     // The modifier mask as of the PREVIOUS event, which is the only way a FlagsChanged can be read
     // as a press or a release (see translate_ns_event).
     std::uint64_t modifier_flags_ = 0;
-    // c1: the window's LIVE region map (the InputArbiter's own — cocoa_bind_caption_regions), so
-    // the pump can consult the published `caption` rects while the NSEvent is still in hand. Read
+    // c1: the window's LIVE input arbiter (cocoa_bind_caption_arbiter), so the pump can consult the
+    // published `caption` rects AND the live capture state while the NSEvent is still in hand. Read
     // ONLY inside handle(), which only runs from pump(), so the EditorWindow member-destruction
     // order (its arbiter dies before this backend) can never race a read.
-    const RegionMap* caption_regions_ = nullptr;
+    const InputArbiter* caption_arbiter_ = nullptr;
     std::size_t caption_drags_ = 0;
     std::size_t caption_zooms_ = 0;
+    std::size_t caption_yields_ = 0;
     // d3: the installed global menu bar + its one shared target. `menu_dispatch_` is the member the
     // target aims at (the mailbox discipline: the ObjC object knows one pointer, the backend owns
     // the lifetime) — it wraps the caller's callback with the activation counter, so the two can
@@ -996,14 +997,14 @@ bool CocoaWindowBackend::handle(NSEvent* event)
     // from — ROADMAP risk 3, the same claim b1 makes NC-side) and the pump skips its
     // [NSApp sendEvent:] forward for it (the hand-off IS the event's AppKit consumption; see the
     // pump). This must run at NSEvent time, not at dispatch time, because only here does the real
-    // NSEvent still exist. The decision itself is the pure caption_press_action, leg-tested
-    // against the SAME last-match-wins hit-test the arbiter routes by, so the two agree about who
-    // owns a CAPTURE-FREE press. KNOWN GAP: the consult cannot see the arbiter's capture state
-    // (it holds only the RegionMap), so a left press while another button's implicit capture — or
-    // a future modal push_capture — is live is consumed here even though route_pointer would have
-    // routed it to the capture target (or swallowed it for a modal backdrop). Every other event —
-    // moves, releases, keys, the right button — flows on untouched.
-    if (type == NSEventTypeLeftMouseDown && caption_regions_ != nullptr && window_ != nil)
+    // NSEvent still exist. The decision itself is the pure caption_press_action, leg-tested as
+    // THE ARBITER'S OWN VERDICT: the same last-match-wins hit-test route_pointer uses AND the same
+    // live capture state (InputArbiter::preview_pointer, side-effect free), so the two agree about
+    // who owns EVERY press — a left press while another button's implicit capture or a modal
+    // push_capture is live is `yielded` here and flows on to route_pointer, which routes it to the
+    // capture target or swallows it for the modal backdrop, exactly as the preview said. Every
+    // other event — moves, releases, keys, the right button — flows on untouched.
+    if (type == NSEventTypeLeftMouseDown && caption_arbiter_ != nullptr && window_ != nil)
     {
         for (std::size_t i = 0; i < batch.count; ++i)
         {
@@ -1011,7 +1012,7 @@ bool CocoaWindowBackend::handle(NSEvent* event)
             {
                 continue;
             }
-            switch (caption_press_action(batch.events[i].pointer, *caption_regions_))
+            switch (caption_press_action(batch.events[i].pointer, *caption_arbiter_))
             {
             // Both consumed arms ACTIVATE first: a titlebar click on a background window makes it
             // key and orders it front on native macOS, and that behaviour used to arrive through
@@ -1029,6 +1030,11 @@ bool CocoaWindowBackend::handle(NSEvent* event)
                 [window_ makeKeyAndOrderFront:nil];
                 [window_ zoom:nil];
                 return true;
+            case CaptionPressAction::yielded:
+                // Counted, NOT consumed: the press is enqueued and forwarded like any other, so
+                // the arbiter applies the verdict the consult previewed.
+                ++caption_yields_;
+                break;
             case CaptionPressAction::none:
                 break;
             }
@@ -1252,11 +1258,11 @@ bool cocoa_hybrid_chrome(const IWindowBackend& backend, CocoaChromeState& out)
     return cocoa != nullptr && cocoa->hybrid_chrome(out);
 }
 
-void cocoa_bind_caption_regions(IWindowBackend& backend, const RegionMap* regions)
+void cocoa_bind_caption_arbiter(IWindowBackend& backend, const InputArbiter* arbiter)
 {
     if (CocoaWindowBackend* cocoa = as_cocoa(backend))
     {
-        cocoa->bind_caption_regions(regions);
+        cocoa->bind_caption_arbiter(arbiter);
     }
 }
 

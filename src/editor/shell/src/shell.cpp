@@ -91,13 +91,14 @@ EditorWindow::EditorWindow(std::unique_ptr<IWindowBackend> backend,
     input_.set_dpi(backend_->dpi());
     last_placement_ = backend_->placement();
     // c1 (editor-window-chrome, target design 02 §4): a macOS backend consults THIS window's live
-    // region map at NSEvent time, so a press on the published `caption` rect becomes the OS's
-    // window drag — the only moment performWindowDragWithEvent: still has the event in hand. Wired
-    // at construction, unconditionally, so EVERY composition (the app, the windowed smoke, a test)
-    // gets production wiring; a no-op for every non-Cocoa backend. Lifetime is sound by scope: the
-    // arbiter is a member of this same object and the backend reads the pointer only inside
-    // pump(), which never runs during destruction.
-    cocoa_bind_caption_regions(*backend_, &input_.regions());
+    // input arbiter at NSEvent time — its published region map AND its capture state — so a press
+    // on the `caption` rect becomes the OS's window drag exactly when route_pointer would have
+    // credited the caption, and never while a live capture owns the press. Wired at construction,
+    // unconditionally, so EVERY composition (the app, the windowed smoke, a test) gets production
+    // wiring; a no-op for every non-Cocoa backend. Lifetime is sound by scope: the arbiter is a
+    // member of this same object and the backend reads the pointer only inside pump(), which never
+    // runs during destruction.
+    cocoa_bind_caption_arbiter(*backend_, &input_);
 }
 
 PresentPath EditorWindow::attach_present(render::IRhi& rhi)

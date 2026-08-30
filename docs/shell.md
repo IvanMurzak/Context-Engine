@@ -333,9 +333,20 @@ only moment `performWindowDragWithEvent:` still has the event in hand: a single 
 published `caption` rect is handed to the OS drag, a double-click is `zoom:`, and either way the
 press is consumed whole (never enqueued, never forwarded to `sendEvent:` — the hand-off IS its
 AppKit consumption), so the browser can never hold a stuck hover from a half-press. The decision
-itself (`caption_press_action`) is pure, uses the arbiter's own last-match-wins hit-test, and runs
-in `editor-shell-test_cocoa_chrome` on all three legs; the windowed proof rides
-`editor-shell-cocoa-window`'s c1 step on the macOS `editor-cef-smoke` job.
+itself (`caption_press_action`) is pure and is **the arbiter's own verdict, regions AND capture**:
+it reads the window's live `InputArbiter` — the same last-match-wins hit-test `route_pointer` uses,
+and the same capture state, through the side-effect-free `InputArbiter::preview_pointer` — so a
+left press on the caption while another button's implicit drag or a modal `push_capture` is live
+is **yielded** (`CaptionPressAction::yielded`, counted in `CocoaCaptionStats::yields`), flows on
+to the arbiter like any other press, and is routed to the capture target or swallowed for the
+modal backdrop exactly as previewed; an overlay capture the press is outside of lets the caption
+keep it, as arbitration does. (c1 shipped with the consult reading only the region map, which made
+such a press a window drag its owner never saw — closed 2026-08-29.) It runs in
+`editor-shell-test_cocoa_chrome` on all three legs, `preview_pointer`'s agreement with
+`route_pointer` across every capture shape in `editor-shell-test_input`; the windowed proof rides
+`editor-shell-cocoa-window`'s c1 step on the macOS `editor-cef-smoke` job. The double-click is
+`zoom:` by design (02 §4) — the system's `AppleActionOnDoubleClick` preference is deliberately not
+consulted.
 
 **The macOS native menu (editor-window-chrome d3, menu structure 03).** editor-core publishes its
 ONE declarative menu model over `menu.publish` (`window_bridge.h` — installed on every window that

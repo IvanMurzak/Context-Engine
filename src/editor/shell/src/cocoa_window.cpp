@@ -42,7 +42,7 @@ bool cocoa_hybrid_chrome(const IWindowBackend& /*backend*/, CocoaChromeState& /*
     return false;
 }
 
-void cocoa_bind_caption_regions(IWindowBackend& /*backend*/, const RegionMap* /*regions*/) {}
+void cocoa_bind_caption_arbiter(IWindowBackend& /*backend*/, const InputArbiter* /*arbiter*/) {}
 
 bool cocoa_caption_stats(const IWindowBackend& /*backend*/, CocoaCaptionStats& /*out*/)
 {
