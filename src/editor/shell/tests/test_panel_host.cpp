@@ -23,7 +23,9 @@
 
 #include "shell_test.h"
 
+#include <cstddef>
 #include <cstdint>
+#include <map>
 #include <optional>
 #include <string>
 #include <vector>
@@ -65,6 +67,18 @@ std::vector<gc::Contribution> synthetic_roster()
     return {make_contribution("test.alpha", "Alpha", 1),
             make_contribution("test.beta", "Beta", 7),
             make_contribution("test.gestural", "Gestural", 1)};
+}
+
+// One synthetic panel with an EXPLICIT instance mode (editor-UX c3). The shared roster above is
+// `limited` max 3 on purpose (see make_contribution); the instance cases need each of the three
+// modes side by side, and stating the mode at the call site is what keeps a case's expectation
+// readable next to the fixture that produces it.
+gc::Contribution with_mode(std::string id, gc::InstanceMode mode, int max)
+{
+    gc::Contribution c = make_contribution(std::move(id), "Modal", 1);
+    c.instances.mode = mode;
+    c.instances.max = max;
+    return c;
 }
 
 // A model whose tree changes with its data, so a re-render is observably different — that is what
@@ -129,6 +143,42 @@ shell::PanelProvider make_provider(FakeModel& model, bool with_gestures, bool wi
         };
     }
     return provider;
+}
+
+// A model bag that mints ONE FakeModel PER INSTANCE, keyed by instance id — the fixture the whole
+// per-instance-state claim rests on.
+//
+// ⚠ IT DELIBERATELY DOES NOT SHARE. The sibling fixture (`provide`, a single FakeModel) is what
+// proves the shared-model binding still shares, and running BOTH is what makes each meaningful: a
+// factory test alone cannot tell "each instance got its own model" from "the host renders whatever
+// the last caller touched".
+struct InstanceModels
+{
+    // NODE-STABLE: a std::map never invalidates a reference on insert, and the providers below
+    // capture `FakeModel&`. A vector would dangle the moment a second instance is created.
+    std::map<std::string, FakeModel> models;
+
+    [[nodiscard]] shell::PanelProviderFactory factory(bool with_gestures, bool with_state)
+    {
+        return [this, with_gestures, with_state](const std::string& instance_id)
+        {
+            FakeModel& model = models[instance_id];
+            // Label the model by its instance so a render is OBSERVABLY per-copy: two instances that
+            // shared a model would render the same label, and every "distinct state" assertion below
+            // would be comparing a constant to itself.
+            model.label = instance_id;
+            model.blob = Json(instance_id);
+            return make_provider(model, with_gestures, with_state);
+        };
+    }
+};
+
+Json instance_params(const std::string& panel_id, const std::string& instance_id)
+{
+    Json params = Json::object();
+    params.set("panelId", Json(panel_id));
+    params.set("instanceId", Json(instance_id));
+    return params;
 }
 
 // --- helpers over the JSON projections --------------------------------------------------------
@@ -622,6 +672,423 @@ void projects_manifest_commands_into_the_roster()
     }
 }
 
+
+// --- editor-UX c3: the instance runtime -------------------------------------------------------
+
+// The id COMPOSITION rule, both directions. It is a wire contract (`kPanelInstanceSeparator` is
+// byte-compared against the TS mirror by `webui-panel-contract`), and the decomposition is what a
+// layout restore depends on: Dockview re-creates a persisted panel BY ID before anything has
+// registered it, so the kind must be recoverable from the id alone.
+void composes_and_decomposes_instance_ids()
+{
+    CHECK(shell::make_panel_instance_id("builtin.problems", 1) == "builtin.problems#1");
+    CHECK(shell::make_panel_instance_id("builtin.problems", 42) == "builtin.problems#42");
+    CHECK(shell::panel_id_of_instance("builtin.problems#1") == "builtin.problems");
+    // A bare id — what a persisted arrangement written before instances existed carries — reads as
+    // the KIND itself, which is the honest restore rather than a lookup that can only fail.
+    CHECK(shell::panel_id_of_instance("builtin.problems") == "builtin.problems");
+    // Splits on the LAST separator: a panel id containing one must resolve to the panel that
+    // exists, not to a prefix that does not.
+    CHECK(shell::panel_id_of_instance("odd#name#7") == "odd#name");
+}
+
+// SINGLETON: the second open FOCUSES the live copy and reports it, which is the behaviour
+// `dock.singleton` never had — `open` used to refuse a second open of every panel whatever its mode
+// said, so the flag could not change any outcome.
+void singleton_focuses_instead_of_refusing()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.single", gc::InstanceMode::singleton, 0));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.single", models.factory(false, false)));
+
+    const shell::InstanceOpen first = host.open_instance("test.single");
+    CHECK(first.outcome == shell::InstanceOutcome::opened);
+    CHECK(first.instance_id == "test.single#1");
+
+    const shell::InstanceOpen second = host.open_instance("test.single");
+    CHECK(second.outcome == shell::InstanceOutcome::focused);
+    // THE SAME copy, and no diagnostic: "already open" is an answer, not a failure.
+    CHECK(second.instance_id == first.instance_id);
+    CHECK(second.code.empty());
+    CHECK(host.instances("test.single").size() == 1);
+
+    // A DIFFERENT id, though, is genuinely refused — a singleton cannot hold two copies, and
+    // silently answering with the live one would attach the caller's state to the wrong copy.
+    const shell::InstanceOpen other = host.open_instance("test.single", "test.single#2");
+    CHECK(other.outcome == shell::InstanceOutcome::refused);
+    CHECK(other.code == shell::kErrPanelInstanceLimit);
+    CHECK(shelltest::mentions(other.diagnostic, "singleton"));
+    CHECK(host.instances("test.single").size() == 1);
+}
+
+// LIMITED: opens up to `max`, and the max+1 is refused WITH THE LIMIT NAMED. Both halves matter —
+// a refusal alone would pass with the ceiling set to zero, so the three successful opens are the
+// non-vacuity sibling.
+void limited_opens_to_max_then_refuses_naming_the_limit()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.limited", gc::InstanceMode::limited, 2));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.limited", models.factory(false, false)));
+
+    CHECK(host.open_instance("test.limited").outcome == shell::InstanceOutcome::opened);
+    CHECK(host.open_instance("test.limited").outcome == shell::InstanceOutcome::opened);
+    CHECK(host.instances("test.limited").size() == 2);
+
+    const shell::InstanceOpen third = host.open_instance("test.limited");
+    CHECK(third.outcome == shell::InstanceOutcome::refused);
+    CHECK(third.code == shell::kErrPanelInstanceLimit);
+    // NAMES the limit (design 04 section 3). A diagnostic that only said "refused" would send the
+    // human to the manifest to find out what they hit.
+    CHECK(shelltest::mentions(third.diagnostic, "max 2"));
+    CHECK(host.instances("test.limited").size() == 2);
+
+    // CLOSING FREES A SLOT — the half a ceiling counted over the SESSION rather than over the LIVE
+    // set would fail. Without `close_instance` a `limited` panel would refuse forever after `max`
+    // opens, however many the user had since closed.
+    CHECK(host.close_instance("test.limited", "test.limited#1"));
+    CHECK(host.instances("test.limited").size() == 1);
+    const shell::InstanceOpen reopened = host.open_instance("test.limited");
+    CHECK(reopened.outcome == shell::InstanceOutcome::opened);
+    // A FRESH ordinal, never a reused one: the counter is monotonic so a stale caller still holding
+    // `#1` cannot be handed the model of the copy that replaced it.
+    CHECK(reopened.instance_id == "test.limited#3");
+    CHECK(!host.close_instance("test.limited", "test.limited#1")); // idempotent, not an error
+}
+
+// UNLIMITED: every open mints a DISTINCT copy, and each copy holds its OWN state. This is the
+// factory binding's whole reason to exist.
+void unlimited_mints_distinct_instances_with_distinct_state()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.many", gc::InstanceMode::unlimited, 0));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.many", models.factory(false, true)));
+
+    const shell::InstanceOpen a = host.open_instance("test.many");
+    const shell::InstanceOpen b = host.open_instance("test.many");
+    CHECK(a.outcome == shell::InstanceOutcome::opened);
+    CHECK(b.outcome == shell::InstanceOutcome::opened);
+    CHECK(a.instance_id != b.instance_id);
+    CHECK(host.instances("test.many").size() == 2);
+
+    // DISTINCT RENDERS. The factory labels each model with its own instance id, so identical HTML
+    // here would mean the two copies share one model — the exact failure the pair exists to rule out.
+    std::string code;
+    const std::optional<shell::PanelRender> render_a = host.render("test.many", code, a.instance_id);
+    const std::optional<shell::PanelRender> render_b = host.render("test.many", code, b.instance_id);
+    CHECK(render_a.has_value() && render_b.has_value());
+    if (render_a.has_value() && render_b.has_value())
+    {
+        CHECK(render_a->instance_id == a.instance_id);
+        CHECK(render_b->instance_id == b.instance_id);
+        CHECK(render_a->html != render_b->html);
+        CHECK(shelltest::mentions(render_a->html, a.instance_id.c_str()));
+        CHECK(shelltest::mentions(render_b->html, b.instance_id.c_str()));
+    }
+
+    // DISTINCT STATE, and a write to one does NOT leak to the other.
+    Json persisted = Json::object();
+    persisted.set(gc::kStateSchemaVersionKey, Json(static_cast<std::uint64_t>(1)));
+    persisted.set(gc::kStateDataKey, Json("only-a"));
+    bool restored = false;
+    std::string state_code;
+    std::string diagnostic;
+    CHECK(host.restore_state("test.many", persisted, restored, state_code, diagnostic, code,
+                             a.instance_id));
+    CHECK(restored);
+
+    const std::optional<Json> state_a = host.get_state("test.many", code, a.instance_id);
+    const std::optional<Json> state_b = host.get_state("test.many", code, b.instance_id);
+    CHECK(state_a.has_value() && state_b.has_value());
+    if (state_a.has_value() && state_b.has_value())
+    {
+        CHECK(state_a->at(gc::kStateDataKey).as_string() == "only-a");
+        // B still holds what its own factory gave it. Equality here would be the leak.
+        CHECK(state_b->at(gc::kStateDataKey).as_string() == b.instance_id);
+    }
+}
+
+// THE SIBLING that keeps the case above honest: a `provide()` binding SHARES one model across every
+// copy, exactly as panel_host.h documents. Without this, "each factory instance has its own state"
+// could not be told from "the host always gives every instance its own state", and the factory
+// binding would look like an elaborate no-op.
+void a_shared_provider_binding_shares_one_model_across_instances()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.shared", gc::InstanceMode::unlimited, 0));
+    shell::PanelHost host(std::move(roster));
+    FakeModel one;
+    CHECK(host.provide("test.shared", make_provider(one, false, true)));
+
+    const shell::InstanceOpen a = host.open_instance("test.shared");
+    const shell::InstanceOpen b = host.open_instance("test.shared");
+    CHECK(a.instance_id != b.instance_id);
+
+    // A command dispatched to A changes the ONE model, so B renders the change too.
+    bool dispatched = false;
+    std::string code;
+    CHECK(host.invoke("test.shared", "test.activate", Json::object(), dispatched, code,
+                      a.instance_id));
+    CHECK(dispatched);
+    CHECK(one.activations == 1);
+    const std::optional<shell::PanelRender> render_b = host.render("test.shared", code, b.instance_id);
+    CHECK(render_b.has_value());
+    if (render_b.has_value())
+    {
+        CHECK(shelltest::mentions(render_b->html, "activated"));
+    }
+}
+
+// The DEFAULT instance: a call that names no id addresses the kind's first live copy, and
+// MATERIALISES one when there is none. That is what keeps every pre-c3 caller — 55 of them —
+// meaning exactly what it meant.
+void an_unnamed_instance_resolves_to_the_default_copy()
+{
+    shell::PanelHost host(synthetic_roster());
+    FakeModel alpha;
+    CHECK(host.provide("test.alpha", make_provider(alpha, false, false)));
+    CHECK(host.instances("test.alpha").empty());
+
+    std::string code;
+    const std::optional<shell::PanelRender> first = host.render("test.alpha", code);
+    CHECK(first.has_value());
+    if (first.has_value())
+    {
+        // MATERIALISED on first use, with the ordinary first ordinal.
+        CHECK(first->instance_id == "test.alpha#1");
+    }
+    CHECK(host.instances("test.alpha").size() == 1);
+
+    // And a second unnamed call reuses it rather than minting a second copy — otherwise every poll
+    // of a singleton panel would allocate a model.
+    const std::optional<shell::PanelRender> second = host.render("test.alpha", code);
+    CHECK(second.has_value() && host.instances("test.alpha").size() == 1);
+
+    // A NAMED id the renderer minted is materialised too (it owns lifecycle; the ceiling is the
+    // backstop), and the mint counter moves past it so the next default cannot collide.
+    const std::optional<shell::PanelRender> named = host.render("test.alpha", code, "test.alpha#9");
+    CHECK(named.has_value());
+    CHECK(host.instances("test.alpha").size() == 2);
+    CHECK(host.open_instance("test.alpha").instance_id == "test.alpha#10");
+}
+
+// The RESOURCE ceiling and the id-length bound — the two limits that are about an untrusted renderer
+// rather than about the manifest. `unlimited` is a statement about the panel, not a licence for an
+// unbounded allocation driven from the wire.
+void bounds_instance_count_and_id_length_against_a_hostile_renderer()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.many", gc::InstanceMode::unlimited, 0));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.many", models.factory(false, false)));
+
+    for (std::size_t i = 0; i < shell::kMaxPanelInstances; ++i)
+    {
+        CHECK(host.open_instance("test.many").outcome == shell::InstanceOutcome::opened);
+    }
+    const shell::InstanceOpen past = host.open_instance("test.many");
+    CHECK(past.outcome == shell::InstanceOutcome::refused);
+    CHECK(past.code == shell::kErrPanelInstanceLimit);
+    CHECK(shelltest::mentions(past.diagnostic, "host ceiling"));
+
+    // A 4 KiB instance id is refused as BAD PARAMS, not as a limit: it is a malformed address, and
+    // classifying it as a ceiling would tell the caller to close a panel that would not help.
+    std::vector<gc::Contribution> other;
+    other.push_back(with_mode("test.wide", gc::InstanceMode::unlimited, 0));
+    shell::PanelHost wide(std::move(other));
+    InstanceModels wide_models;
+    CHECK(wide.provide_factory("test.wide", wide_models.factory(false, false)));
+    const shell::InstanceOpen huge = wide.open_instance("test.wide", std::string(4096, 'x'));
+    CHECK(huge.outcome == shell::InstanceOutcome::refused);
+    CHECK(huge.code == shell::kErrPanelBadParams);
+    CHECK(wide.instances("test.wide").empty());
+}
+
+// A factory whose probe cannot render is refused AT BIND TIME, exactly as a build-less provider is —
+// and a factory that CAN is bound with its capability shape read off that same probe, so
+// `panel.list` answers `gestures`/`persists` honestly for a kind with no live copy yet (which is
+// every kind at boot, when the renderer reads the roster).
+void a_factory_is_probed_at_bind_time_for_renderability_and_capabilities()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.many", gc::InstanceMode::unlimited, 0));
+    roster.push_back(with_mode("test.broken", gc::InstanceMode::unlimited, 0));
+    shell::PanelHost host(std::move(roster));
+
+    CHECK(!host.provide_factory("test.broken",
+                                [](const std::string&) { return shell::PanelProvider{}; }));
+    CHECK(!host.hosts("test.broken"));
+    CHECK(!host.provide_factory("test.many", nullptr));
+
+    InstanceModels models;
+    CHECK(host.provide_factory("test.many", models.factory(true, true)));
+    const Json listing = host.list();
+    const Json* many = find_panel(listing, "test.many");
+    CHECK(many != nullptr);
+    if (many != nullptr)
+    {
+        CHECK(many->at("hosted").as_bool());
+        // Asserted with NO instance open — the state the renderer actually reads the roster in.
+        CHECK(many->at("gestures").as_bool());
+        CHECK(many->at("persists").as_bool());
+    }
+    CHECK(host.instances("test.many").empty());
+}
+
+// The WIRE half: `instanceId` is optional on all five panel methods, echoed on every reply, and a
+// non-string one is refused rather than silently defaulted to the first copy — which would route one
+// instance's command into another's model.
+void carries_the_instance_id_on_every_panel_method()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.many", gc::InstanceMode::unlimited, 0));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.many", models.factory(true, true)));
+    shell::BridgeRouter router;
+    CHECK(host.install(router));
+
+    const Json addressed = call(router, shell::kPanelRenderMethod,
+                                instance_params("test.many", "test.many#2"));
+    CHECK(addressed.contains("result"));
+    if (addressed.contains("result"))
+    {
+        CHECK(addressed.at("result").at("instanceId").as_string() == "test.many#2");
+        CHECK(shelltest::mentions(addressed.at("result").at("html").as_string(), "test.many#2"));
+    }
+
+    // UNNAMED still answers, and the reply NAMES the copy it addressed rather than echoing the
+    // caller's empty string back — a caller that sent no id still learns which copy it reached.
+    const Json unnamed = call(router, shell::kPanelStateGetMethod, panel_params("test.many"));
+    CHECK(unnamed.contains("result"));
+    if (unnamed.contains("result"))
+    {
+        CHECK(unnamed.at("result").at("instanceId").as_string() == "test.many#2");
+    }
+
+    // A NUMBER where the id belongs is a refusal. Defaulting it would be indistinguishable from a
+    // caller that meant the default copy, which is precisely the confusion that must not be silent.
+    Json bad = Json::object();
+    bad.set("panelId", Json("test.many"));
+    bad.set("instanceId", Json(static_cast<std::int64_t>(7)));
+    const Json refused = call(router, shell::kPanelRenderMethod, bad);
+    CHECK(refused.contains("error"));
+    if (refused.contains("error"))
+    {
+        CHECK(refused.at("error").at("data").at("reason").as_string() == shell::kErrPanelBadParams);
+    }
+
+    // And the RELEASE verb frees the model, so a ceiling counts LIVE copies rather than opens.
+    const Json closed = call(router, shell::kPanelInstanceCloseMethod,
+                             instance_params("test.many", "test.many#2"));
+    CHECK(closed.contains("result"));
+    if (closed.contains("result"))
+    {
+        CHECK(closed.at("result").at("closed").as_bool());
+    }
+    CHECK(host.instances("test.many").empty());
+    // A second close is `closed:false` and NOT an error — a double close is ordinary.
+    const Json again = call(router, shell::kPanelInstanceCloseMethod,
+                            instance_params("test.many", "test.many#2"));
+    CHECK(again.contains("result") && !again.at("result").at("closed").as_bool());
+}
+
+// A CEILING REFUSAL NAMES THE LIMIT ON THE WIRE, not only on the in-process `open_instance` path.
+//
+// `resolve_instance` has nowhere to put the diagnostic `may_open` produced, so every `panel.*`
+// handler used to answer `panel.instance_limit` with its own generic wording — "cannot be rendered
+// by this build", which is FALSE (the build hosts the panel fine) and contradicts
+// `kErrPanelInstanceLimit`'s own contract that the diagnostic NAMES the limit (design 04 section 3).
+// The cost is a debugging round: a human who hit a ceiling went looking for a missing feature
+// instead of closing a panel. `open_instance` was the ONLY path that surfaced it, and it is not on
+// the wire — so the in-process tests above all passed while the renderer saw the wrong cause.
+void the_wire_names_the_limit_when_a_ceiling_refuses()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.limited", gc::InstanceMode::limited, 2));
+    roster.push_back(with_mode("test.capped", gc::InstanceMode::limited, 1));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.limited", models.factory(true, true)));
+    // The sibling subject below: a KNOWN panel that persists nothing AND sits at its own ceiling —
+    // both properties are load-bearing, see there.
+    CHECK(host.provide_factory("test.capped", models.factory(false, false)));
+    shell::BridgeRouter router;
+    CHECK(host.install(router));
+
+    CHECK(host.open_instance("test.limited").outcome == shell::InstanceOutcome::opened);
+    CHECK(host.open_instance("test.limited").outcome == shell::InstanceOutcome::opened);
+
+    // A THIRD copy, addressed from the wire — the ceiling refuses it on every method that would
+    // otherwise materialise one. Two methods rather than one because the wording is per-handler.
+    const Json rendered =
+        call(router, shell::kPanelRenderMethod, instance_params("test.limited", "test.limited#9"));
+    CHECK(rendered.contains("error"));
+    if (rendered.contains("error"))
+    {
+        CHECK(rendered.at("error").at("data").at("reason").as_string()
+              == shell::kErrPanelInstanceLimit);
+        const std::string message = rendered.at("error").at("message").as_string();
+        CHECK(shelltest::mentions(message, "max 2"));
+        // And the old wording, which asserted a cause this build contradicts, is gone.
+        CHECK(!shelltest::mentions(message, "cannot be rendered by this build"));
+    }
+
+    const Json state = call(router, shell::kPanelStateGetMethod,
+                            instance_params("test.limited", "test.limited#9"));
+    CHECK(state.contains("error"));
+    if (state.contains("error"))
+    {
+        CHECK(state.at("error").at("data").at("reason").as_string()
+              == shell::kErrPanelInstanceLimit);
+        CHECK(shelltest::mentions(state.at("error").at("message").as_string(), "max 2"));
+    }
+
+    // NON-VACUITY SIBLING, ON A PANEL THIS HOST KNOWS. A refusal that is not a ceiling keeps its
+    // handler's own wording, so the recomputation stays narrow rather than becoming a blanket
+    // rewrite of every `panel.*` error message.
+    //
+    // ⚠ THE SUBJECT NEEDS BOTH PROPERTIES, and MEASUREMENT is why — two weaker siblings were tried
+    // first and BOTH stayed green against a plant that deleted the `error_code` guard:
+    //   * an UNKNOWN panel is refused before the code is ever consulted (`find` misses, so the
+    //     fallback is returned whatever the code says), and
+    //   * a known panel BELOW its ceiling takes the defensive `may_open() == true` branch, which
+    //     also returns the fallback.
+    // Only a known panel sitting AT its ceiling reaches the recomputation with a non-ceiling code.
+    // `test.capped` is `limited` with max 1 and persists nothing, so once its single copy is open a
+    // `panel.state.get` refuses with `panel.no_state` from a panel `may_open` would refuse — the one
+    // combination that can tell a narrow recomputation from a blanket one.
+    CHECK(host.open_instance("test.capped").outcome == shell::InstanceOutcome::opened);
+    const Json no_state = call(router, shell::kPanelStateGetMethod, panel_params("test.capped"));
+    CHECK(no_state.contains("error"));
+    if (no_state.contains("error"))
+    {
+        const std::string message = no_state.at("error").at("message").as_string();
+        CHECK(no_state.at("error").at("data").at("reason").as_string()
+              != shell::kErrPanelInstanceLimit);
+        CHECK(shelltest::mentions(message, "panel.state.get refused for 'test.capped'"));
+        CHECK(!shelltest::mentions(message, "max 1"));
+    }
+
+    // And an UNKNOWN panel still keeps the render handler's own wording too.
+    const Json unknown = call(router, shell::kPanelRenderMethod,
+                              instance_params("test.nonexistent", "test.nonexistent#1"));
+    CHECK(unknown.contains("error"));
+    if (unknown.contains("error"))
+    {
+        CHECK(unknown.at("error").at("data").at("reason").as_string()
+              != shell::kErrPanelInstanceLimit);
+        CHECK(shelltest::mentions(unknown.at("error").at("message").as_string(),
+                                  "cannot be rendered by this build"));
+    }
+}
+
 } // namespace
 
 int main()
@@ -637,5 +1104,15 @@ int main()
     refuses_hostile_params_without_crashing();
     hosts_the_real_roster();
     projects_manifest_commands_into_the_roster();
+    composes_and_decomposes_instance_ids();
+    singleton_focuses_instead_of_refusing();
+    limited_opens_to_max_then_refuses_naming_the_limit();
+    unlimited_mints_distinct_instances_with_distinct_state();
+    a_shared_provider_binding_shares_one_model_across_instances();
+    an_unnamed_instance_resolves_to_the_default_copy();
+    bounds_instance_count_and_id_length_against_a_hostile_renderer();
+    a_factory_is_probed_at_bind_time_for_renderability_and_capabilities();
+    carries_the_instance_id_on_every_panel_method();
+    the_wire_names_the_limit_when_a_ceiling_refuses();
     SHELL_TEST_MAIN_END();
 }

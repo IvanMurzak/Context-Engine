@@ -38,6 +38,7 @@ import { layoutRestoreTests } from "./layoutrestore.test.js";
 import { panelPortTests } from "./panelport.test.js";
 import { panelVerbsTests } from "./panelverbs.test.js";
 import { panelStateTests } from "./panelstate.test.js";
+import { panelInstanceTests } from "./panelinstances.test.js";
 import { bootTests } from "./boot.test.js";
 import { chromeTests } from "./chrome.test.js";
 import { packageEventTests } from "./packageevents.test.js";
@@ -80,6 +81,7 @@ void runTests([
     ...panelPortTests,
     ...panelVerbsTests,
     ...panelStateTests,
+    ...panelInstanceTests,
     // LAST, deliberately: the boot cases drive the whole bundle against a mock Shell and leave real
     // boot state on the shared document (`data-editor-*`, the applied theme's custom properties), so
     // running them after every other case keeps that out of the others' way. The a2 chrome cases sit

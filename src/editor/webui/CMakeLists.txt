@@ -305,10 +305,14 @@ add_test(NAME webui-scheme-contract
             --shell-cef-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/cef/src")
 
 # 1c) The e05d1 PANEL CONTRACT gate. The panel surface is the widest cross-language seam in the
-# editor: six `panel.*` method names, two D6 state member names and four gesture verbs, each of which
-# exists once in C++ and once in TS. A rename on either side unbinds the surface SILENTLY — the
-# editor comes up with no panels and no build error anywhere. This re-reads all twelve out of the
-# BUILT bundle and compares them to the C++ constants, and additionally asserts the two facts that
+# editor: seven `panel.*` method names, the instance-id separator, two D6 state member names, four
+# gesture verbs and — since editor-UX c3 — the three CLOSED MANIFEST VOCABULARIES (instance mode /
+# dock zone / content type), each of which exists once in C++ and once in TS. A rename on either side
+# unbinds the surface SILENTLY: a method drift leaves the editor with no panels, and a VOCABULARY
+# drift is quieter still, because every TS parser fails CLOSED — rename the C++ `unlimited` token and
+# every multi-instance panel becomes a singleton with nothing refusing anywhere. This re-reads them
+# all out of the BUILT bundle and compares them to the C++ constants, and additionally asserts the
+# two facts that
 # would make the panel layer non-functional in a way no unit test can see: that the pinned docking
 # engine is LOADED by the served document (rather than bundled, which would void `webui-assets`'
 # SHA re-hash of the shipped artifact), and that editor-core's declared dependency set is still
@@ -324,6 +328,7 @@ add_test(NAME webui-panel-contract
                 "${CMAKE_CURRENT_SOURCE_DIR}/../gui/contract/include/context/editor/gui/contract"
             --package-json "${_ctx_webui_core}/package.json"
             --shell-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../shell/src"
+            --contract-src-dir "${CMAKE_CURRENT_SOURCE_DIR}/../gui/contract/src"
             --panels-include-dir
                 "${CMAKE_CURRENT_SOURCE_DIR}/../gui/panels/problems/include/context/editor/gui/panels/problems")
 

@@ -537,6 +537,15 @@ PANEL_BUNDLE = (
     'var STATE_SCHEMA_VERSION_KEY = "schemaVersion";\n'
     'var STATE_DATA_KEY = "data";\n'
     'var GESTURE_VERBS = ["begin", "extend", "commit", "cancel"];\n'
+    # editor-UX c3: the instance-lifecycle verb + the instance-id separator (panels.ts).
+    'var PANEL_INSTANCE_CLOSE_METHOD = "panel.instance.close";\n'
+    'var PANEL_INSTANCE_SEPARATOR = "#";\n'
+    # editor-UX c3: the three CLOSED MANIFEST VOCABULARIES, hand-written TS mirrors of the C++
+    # `*_token` switches. `CONTENT_TYPES` deliberately omits `unknown` — a TS-ONLY parse outcome with
+    # no C++ enumerator, which the gate subtracts rather than pinning.
+    'var PANEL_INSTANCE_MODES = ["singleton", "limited", "unlimited"];\n'
+    'var DOCK_ZONES = ["left", "right", "top", "bottom", "center"];\n'
+    'var CONTENT_TYPES = ["uitree", "iframe", "local"];\n'
     # e05d2 editor-state + region-map vocabulary (editorstate.ts).
     'var EDITOR_STATE_GET_METHOD = "editor.state.get";\n'
     'var EDITOR_STATE_PUBLISH_METHOD = "editor.state.publish";\n'
@@ -638,6 +647,8 @@ PANEL_CPP_HEADER = (
     'inline constexpr const char* kPanelGestureMethod = "panel.gesture";\n'
     'inline constexpr const char* kPanelStateGetMethod = "panel.state.get";\n'
     'inline constexpr const char* kPanelStateSetMethod = "panel.state.set";\n'
+    'inline constexpr const char* kPanelInstanceCloseMethod = "panel.instance.close";\n'
+    'inline constexpr const char* kPanelInstanceSeparator = "#";\n'
     "enum class GestureVerb { begin, extend, commit, cancel };\n"
     "const char* gesture_verb_token(GestureVerb verb);\n"
 )
@@ -658,6 +669,48 @@ PANEL_CPP_SOURCE = (
     '        return "cancel";\n'
     "    }\n"
     '    return "cancel";\n'
+    "}\n"
+)
+
+# The R-EDIT-001 closed vocabularies live in gui/contract/src/extension.cpp as `*_token` SWITCHES,
+# like the gesture verbs and unlike every plain-constant surface above. MIRRORS THE REAL SHAPE
+# including each switch's deny-by-default trailing `return`, which repeats a token already emitted —
+# the reader must dedupe it or a set comparison reports a phantom extra, and a fixture without one
+# would hide that.
+PANEL_CPP_EXTENSION = (
+    "const char* dock_zone_token(DockZone zone)\n"
+    "{\n"
+    "    switch (zone)\n"
+    "    {\n"
+    '    case DockZone::left: return "left";\n'
+    '    case DockZone::right: return "right";\n'
+    '    case DockZone::top: return "top";\n'
+    '    case DockZone::bottom: return "bottom";\n'
+    '    case DockZone::center: return "center";\n'
+    "    }\n"
+    '    return "center";\n'
+    "}\n"
+    "\n"
+    "const char* content_type_token(ContentType type)\n"
+    "{\n"
+    "    switch (type)\n"
+    "    {\n"
+    '    case ContentType::uitree: return "uitree";\n'
+    '    case ContentType::iframe: return "iframe";\n'
+    '    case ContentType::local: return "local";\n'
+    "    }\n"
+    '    return "uitree";\n'
+    "}\n"
+    "\n"
+    "const char* instance_mode_token(InstanceMode mode)\n"
+    "{\n"
+    "    switch (mode)\n"
+    "    {\n"
+    '    case InstanceMode::singleton: return "singleton";\n'
+    '    case InstanceMode::limited: return "limited";\n'
+    '    case InstanceMode::unlimited: return "unlimited";\n'
+    "    }\n"
+    '    return "singleton";\n'
     "}\n"
 )
 
@@ -810,6 +863,17 @@ PANEL_DOCUMENT = (
 PANEL_PACKAGE = {"name": "@context-engine/editor-core", "dependencies": {"dockview-core": "7.0.2"}}
 
 
+def t_replace_first_token(bundle: str, ts_name: str, replacement: str) -> str:
+    """Rename the FIRST token of a bundle array — the minimal TS-side drift for that vocabulary.
+
+    A whole-array rewrite would also be drift, but a one-token rename is the mutation a careless edit
+    actually makes, and it is the one a set comparison must still catch.
+    """
+    match = re.search(rf'(var {re.escape(ts_name)} = \[")([^"]*)(")', bundle)
+    assert match is not None, f"{ts_name} is not an array in the fixture bundle"
+    return bundle[:match.start(2)] + replacement + bundle[match.end(2):]
+
+
 def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str = PANEL_DOCUMENT,
                    header: str = PANEL_CPP_HEADER, state: str = PANEL_CPP_STATE,
                    source: str = PANEL_CPP_SOURCE, editor_state: str = PANEL_CPP_EDITOR_STATE,
@@ -825,8 +889,9 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    package_events: str = PANEL_CPP_PACKAGE_EVENTS,
                    package_grants: str = PANEL_CPP_PACKAGE_GRANTS,
                    panels: str = PANEL_CPP_PANELS,
+                   extension: str = PANEL_CPP_EXTENSION,
                    package: dict | None = None,
-                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path, Path]:
+                   stage_dockview: bool = True) -> tuple[Path, Path, Path, Path, Path, Path, Path]:
     asset_dir = tmp_path / "app"
     asset_dir.mkdir(parents=True, exist_ok=True)
     (asset_dir / "editor-core.js").write_text(bundle, encoding="utf-8")
@@ -863,17 +928,23 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     panels_dir.mkdir(parents=True, exist_ok=True)
     (panels_dir / "problems_panel.h").write_text(panels, encoding="utf-8")
 
+    contract_src_dir = tmp_path / "contractsrc"
+    contract_src_dir.mkdir(parents=True, exist_ok=True)
+    (contract_src_dir / "extension.cpp").write_text(extension, encoding="utf-8")
+
     package_json = tmp_path / "package.json"
     package_json.write_text(
         json.dumps(PANEL_PACKAGE if package is None else package), encoding="utf-8")
-    return asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir
+    return (asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir,
+            contract_src_dir)
 
 
 def _run_panel(tmp_path: Path, **kwargs) -> int:
-    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(
-        tmp_path, **kwargs)
+    (asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir,
+     contract_src_dir) = _panel_fixture(tmp_path, **kwargs)
     return check_webui_assets.run_panel_contract(
-        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir, panels_dir)
+        asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir, panels_dir,
+        contract_src_dir)
 
 
 @pytest.mark.parametrize("ts_name", ["PROBLEMS_LIST_NODE_ID", "PROBLEMS_ROW_NODE_ID_PREFIX"])
@@ -898,11 +969,22 @@ def test_renamed_problems_cpp_constant_is_a_config_error(tmp_path: Path) -> None
 
 
 def test_missing_panels_include_dir_is_a_config_error(tmp_path: Path) -> None:
-    asset_dir, include_dir, contract_dir, package_json, src_dir, _ = _panel_fixture(tmp_path)
+    asset_dir, include_dir, contract_dir, package_json, src_dir, _, contract_src = _panel_fixture(
+        tmp_path)
     with pytest.raises(check_webui_assets.CheckError):
         check_webui_assets.run_panel_contract(
             asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir,
-            tmp_path / "no-panels")
+            tmp_path / "no-panels", contract_src)
+
+
+def test_missing_contract_src_dir_is_a_config_error(tmp_path: Path) -> None:
+    """editor-UX c3: without extension.cpp the closed-vocabulary half can verify NOTHING -> exit 2."""
+    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir, _ = _panel_fixture(
+        tmp_path)
+    with pytest.raises(check_webui_assets.CheckError):
+        check_webui_assets.run_panel_contract(
+            asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir,
+            panels_dir, tmp_path / "no-contract-src")
 
 
 def test_panel_contract_happy_path(tmp_path: Path, capsys) -> None:
@@ -913,9 +995,13 @@ def test_panel_contract_happy_path(tmp_path: Path, capsys) -> None:
 @pytest.mark.parametrize("ts_name", [
     "PANEL_LIST_METHOD", "PANEL_RENDER_METHOD", "PANEL_COMMAND_METHOD",
     "PANEL_GESTURE_METHOD", "PANEL_STATE_GET_METHOD", "PANEL_STATE_SET_METHOD",
+    # editor-UX c3. The SEPARATOR is the sharpest of the set: both sides compose AND decompose with
+    # it, so a drift makes every instance id resolve to a kind that does not exist — nothing refuses,
+    # the editor simply comes up with empty panels.
+    "PANEL_INSTANCE_CLOSE_METHOD", "PANEL_INSTANCE_SEPARATOR",
 ])
 def test_panel_method_drift_fails(tmp_path: Path, ts_name: str) -> None:
-    """Every one of the six methods, not a sample: a gate that covers five is a gate with a hole."""
+    """Every one of the constants, not a sample: a gate that covers most is a gate with a hole."""
     drifted = re.sub(rf'({ts_name} = ")[^"]*(")', r"\1panel.drifted\2", PANEL_BUNDLE)
     assert drifted != PANEL_BUNDLE
     assert _run_panel(tmp_path, bundle=drifted) == 1
@@ -1389,12 +1475,12 @@ def test_a_bundle_with_no_gesture_array_at_all_fails(tmp_path: Path) -> None:
 
 def test_missing_bundle_fails_the_panel_gate(tmp_path: Path) -> None:
     """Fail-closed on an absent build artifact (the scheme gate's sibling assertion)."""
-    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(
-        tmp_path)
+    (asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir,
+     contract_src_dir) = _panel_fixture(tmp_path)
     (asset_dir / "editor-core.js").unlink()
     assert check_webui_assets.run_panel_contract(
         asset_dir, "editor-core.js", include_dir, contract_dir, package_json, src_dir,
-        panels_dir) == 1
+        panels_dir, contract_src_dir) == 1
 
 
 def test_renamed_panel_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
@@ -1432,8 +1518,8 @@ def test_dependency_drift_from_the_s1_approved_set_fails(tmp_path: Path, depende
 
 
 def test_main_routes_the_panel_contract_flag(tmp_path: Path) -> None:
-    asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(
-        tmp_path)
+    (asset_dir, include_dir, contract_dir, package_json, src_dir, panels_dir,
+     contract_src_dir) = _panel_fixture(tmp_path)
     assert check_webui_assets.main([
         "--asset-dir", str(asset_dir), "--bundle-name", "editor-core.js",
         "--panel-contract",
@@ -1442,15 +1528,113 @@ def test_main_routes_the_panel_contract_flag(tmp_path: Path) -> None:
         "--package-json", str(package_json),
         "--shell-src-dir", str(src_dir),
         "--panels-include-dir", str(panels_dir),
+        "--contract-src-dir", str(contract_src_dir),
     ]) == 0
 
 
 def test_missing_asset_dir_is_a_panel_config_error(tmp_path: Path) -> None:
-    _, include_dir, contract_dir, package_json, src_dir, panels_dir = _panel_fixture(tmp_path)
+    _, include_dir, contract_dir, package_json, src_dir, panels_dir, contract_src = _panel_fixture(
+        tmp_path)
     with pytest.raises(check_webui_assets.CheckError):
         check_webui_assets.run_panel_contract(
             tmp_path / "nope", "editor-core.js", include_dir, contract_dir, package_json, src_dir,
-            panels_dir)
+            panels_dir, contract_src)
+
+
+# ------------------------------------------------- check 7c2: the R-EDIT-001 closed vocabularies
+#
+# editor-UX c3. Three token tables that lived once in C++ and once in TS with NOTHING comparing them
+# for a whole contract major. The drift is the quietest in the family precisely BECAUSE every TS
+# parser fails closed: `readInstances` falls back to `singleton`, `readDock` to `center`,
+# `readContentType` to `unknown`. Rename a C++ token and no method refuses, no build breaks, and the
+# symptom ("I can only ever open one viewport") reads as a product decision.
+
+
+@pytest.mark.parametrize("ts_name", ["PANEL_INSTANCE_MODES", "DOCK_ZONES", "CONTENT_TYPES"])
+def test_closed_vocabulary_drift_fails(tmp_path: Path, ts_name: str) -> None:
+    """A RENAMED token on the TS side is drift — each vocabulary, not a sample."""
+    drifted = t_replace_first_token(PANEL_BUNDLE, ts_name, "drifted")
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+@pytest.mark.parametrize("ts_name", ["PANEL_INSTANCE_MODES", "DOCK_ZONES", "CONTENT_TYPES"])
+def test_bundle_missing_a_closed_vocabulary_array_fails(tmp_path: Path, ts_name: str) -> None:
+    """An ABSENT array means editor-core is not parsing that vocabulary at all."""
+    stripped = "\n".join(line for line in PANEL_BUNDLE.splitlines() if f"var {ts_name}" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+@pytest.mark.parametrize(
+    "cpp_token,replacement",
+    [("unlimited", "many"), ("center", "middle"), ("uitree", "tree")])
+def test_a_changed_cpp_vocabulary_is_a_config_error(tmp_path: Path, cpp_token: str,
+                                                    replacement: str) -> None:
+    """Anti-rot: this script PINS each set, so a deliberate C++ change must be made here too.
+
+    Exit 2, not 1 — the same discipline the gesture verbs get. Once the pin and the source disagree
+    the check can no longer be trusted to judge EITHER side, and reporting that as an ordinary drift
+    would point the reader at the innocent one.
+    """
+    changed = PANEL_CPP_EXTENSION.replace(f'"{cpp_token}"', f'"{replacement}"')
+    assert changed != PANEL_CPP_EXTENSION
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, extension=changed)
+
+
+@pytest.mark.parametrize("function", ["instance_mode_token", "dock_zone_token",
+                                      "content_type_token"])
+def test_a_renamed_cpp_token_function_is_a_config_error(tmp_path: Path, function: str) -> None:
+    """Rot-into-a-no-op guard: rename the switch and the gate can verify NOTHING -> exit 2."""
+    renamed = PANEL_CPP_EXTENSION.replace(function, f"{function}_v2")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, extension=renamed)
+
+
+def test_content_types_unknown_is_ts_only_and_an_extra_token_still_fails(tmp_path: Path) -> None:
+    """The TS-only subtraction is NARROW, and this proves both halves of that.
+
+    `unknown` is a parse OUTCOME with no C++ enumerator, so carrying it must be fine — asserted by
+    the happy path with it present. But subtracting a NAMED member must not become "ignore anything
+    extra": a second unrecognised token is real drift and still reds. Without the second half the
+    subtraction would be a hole the size of the whole vocabulary.
+    """
+    with_unknown = PANEL_BUNDLE.replace(
+        'var CONTENT_TYPES = ["uitree", "iframe", "local"];',
+        'var CONTENT_TYPES = ["uitree", "iframe", "local", "unknown"];')
+    assert with_unknown != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=with_unknown) == 0
+
+    with_extra = PANEL_BUNDLE.replace(
+        'var CONTENT_TYPES = ["uitree", "iframe", "local"];',
+        'var CONTENT_TYPES = ["uitree", "iframe", "local", "webview"];')
+    assert _run_panel(tmp_path, bundle=with_extra) == 1
+
+
+def test_the_real_repo_closed_vocabularies_agree_across_languages() -> None:
+    """The COMMITTED sources, independent of any build — the gesture check's sibling for c3.
+
+    This is the one that would have caught the gap while it was open: it reads the real
+    `extension.cpp` switches and the real `panels.ts` arrays and compares them as SETS.
+    """
+    token_sources = {
+        "extension.cpp": (REPO_ROOT / "src" / "editor" / "gui" / "contract" / "src" /
+                          "extension.cpp"),
+        "panel_host.cpp": REPO_ROOT / "src" / "editor" / "shell" / "src" / "panel_host.cpp",
+    }
+    ts = (REPO_ROOT / "src" / "editor" / "webui" / "core" / "src" / "panels.ts").read_text(
+        encoding="utf-8")
+    for _human, source, function, ts_name, pinned, ts_only, _why in (
+            check_webui_assets.TOKEN_VOCABULARIES):
+        cpp_tokens = check_webui_assets._read_cpp_token_switch(token_sources[source], function)
+        assert set(cpp_tokens) == set(pinned), (
+            f"the real C++ {function} vocabulary {sorted(cpp_tokens)} drifted from the pinned "
+            f"{sorted(pinned)}")
+        ts_tokens = check_webui_assets._read_ts_string_array_from_bundle(ts, ts_name)
+        assert ts_tokens is not None, f"panels.ts declares no {ts_name} array"
+        assert set(ts_tokens) - set(ts_only) == set(cpp_tokens), (
+            f"panels.ts {ts_name} {sorted(ts_tokens)} drifted from the C++ tokens "
+            f"{sorted(cpp_tokens)}")
 
 
 def test_the_real_repo_panel_sources_agree_across_languages() -> None:
@@ -1482,19 +1666,10 @@ def test_the_real_repo_panel_sources_agree_across_languages() -> None:
                                                                  cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in statusbar_ts, (
             f"{ts_name} drifted from C++ {cpp_name}")
-    # The gesture vocabulary, read from BOTH real sources as SETS — the C++ wire tokens out of the
-    # actual switch, the TS array out of the actual module. Asserting only `verb in ts` (the old
-    # form) could not catch a .cpp token rename at all, because it never opened the .cpp.
-    shell_src = REPO_ROOT / "src" / "editor" / "shell" / "src"
-    cpp_verbs = check_webui_assets._read_cpp_gesture_verbs(shell_src / "panel_host.cpp")
-    assert set(cpp_verbs) == set(check_webui_assets.GESTURE_VERBS), (
-        f"the real C++ gesture vocabulary {sorted(cpp_verbs)} drifted from the pinned "
-        f"{sorted(check_webui_assets.GESTURE_VERBS)}")
-    ts_verbs = check_webui_assets._read_ts_string_array_from_bundle(ts, "GESTURE_VERBS")
-    assert ts_verbs is not None, "panels.ts declares no GESTURE_VERBS array"
-    assert set(ts_verbs) == set(cpp_verbs), (
-        f"panels.ts GESTURE_VERBS {sorted(ts_verbs)} drifted from the C++ wire tokens "
-        f"{sorted(cpp_verbs)}")
+    # The gesture vocabulary is NOT re-asserted here: it is a row of TOKEN_VOCABULARIES, so
+    # `test_the_real_repo_closed_vocabularies_agree_across_languages` above already reads it from
+    # both real sources as SETS. Two shapes of one assertion meant a fifth vocabulary was covered
+    # only if an author happened to edit the right one.
 
 
 def test_the_real_editor_core_dependencies_are_the_approved_set() -> None:

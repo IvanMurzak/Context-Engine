@@ -100,6 +100,17 @@ export interface DockviewAddPanelOptions {
 /** A live panel handle. */
 export interface DockviewPanelHandle {
     readonly id: string;
+    /**
+     * The panel's own API. ONE member declared — `setActive` — and it is the D6 singleton rule's
+     * "focus" half (editor-UX c3): a second open of a `singleton` raises the live copy instead of
+     * refusing. Widening this surface costs the D2 fallback (see the file header), so it is one
+     * method rather than the whole `DockviewPanelApi`.
+     *
+     * OPTIONAL, so a T1 harness may hand back a bare `{id}` handle. The caller uses `?.`, and a host
+     * that cannot raise a tab has still answered the question the caller acts on — WHICH copy this
+     * open names.
+     */
+    readonly api?: { setActive(): void };
 }
 
 /** A Dockview event registration; calling `dispose` detaches the listener. */

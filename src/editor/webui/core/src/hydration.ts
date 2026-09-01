@@ -231,6 +231,21 @@ export interface HydrationOptions {
     readonly gestures: boolean;
     /** Called after any successful dispatch, so the host can re-render on the new revision. */
     readonly onDispatched?: (revision: number) => void;
+    /**
+     * WHICH COPY of the panel kind this runtime is bound to (editor-UX c3, design 04 §3).
+     *
+     * Optional, and its absence means "the kind's one copy" — every pre-c3 caller keeps meaning what
+     * it meant, and the Shell's own "no id ⇒ the default instance" path answers it. `PanelHost`
+     * always supplies one.
+     *
+     * ⚠ IT IS ALSO THE DOM-ID SCOPE, which is the half a reader is likeliest to miss. `#normalise`
+     * rewrites every model node id to `<scope>::<nodeId>` so two panels cannot both own `id="root"`;
+     * with two copies of ONE kind mounted in one document, a scope of the PANEL id makes that
+     * collision come back — duplicate ids across the two slots, which is invalid HTML and actively
+     * breaks assistive technology, since it resolves references by id. Scoping by INSTANCE is what
+     * keeps the document valid once a kind can exist twice.
+     */
+    readonly instanceId?: string;
 }
 
 /**
@@ -244,6 +259,18 @@ export class HydrationRuntime {
     readonly #container: HTMLElement;
     readonly #client: PanelClient;
     readonly #panelId: string;
+    /**
+     * The copy this runtime ADDRESSES ON THE WIRE — `""` when the host bound none.
+     *
+     * ⚠ EMPTY IS NOT THE SAME AS `#idScope` BELOW, and keeping them apart is what makes this change
+     * additive. An unscoped runtime sends NO `instanceId` member at all (`PanelClient` omits the key
+     * for `""`), so a valueless dispatch stays byte-identical to the pre-c3 wire and the Shell's "no
+     * id ⇒ the default copy" path answers it — while the DOM still needs a non-empty scope, which is
+     * the panel id, exactly as it was.
+     */
+    readonly #instanceId: string;
+    /** The DOM-id scope (see `HydrationOptions.instanceId`). Never empty. */
+    readonly #idScope: string;
     readonly #gesturesEnabled: boolean;
     readonly #onDispatched: ((revision: number) => void) | undefined;
 
@@ -316,6 +343,10 @@ export class HydrationRuntime {
         this.#container = container;
         this.#client = client;
         this.#panelId = panelId;
+        this.#instanceId = options.instanceId ?? "";
+        // The SCOPE falls back to the panel id: an unscoped runtime is the single-copy world this
+        // class shipped in, and the panel id is exactly the scope it used then.
+        this.#idScope = this.#instanceId === "" ? panelId : this.#instanceId;
         this.#gesturesEnabled = options.gestures;
         this.#onDispatched = options.onDispatched;
         this.#bindInteractions();
@@ -354,7 +385,7 @@ export class HydrationRuntime {
         // newer revision look already-applied so nothing heals it until the next user action.
         // Revision comparison alone cannot substitute: `apply` is also called directly.
         const generation = ++this.#generation;
-        const render = await this.#client.render(this.#panelId);
+        const render = await this.#client.render(this.#panelId, this.#instanceId);
         if (render === null || generation !== this.#generation || this.#disposed) {
             return false;
         }
@@ -663,7 +694,13 @@ export class HydrationRuntime {
         // this an unexpected transport throw becomes an unhandled promise rejection in a renderer
         // that has no console to report it — the runtime would go quiet with no diagnosis.
         try {
-            const result = await this.#client.command(this.#panelId, commandId, nodeId, value);
+            const result = await this.#client.command(
+                this.#panelId,
+                commandId,
+                nodeId,
+                value,
+                this.#instanceId,
+            );
             // Counted only when the command ACTUALLY dispatched: a refusal or a transport failure
             // is not a dispatch, and inflating the counter would misreport what the panel did.
             if (result !== null && result.dispatched) {
@@ -737,7 +774,12 @@ export class HydrationRuntime {
         }
         // Caught for the same reason as `#activate` — every caller reaches this through `void`.
         try {
-            const result = await this.#client.gesture(this.#panelId, verb, { nodeId, x, y });
+            const result = await this.#client.gesture(
+                this.#panelId,
+                verb,
+                { nodeId, x, y },
+                this.#instanceId,
+            );
             this.#gestures += 1;
             if (result !== null && result.dispatched) {
                 this.#onDispatched?.(result.revision);
@@ -784,7 +826,7 @@ export class HydrationRuntime {
                 continue;
             }
             element.setAttribute(NODE_ID_ATTRIBUTE, nodeId);
-            element.setAttribute("id", `${this.#panelId}::${nodeId}`);
+            element.setAttribute("id", `${this.#idScope}::${nodeId}`);
             const role = element.getAttribute("role") ?? "";
             // Through the kit's own accessor rather than by indexing the map: it is the surface the
             // kit publishes, and routing the runtime's only lookup through it keeps that surface

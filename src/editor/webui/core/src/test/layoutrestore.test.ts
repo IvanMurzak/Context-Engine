@@ -126,9 +126,11 @@ export const layoutRestoreTests: readonly TestCase[] = [
                 const before = hostedPanelIds(mounted.host);
                 assertEqual(
                     before,
-                    "builtin.problems,builtin.scenetree",
+                    "builtin.problems#1,builtin.scenetree#1",
                     "start() opened both rostered panels — otherwise every surviving-dock " +
-                        "assertion below is vacuous",
+                        "assertion below is vacuous. Dockview keys its arrangement by INSTANCE id " +
+                        "since editor-UX c3, so a bare panel id here would mean the rekeying never " +
+                        "reached the engine",
                 );
                 assertEqual(
                     mounted.host.restoreLayout({}),
@@ -222,8 +224,8 @@ export const layoutRestoreTests: readonly TestCase[] = [
                 assertEqual(target.host.restoreLayout(layout), true, "the arrangement restores");
                 assertEqual(
                     hostedPanelIds(target.host),
-                    "builtin.problems,builtin.scenetree",
-                    "and the restored dock hosts the donor's panels",
+                    "builtin.problems#1,builtin.scenetree#1",
+                    "and the restored dock hosts the donor's panels, by the INSTANCE ids it saved",
                 );
             } finally {
                 target.dispose();

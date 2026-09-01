@@ -49,7 +49,12 @@ import { Keymap, KeybindingsClient } from "./keymap.js";
 import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.js";
 import { PaletteView } from "./palette_view.js";
 import { PanelClient } from "./panels.js";
-import { PanelHost, type LocalPanelFactory, type PanelVerbBinding } from "./panelhost.js";
+import {
+    PanelHost,
+    type LocalPanelFactory,
+    type PanelOpenResult,
+    type PanelVerbBinding,
+} from "./panelhost.js";
 import {
     PANEL_VERB_COMMAND_INVOKE,
     makePanelBridgeVerbs,
@@ -739,7 +744,11 @@ async function startPanels(
             if (seededTitle !== "") {
                 chrome?.mount.setTitle(seededTitle);
             }
-            await client.setState(seed.panelId, seed.state);
+            // ADDRESSED TO THE COPY, not to the kind (c3). `start({only})` opened exactly one, and
+            // it is the one the moved state belongs to — a bare kind-addressed restore happens to
+            // reach the same model today only because there is one, which is an assumption a second
+            // copy silently breaks.
+            await client.setState(seed.panelId, seed.state, host.mounted[0]);
             await host.refreshAll();
         }
 
@@ -937,7 +946,9 @@ interface MenuBringUp {
     /** The d3 command set, registered through `buildCommandRegistry`'s `menuCommands` source. */
     readonly commands: readonly Command[];
     /** Filled by startPanels once the PanelHost exists — `view.panel.open.settings`'s late bind. */
-    readonly hostHolder: { current: { openById(panelId: string): boolean } | undefined };
+    readonly hostHolder: {
+        current: { openInstance(panelId: string): PanelOpenResult } | undefined;
+    };
     /** Route a command id through the late-bound registry (the menubar + the native-fact path). */
     readonly executeCommand: (commandId: string) => void;
     /** Publish the model to the Shell (macOS NSMenu feed) — called once the command layer is up. */
@@ -989,7 +1000,13 @@ async function startMenu(bridge: ShellBridge, options: StartMenuOptions): Promis
         project: new WelcomeClient(bridge),
         windowControls: chromeClient,
         select: new SessionControlClient(bridge),
-        openPanel: (panelId: string): boolean => hostHolder.current?.openById(panelId) ?? false,
+        // ⚠ `focused` IS A SUCCESS (editor-UX c3). A menu activation for a singleton that is already
+        // open raises the live copy, and reporting that as a failure would make "open Settings" say
+        // it did nothing at the exact moment it did the right thing.
+        openPanel: (panelId: string): boolean => {
+            const host = hostHolder.current;
+            return host !== undefined && host.openInstance(panelId).outcome !== "refused";
+        },
         openDocs: (): Promise<boolean> => banners.openDocs(),
         showAbout: (): void => {
             // The dialog renders whatever `update.state` already knows (03's table: version + the
@@ -1292,7 +1309,7 @@ const reportNotices = makeChangeReporter(NOTICES_ATTRIBUTE);
 
 /**
  * Open + restore every panel that has rehomed INTO this window (M9 e10b) — the RUNTIME half of the
- * D6 recreate path (the boot seed is the boot half). Each seed is `openById` + `panel.state.set` +
+ * D6 recreate path (the boot seed is the boot half). Each seed is `openInstance` + `panel.state.set` +
  * `refreshAll`, exactly the seed-open in `startPanels`, so rehome and tear-out demonstrably use the
  * SAME mechanism (a DoD line). Best-effort and total: a panel this build cannot host is skipped.
  */
@@ -1303,8 +1320,13 @@ async function applyRehomedPanels(
 ): Promise<number> {
     let applied = 0;
     for (const seed of seeds) {
-        if (host.openById(seed.panelId)) {
-            await client.setState(seed.panelId, seed.state);
+        // c3: a rehome MINTS A COPY in this window and restores onto it. The source window's
+        // instance id does not travel — ordinals are per window, so replaying one would collide with
+        // an unrelated panel here — and `refused` (an unhostable kind, or a `limited` kind already at
+        // its ceiling in this window) is skipped exactly as an unhostable panel always was.
+        const opened = host.openInstance(seed.panelId);
+        if (opened.outcome !== "refused") {
+            await client.setState(seed.panelId, seed.state, opened.instanceId);
             applied += 1;
         }
     }
@@ -1514,9 +1536,11 @@ async function startWindowMechanism(
         // relay (see `tearOutActivePanel` for why), so it rehomes with its state cleared.
         if (list !== null && windowId !== 0 && typeof window !== "undefined") {
             window.addEventListener("pagehide", (): void => {
-                for (const id of [...host.mounted]) {
-                    void client.getState(id).then((state) => {
-                        void windowClient.moveTo(id, state, 0);
+                for (const instanceId of [...host.mounted]) {
+                    // c3: `mounted` names COPIES; the relay carries the KIND plus that copy's state.
+                    const panelId = host.panelIdOf(instanceId);
+                    void client.getState(panelId, instanceId).then((state) => {
+                        void windowClient.moveTo(panelId, state, 0);
                     });
                 }
             });
@@ -1744,7 +1768,14 @@ export function makePanelDispatch(
     host?: PanelHost,
 ): (panelId: string, commandId: string) => Promise<CommandOutcome> {
     return async (panelId: string, commandId: string): Promise<CommandOutcome> => {
-        const port = host?.portRequest(panelId);
+        // ⚠ THE KIND IS RESOLVED TO A COPY FIRST (editor-UX c3). `panelId` arrives from the roster
+        // projection (`projectPanelCommands`), so it names a KIND — while `PanelHost`'s tables are
+        // keyed by INSTANCE id since c3. Asking `portRequest` for a bare kind can now only ever miss,
+        // which would silently send EVERY package panel's manifest command back down the
+        // `panel.command` route that has no C++ model to answer it — the exact dead end e13b-2 built
+        // this second route to fix.
+        const instanceId = host?.instancesOf(panelId)[0];
+        const port = instanceId === undefined ? undefined : host?.portRequest(instanceId);
         if (port !== undefined) {
             const reply = await port(PANEL_VERB_COMMAND_INVOKE, { id: commandId });
             return reply.ok
@@ -1756,7 +1787,11 @@ export function makePanelDispatch(
                       })`,
                   };
         }
-        const result = await client.command(panelId, commandId, "");
+        // Addressed to the SAME copy the port route above resolved, so a kind with two live copies
+        // does not have its two routes land on two different models. `undefined` (no host, or no live
+        // copy) leaves the wire byte-identical to the pre-c3 call and the Shell answers for its
+        // default instance, exactly as before.
+        const result = await client.command(panelId, commandId, "", undefined, instanceId);
         return result !== null && result.dispatched
             ? { ok: true, note: `${panelId}/${commandId}` }
             : { ok: false, note: `${panelId}/${commandId} not dispatched` };
@@ -1909,15 +1944,18 @@ function makeEditorActions(
             // done here" would be false and would stop the next reader from doing it. All FIVE sites
             // could take the port route: the two CAPTURE sites (here and `movePanelToPrimary`) run in
             // the window where the panel is mounted, and the two APPLY sites (`applyRehomedPanels`
-            // and the boot seed, both above) already `openById`/`start` BEFORE they `setState`, so
+            // and the boot seed, both above) already `openInstance`/`start` BEFORE they `setState`, so
             // the target's store exists by the time they would seed it. What is missing is a drill
             // that proves a blob survives a real two-window relay — which is e10's kind of test, not
             // this task's — plus the `pagehide` rehome handler, whose payload would then have to be
             // gathered while the window is closing. Left as ONE coherent piece of follow-up rather
             // than three-fifths wired: a half-wired relay loses state on whichever path was skipped
             // and looks like it works on the others.
-            const state = await client.getState(active);
-            const result = await windowClient.tearOut(active, state);
+            // c3: `active` is a COPY. Its state is read from that copy, and the KIND is what the
+            // relay carries — the target window mints its own copy (see `applyRehomedPanels`).
+            const activeKind = host.panelIdOf(active);
+            const state = await client.getState(activeKind, active);
+            const result = await windowClient.tearOut(activeKind, state);
             if (result.created) {
                 host.close(active); // the panel now lives in the new window — recreate + destroy, D6
                 reportWindow(`torn out ${active} to window ${result.windowId}`);
@@ -1942,8 +1980,9 @@ function makeEditorActions(
             }
             // Same C++-route-only limit as `tearOutActivePanel` above: a package panel's port blob
             // does not travel this relay (M9 e13d).
-            const state = await client.getState(active);
-            const result = await windowClient.moveTo(active, state, 0);
+            const activeKind = host.panelIdOf(active);
+            const state = await client.getState(activeKind, active);
+            const result = await windowClient.moveTo(activeKind, state, 0);
             if (result.moved) {
                 host.close(active);
                 return { ok: true, note: `moved ${active} to window 0` };
@@ -1987,7 +2026,12 @@ async function runPaletteSmoke(
     let detail = "palette smoke: nothing executed";
     try {
         const mounted = host.mounted;
-        const focus = mounted.length > 0 ? (mounted[mounted.length - 1] ?? "") : "";
+        // THE KIND, not the copy (c3). `panelFocus` is a `when`-context whose comparison form is
+        // `panelFocus == inspector` (when.ts) — a panel-KIND name — so feeding it an instance id
+        // would leave every such clause false. Today's shipped bindings only test it for truthiness,
+        // which is exactly why this would have gone unnoticed until the first one compared.
+        const focus =
+            mounted.length > 0 ? host.panelIdOf(mounted[mounted.length - 1] ?? "") : "";
         // The scenario supplies its OWN when-context (a focused panel), so the palette surfaces the
         // panel-focus-guarded `view.panel.close` deterministically regardless of the stubbed editor.ui.
         const context: WhenContext = { panelFocus: focus, textInputFocus: false };

@@ -250,6 +250,7 @@ const PATCHED_HTML = FIELDS_HTML.replace(' value="1.5"', ' value="2.5"').replace
 function render(): PanelRender {
     return {
         panelId: PANEL_ID,
+        instanceId: PANEL_ID,
         revision: 1,
         html: FIELDS_HTML,
         focusOrder: [`${WIDGET_PREFIX}/name`, `${WIDGET_PREFIX}/speed`],
@@ -726,6 +727,7 @@ export const hydrationTests: readonly TestCase[] = [
 
                 panel.runtime.apply({
                     panelId: PANEL_ID,
+                    instanceId: PANEL_ID,
                     revision: 2,
                     html: PATCHED_HTML,
                     focusOrder: [`${WIDGET_PREFIX}/name`],
