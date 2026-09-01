@@ -1,0 +1,30 @@
+src/editor/editorkernel/src/editor_session_state.cpp
+  s_782aa603d2bdb2::t_7f022c153fe0d4 389,391
+  s_782aa603d2bdb2::t_5c7a3435522659 369-373
+src/editor/shell/panels/include/context/editor/shell/panels/session_feed.h
+  s_782aa603d2bdb2::t_745f3da1b50893 148-157
+src/editor/editorkernel/tests/test_editor_session_state.cpp
+  s_782aa603d2bdb2::t_40dbd4cd28b2a4 539-545
+src/editor/shell/panels/tests/test_session_feed.cpp
+  s_782aa603d2bdb2::t_7078f926326930 346-352,357-364
+  s_782aa603d2bdb2::t_677286af2cb66d 503-547
+src/editor/shell/panels/src/session_feed.cpp
+  s_782aa603d2bdb2::t_e4383536bf56bc 163-170
+  s_782aa603d2bdb2::t_94e312e2da04f7 240-260
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c4597bd9cd3c25006509bf5e2ac1590154209b87",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
