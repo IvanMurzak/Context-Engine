@@ -1216,7 +1216,7 @@ windowless input-injection surface the render-handler contract above depends on)
 | `SetFocus` (`cef_browser.h:401`) | **implemented** | `cef_shell.cpp:1320`. |
 | `WasResized` (`:699`) | **implemented** | `cef_shell.cpp:1254` — the resize protocol: makes CEF re-read `GetViewRect` and repaint. |
 | `WasHidden` (`:707`) | gap | No call site in `src/`. CEF keeps laying out and calling `OnPaint` at full rate while the window is minimized or hidden — a CPU/GPU cost with no correctness effect. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
-| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1243-1255`) drives only `WasResized` on a DPI change, and `WasResized`'s own doc re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — so a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
+| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1243-1255`) drives only `WasResized` on a DPI change, and the CEF SDK's own doc comment for `WasResized` (`cef_browser.h`) says it re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — note this is narrower than `resize()`'s own local comment, which says `WasResized` re-reads `GetScreenInfo` too; that local comment is itself inaccurate against the pinned SDK doc, a pre-existing mismatch outside this task's scope. So a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
 | `SendKeyEvent` (`:751`) | **implemented** | `cef_shell.cpp:1312`. |
 | `SendMouseClickEvent` (`:758`) | **implemented** | `cef_shell.cpp:1282,1286`. |
 | `SendMouseMoveEvent` (`:768`) | **implemented** | `cef_shell.cpp:1274,1279`. |
@@ -1245,8 +1245,10 @@ context menu for every member below.
 
 ### What this closes and what it opens
 
-- Replaces an impression ("is this the wrong framework?", `README.md` § "The framework question,
-  answered once") with a count: 5 implemented, 3 deliberately-not-needed groups (`OnAcceleratedPaint`,
+- Replaces an impression ("is this the wrong framework?",
+  `.taskflow/2026-08-29-editor-ux-packages-events/README.md` § "The framework question, answered
+  once" — not the repo-root `README.md`, which has no such section) with a count: 5 implemented, 3
+  deliberately-not-needed groups (`OnAcceleratedPaint`,
   `SetWindowlessFrameRate`, all of `CefContextMenuHandler`), and the rest gaps.
 - Tasks `a1` and `b1` each close a named subset of the gaps above; their own task files cite the exact
   rows they close.
