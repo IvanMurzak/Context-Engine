@@ -1,0 +1,46 @@
+docs/shell.md
+  s_782aa603d2bdb2::t_18b1ccf8b6a4a0 475-478,481-490
+  s_782aa603d2bdb2::t_0d8e6bb49ff276 610
+  s_2f90322c98a3c6::t_f146a836b0db25 491
+src/editor/shell/tests/test_shell.cpp
+  s_782aa603d2bdb2::t_8a4731a696ab7a 193-226
+  s_782aa603d2bdb2::t_34ed5c5f1d4dde 722
+  s_782aa603d2bdb2::t_53f33e139f03f7 53-55
+src/editor/shell/cef/src/cef_shell.cpp
+  s_782aa603d2bdb2::t_7394ecc6fbcb91 1313-1315
+src/editor/shell/include/context/editor/shell/shell.h
+  s_782aa603d2bdb2::t_c38414f70f2dcd 162-164
+  s_782aa603d2bdb2::t_9d66b401defba9 187-198
+src/editor/shell/src/shell.cpp
+  s_782aa603d2bdb2::t_d3d53c56e3a3d3 295-299
+  s_782aa603d2bdb2::t_42e1e5ebf8aa4f 338-348
+  s_782aa603d2bdb2::t_56b6c2e36a1520 173-175
+  s_782aa603d2bdb2::t_75672d7e65cd7c 209-213
+  s_782aa603d2bdb2::t_ec43b5b6e31074 214
+src/editor/shell/tests/test_dpi.cpp
+  s_782aa603d2bdb2::t_e368cf405b1fc0 161-162,173-174,217-220
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "0b64239982d0c667985cbde1b6b3c88a6471d039",
+  "prompts": {},
+  "sessions": {
+    "s_2f90322c98a3c6": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "256cbe91-0c50-4f7b-ad34-ffec65ad786c",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
