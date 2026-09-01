@@ -376,4 +376,95 @@ export const kitTests: readonly TestCase[] = [
             }
         },
     },
+
+    // ------------------------------------------------------------------ disabled (a3, 07 §2)
+    {
+        name: "kit: disabled dims to muted2 ink on BOTH the native `:disabled` path and `[aria-disabled]`",
+        run: () => {
+            // Both halves the DoD asks for, in one case, on real elements: a genuine `<button
+            // disabled>` (the form-associated path) and a plain `<li aria-disabled="true">` (the
+            // ARIA-menu-pattern path `app.css:389-391` documents — a non-form element that stays
+            // focusable while inert). Neither path is vacuous against the other: `:disabled` never
+            // matches the `<li>`, and `[aria-disabled]` is not set on the `<button>`, so each assertion
+            // exercises only the selector it names.
+            const engine = documentEngine();
+            const mounted = mountWidgets();
+            try {
+                applyToDocument(engine, BUILTIN_DARK);
+                const muted2 = toRgb(colour(darkTheme as Doc, "muted2"));
+
+                const button = mounted.elements.get("button") as HTMLButtonElement;
+                assertEqual(
+                    window.getComputedStyle(button).color,
+                    toRgb(colour(darkTheme as Doc, "ink")),
+                    "the button starts at the normal ink colour",
+                );
+                button.disabled = true;
+                assertEqual(
+                    window.getComputedStyle(button).color,
+                    muted2,
+                    "the native `:disabled` path dims a real <button> to colors.muted2",
+                );
+
+                const listitem = mounted.elements.get("listitem") as HTMLElement;
+                listitem.setAttribute("aria-disabled", "true");
+                assertEqual(
+                    window.getComputedStyle(listitem).color,
+                    muted2,
+                    "the `[aria-disabled=\"true\"]` path dims a non-form <li> to the SAME colors.muted2",
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+
+    // ------------------------------------------------------------------ pressed (a3, 07 §2)
+    {
+        // A real `:active` cannot be synthesized from in-page script any more than `:hover` can (same
+        // harness limitation `theme_dom.test.ts`'s tab-strip case documents: no CDP, and an untrusted
+        // MouseEvent never flips Chromium's internal pointer-down state). This proves the two halves
+        // that ARE mechanically provable: (1) the SERVED kit.css declares `:active` on exactly the
+        // three roles that already have `:hover`, targeting the dedicated `panel3` token; and (2) that
+        // token really is a THIRD, visibly distinct paint on a live element — not the theme
+        // accidentally repeating `panel2`'s value, which `webui-kit-tokens-only`'s source scan cannot
+        // see (it only knows both are `--ctx-*` tokens with no fallback).
+        name: "kit: pressed (`:active`) is wired on the SERVED sheet to a THIRD, distinct surface step",
+        run: () => {
+            const engine = documentEngine();
+            const mounted = mountWidgets();
+            try {
+                applyToDocument(engine, BUILTIN_DARK);
+
+                // Half 1 — the served rule, on every role that has `:hover`.
+                const sheet = kitStyleSheet();
+                for (const role of ["listitem", "treeitem", "button"] as const) {
+                    const widgetClass = WIDGET_CLASSES[role];
+                    const activeRule = [...sheet.cssRules].find(
+                        (rule) => rule.cssText.includes(`.${widgetClass}:active`),
+                    ) as CSSStyleRule | undefined;
+                    assert(activeRule !== undefined, `kit.css declares .${widgetClass}:active`);
+                    assert(
+                        /--ctx-colors-panel3\b/.test(activeRule?.style.background ?? ""),
+                        `.${widgetClass}:active steps to colors.panel3, not panel2 again`,
+                    );
+                }
+
+                // Half 2 — the mechanism: panel3 is a real, resolvable, DISTINCT paint.
+                const button = mounted.elements.get("button") as HTMLElement;
+                const normal = window.getComputedStyle(button).backgroundColor;
+                assertEqual(normal, toRgb(colour(darkTheme as Doc, "chip")), "normal: colors.chip");
+                const panel2Rgb = toRgb(colour(darkTheme as Doc, "panel2"));
+                const panel3Rgb = toRgb(colour(darkTheme as Doc, "panel3"));
+                assert(panel2Rgb !== panel3Rgb, "the theme's hover and pressed steps genuinely differ");
+                button.style.background = "var(--ctx-colors-panel3)";
+                const pressed = window.getComputedStyle(button).backgroundColor;
+                assertEqual(pressed, panel3Rgb, "the pressed token resolves to exactly colors.panel3");
+                assert(pressed !== normal, "pressed is visibly distinct from the resting background");
+                assert(pressed !== panel2Rgb, "pressed is visibly distinct from hover, not a repeat");
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
 ];

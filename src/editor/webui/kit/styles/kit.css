@@ -96,6 +96,16 @@
     background: var(--ctx-colors-panel2);
 }
 
+/* Pressed (a3, 07 §2): one further step than hover, via a DEDICATED theme token (`panel3`) — never a
+ * `calc()` over `panel2`, which would be a raw-value bypass wearing a token's clothes (the file
+ * header's own rule). Declaration ORDER matters: `:active` must follow `:hover` in the sheet so a
+ * genuine click — which matches both pseudo-classes on the same element at once — resolves to the
+ * pressed step rather than the hover step at equal specificity. */
+.ctx-widget-listitem:active,
+.ctx-widget-treeitem:active {
+    background: var(--ctx-colors-panel3);
+}
+
 /* --- button (`<button>`) ----------------------------------------------------------------------- *
  *
  * `font: inherit` first, so the browser's own control font never leaks in ahead of the tokens the
@@ -114,6 +124,11 @@
 
 .ctx-widget-button:hover {
     background: var(--ctx-colors-panel2);
+}
+
+/* Pressed (a3, 07 §2) — see the listitem/treeitem pair above for why the token and the ordering. */
+.ctx-widget-button:active {
+    background: var(--ctx-colors-panel3);
 }
 
 /* --- textbox (`<input>`) — the second role app.css never styled -------------------------------- *
@@ -142,6 +157,59 @@
     margin: 0 6px 0 0;
     accent-color: var(--ctx-colors-accent);
     cursor: pointer;
+}
+
+/* --- disabled (a3, 07 §2) — BOTH `:disabled` and `[aria-disabled="true"]`, always --------------- *
+ *
+ * `app.css:389-391` records why both selectors are required: the ARIA menu pattern keeps a disabled
+ * item FOCUSABLE, so `:disabled` alone misses it. A muted INK STEP, not `opacity` — the same
+ * correction `.ctx-widget-status` already documents above, generalised: opacity fades a colour toward
+ * whatever is behind it, which dilutes the high-contrast themes' AA+ ink ratio on exactly the roles a
+ * low-vision user most needs to read.
+ *
+ * Scoped to the eight COLOUR-BEARING roles — `region` / `group` / `list` / `tree` carry layout only,
+ * by design (`kit.test.ts`'s own `COLOUR_EXPECTATIONS` comment: "the container roles carry layout
+ * only"), so a disabled-ink rule on them would be unreachable dead weight: none of the four declares
+ * its own `color`, and a role that DOES render text (`.ctx-widget-text`, say) would not inherit
+ * through a disabled ancestor's ink anyway — an explicit `color` on a child always beats whatever its
+ * ancestor's `:disabled` rule resolves to. `:disabled` itself only ever matches a form-associated
+ * element (`button` / `textbox` / `checkbox`, plus `status`'s `<output>`); it is declared for the
+ * other four roles too, inert today, so a future tag change under any of them picks the rule up for
+ * free rather than needing a second edit here. */
+.ctx-widget-heading:disabled, .ctx-widget-heading[aria-disabled="true"],
+.ctx-widget-status:disabled, .ctx-widget-status[aria-disabled="true"],
+.ctx-widget-text:disabled, .ctx-widget-text[aria-disabled="true"],
+.ctx-widget-listitem:disabled, .ctx-widget-listitem[aria-disabled="true"],
+.ctx-widget-treeitem:disabled, .ctx-widget-treeitem[aria-disabled="true"],
+.ctx-widget-button:disabled, .ctx-widget-button[aria-disabled="true"],
+.ctx-widget-textbox:disabled, .ctx-widget-textbox[aria-disabled="true"],
+.ctx-widget-checkbox:disabled, .ctx-widget-checkbox[aria-disabled="true"] {
+    color: var(--ctx-colors-muted2);
+    cursor: not-allowed;
+}
+
+/* --- colour transitions (a3, 07 §2) -------------------------------------------------------------- *
+ *
+ * `background-color` / `border-color` / `color` ONLY — never `transform`, never a layout property:
+ * the composite is damage-driven, and a re-layout under transition is jitter. Scoped to the same eight
+ * colour-bearing roles as the disabled rule above, for the same reason: `region` / `group` / `list` /
+ * `tree` have no colour-ish property of their own to transition.
+ *
+ * The duration and easing are TOKENS, so `prefers-reduced-motion: reduce` already collapses every
+ * `--ctx-motion-duration-*` to `0ms` (`theme.ts:306-335`, re-asserted at `app.css:163`) with NO second
+ * media query needed here — verified by the theme engine's own T1 tier, not duplicated. */
+.ctx-widget-heading,
+.ctx-widget-status,
+.ctx-widget-text,
+.ctx-widget-listitem,
+.ctx-widget-treeitem,
+.ctx-widget-button,
+.ctx-widget-textbox,
+.ctx-widget-checkbox {
+    transition:
+        background-color var(--ctx-motion-duration-fast) var(--ctx-motion-easing-standard),
+        border-color var(--ctx-motion-duration-fast) var(--ctx-motion-easing-standard),
+        color var(--ctx-motion-duration-fast) var(--ctx-motion-easing-standard);
 }
 
 /* --- the focus ring, on EVERY role (R-A11Y-001) ------------------------------------------------ *

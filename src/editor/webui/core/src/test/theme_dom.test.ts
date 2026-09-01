@@ -34,6 +34,7 @@ import {
     BUILTIN_LIGHT,
     REDUCED_MOTION_QUERY,
     ThemeEngine,
+    TOKEN_VARIABLE_PREFIX,
     type ThemeDocument,
 } from "../theme.js";
 import { detectDockview, type DockviewApi, type DockviewContentRenderer } from "../dockview.js";
@@ -257,6 +258,97 @@ export const themeDomTests: readonly TestCase[] = [
                     computed,
                     panelColour(darkTheme as ThemeDocument),
                     "and it is exactly the Dark theme's colors.panel",
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+
+    // ------------------------------------------------------------------ tab-strip hover (a3, 07 §4)
+    {
+        // A real `:hover` cannot be synthesized from in-page script in THIS harness: there is no CDP
+        // access from the test bundle, and an untrusted `MouseEvent` never updates Chromium's internal
+        // hover hit-test (that is what Playwright's `.hover()` uses `Input.dispatchMouseEvent` for
+        // instead of `dispatchEvent`). The pixel confirmation is therefore `docs/shell.md`'s manual
+        // table (§10, "Mouse" / the tab-strip row), per the DoD's own escape hatch for "genuinely
+        // unassertable". What THIS case proves mechanically, in two halves that together are stronger
+        // than reading the source selector: (1) the SERVED app.css — the staged asset a CMake mistake
+        // could silently drop, not the file on disk — declares the exact override on the right
+        // selector, targeting the right token, and leaves the truly-active tab alone; (2) the
+        // mechanism that override depends on really works end to end on a REAL mounted `.dv-tab` —
+        // setting the same three custom properties actually drives dockview's own
+        // `background-color: var(...)` rule to the theme's `colors.panel2`, not to a reference that
+        // silently resolves to nothing.
+        name: "dom: the tab-strip hover override reaches the SERVED sheet and really drives panel2",
+        run: () => {
+            const engine = documentEngine();
+            const mounted = mountDockview();
+            try {
+                applyToDocument(engine, BUILTIN_DARK);
+
+                // Half 1 — the served rule.
+                const sheet = [...window.document.styleSheets].find((candidate) =>
+                    (candidate.href ?? "").endsWith("/app.css"),
+                );
+                assert(sheet !== undefined, "the served app.css is a stylesheet of this document");
+                const hoverRule = [...(sheet as CSSStyleSheet).cssRules].find((rule) =>
+                    rule.cssText.includes(".dv-tab:hover"),
+                ) as CSSStyleRule | undefined;
+                assert(hoverRule !== undefined, "app.css declares a `.dv-tab:hover` rule");
+                const OVERRIDDEN_ON_HOVER = [
+                    "--dv-activegroup-hiddenpanel-tab-background-color",
+                    "--dv-inactivegroup-visiblepanel-tab-background-color",
+                    "--dv-inactivegroup-hiddenpanel-tab-background-color",
+                ] as const;
+                for (const variable of OVERRIDDEN_ON_HOVER) {
+                    const value = hoverRule?.style.getPropertyValue(variable) ?? "";
+                    assert(
+                        /--ctx-colors-panel2\b/.test(value),
+                        `${variable} on hover resolves to colors.panel2 (was \`${value}\`)`,
+                    );
+                }
+                assertEqual(
+                    hoverRule?.style.getPropertyValue(
+                        "--dv-activegroup-visiblepanel-tab-background-color",
+                    ) ?? "",
+                    "",
+                    "the currently-active tab of the FOCUSED group is deliberately left untouched — " +
+                        "it is already the pressed/selected step and needs no further highlight",
+                );
+
+                // Half 2 — the mechanism, on a REAL mounted tab. `mountDockview()` splits "left" and
+                // "right" into two groups, so exactly one is `.dv-inactive-group` and its own active
+                // tab is the "inactivegroup-visiblepanel" case above — whichever panel ended up with
+                // focus, this query does not need to guess which.
+                const inactiveGroupTab = mounted.container.querySelector<HTMLElement>(
+                    ".dv-groupview.dv-inactive-group .dv-tab.dv-active-tab",
+                );
+                assert(
+                    inactiveGroupTab !== null,
+                    "one of the two mounted groups is not the focused one, and its own active tab " +
+                        "is mounted",
+                );
+                const tab = inactiveGroupTab as HTMLElement;
+                const panel2Hex = (darkTheme as { colors: { panel2: string } }).colors.panel2;
+                const panel2Rgb = toRgb(panel2Hex);
+                assert(
+                    window.getComputedStyle(tab).backgroundColor !== panel2Rgb,
+                    "before the override, the tab paints the base panel colour, not panel2 — " +
+                        "otherwise the assertion below would be vacuous",
+                );
+                const panel2Value = window
+                    .getComputedStyle(window.document.documentElement)
+                    .getPropertyValue(`${TOKEN_VARIABLE_PREFIX}colors-panel2`);
+                for (const variable of OVERRIDDEN_ON_HOVER) {
+                    tab.style.setProperty(variable, panel2Value);
+                }
+                assertEqual(
+                    window.getComputedStyle(tab).backgroundColor,
+                    panel2Rgb,
+                    "setting the SAME three variables the :hover rule sets really does drive " +
+                        "dockview's own background-color rule to colors.panel2 — the mechanism the " +
+                        "rule depends on, proven on the live cascade rather than assumed from source",
                 );
             } finally {
                 mounted.dispose();

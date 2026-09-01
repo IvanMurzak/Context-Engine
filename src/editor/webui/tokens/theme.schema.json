@@ -39,6 +39,10 @@
           "type": "string",
           "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
         },
+        "panel3": {
+          "type": "string",
+          "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
+        },
         "ink": {
           "type": "string",
           "description": "CSS color: hex (#rgb/#rrggbb/#rrggbbaa) or rgb()/rgba()"
@@ -109,6 +113,7 @@
         "canvas",
         "panel",
         "panel2",
+        "panel3",
         "ink",
         "muted",
         "muted2",
