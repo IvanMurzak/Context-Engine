@@ -33,6 +33,11 @@ import {
     HELP_ABOUT_COMMAND_ID,
     HELP_DOCS_COMMAND_ID,
     MENU_ITEM_CLASS,
+    MENU_PANEL_SEARCH_EMPTY_CLASS,
+    MENU_PANEL_SEARCH_GROUP_CLASS,
+    MENU_PANEL_SEARCH_HIGHLIGHT_CLASS,
+    MENU_PANEL_SEARCH_INPUT_CLASS,
+    MENU_PANEL_SEARCH_ITEM_CLASS,
     MENUBAR_ITEM_CLASS,
     NO_RECENTS_REASON,
     PROJECT_NEW_COMMAND_ID,
@@ -43,23 +48,32 @@ import {
     VIEW_WINDOW_CLOSE_COMMAND_ID,
     WINDOW_FOCUS_COMMAND_PREFIX,
     WINDOW_MINIMIZE_COMMAND_ID,
+    WINDOW_PANEL_OPEN_COMMAND_PREFIX,
     WINDOW_QUIT_COMMAND_ID,
     WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID,
     aboutLines,
     buildMenuModel,
+    highlightRuns,
     makeMenuActions,
     menuAcceleratorFor,
     menuCommands,
     menuModelJson,
     mountMenubar,
     openAboutDialog,
+    panelRowState,
+    panelSearchCandidate,
+    panelTreeRows,
     parseMenuFact,
+    searchPanels,
     subscribeMenuFacts,
+    windowPanelOpenCommandId,
+    windowPanelOpenCommands,
     type MenuActionDeps,
     type MenuCommandActions,
     type MenuCommandEntry,
     type MenuModel,
     type MenuSubmenuEntry,
+    type PanelSearchHost,
 } from "../menu.js";
 import { buildCommandRegistry, type CommandOutcome } from "../commands.js";
 import { EDITOR_PLAYBAR_ID, EDITOR_STATUSBAR_ID, EDITOR_TITLEBAR_ID, mountChrome, TITLEBAR_DRAG_CLASS, TITLEBAR_MENU_CLASS, type ChromeStripElements } from "../chrome.js";
@@ -73,8 +87,9 @@ import {
     CHROME_WINDOW_SECONDARY,
     type ChromeState,
 } from "../window.js";
+import type { PanelOpenResult } from "../panelhost.js";
 import type { UpdateState } from "../banners.js";
-import type { PanelRoster } from "../panels.js";
+import type { PanelManifest, PanelRoster } from "../panels.js";
 
 // ------------------------------------------------------------------------------- model fixtures
 
@@ -150,6 +165,74 @@ function actionSpies(): ActionLog {
 
 const EMPTY_ROSTER: PanelRoster = { contractMajor: 1, panels: [] };
 
+// -------------------------------------------------------------------- panel-search fixtures (d1)
+
+/** One `panel.list` entry, defaulted to a hosted `unlimited` uitree panel at the top level — the
+ *  fields the Window menu's panel section actually reads, filled in per test. */
+function panelManifest(
+    id: string,
+    overrides?: Partial<Pick<PanelManifest, "title" | "path" | "instances">>,
+): PanelManifest {
+    return {
+        id,
+        kind: "panel",
+        title: overrides?.title ?? id,
+        icon: "",
+        contractVersion: 3,
+        dock: { zone: "right", minWidth: 0, minHeight: 0 },
+        instances: overrides?.instances ?? { mode: "unlimited", max: 0 },
+        path: overrides?.path ?? "",
+        contentType: "uitree",
+        contentEntry: "",
+        schemaVersion: 1,
+        capabilities: [],
+        commands: [],
+        hosted: true,
+        gestures: false,
+        persists: true,
+        revision: 1,
+    };
+}
+
+/** A `PanelSearchHost` fake: `instancesOf` reads the fixed `live` map, `openInstance` replays the
+ *  SAME open semantics `PanelHost.open` documents (singleton focuses, limited refuses past max,
+ *  else mints) so a test can assert the row state AND the dispatch outcome agree, without a real
+ *  Dockview (`panelinstances.test.ts` already proves the real host's own semantics). */
+function fakePanelSearchHost(
+    roster: PanelRoster | null,
+    live: Readonly<Record<string, readonly string[]>> = {},
+): { readonly host: PanelSearchHost; readonly opened: string[] } {
+    const opened: string[] = [];
+    const host: PanelSearchHost = {
+        roster,
+        instancesOf: (panelId: string): readonly string[] => live[panelId] ?? [],
+        openInstance: (panelId: string): PanelOpenResult => {
+            opened.push(panelId);
+            const manifest = roster?.panels.find((entry) => entry.id === panelId);
+            const copies = live[panelId] ?? [];
+            if (manifest === undefined) {
+                return { outcome: "refused", instanceId: "", diagnostic: `'${panelId}' not rostered` };
+            }
+            if (manifest.instances.mode === "singleton" && copies.length >= 1) {
+                return { outcome: "focused", instanceId: copies[0] ?? `${panelId}#1`, diagnostic: "" };
+            }
+            if (manifest.instances.mode === "limited" && copies.length >= manifest.instances.max) {
+                return {
+                    outcome: "refused",
+                    instanceId: "",
+                    diagnostic: `'${panelId}' allows at most ${String(manifest.instances.max)} open copies`,
+                };
+            }
+            return {
+                outcome: "opened",
+                instanceId: `${panelId}#${String(copies.length + 1)}`,
+                diagnostic: "",
+            };
+        },
+    };
+    return { host, opened };
+}
+
 /** A REAL registry carrying the d3 command set over spies — the single-dispatch fixture. */
 function registryWith(log: ActionLog) {
     return buildCommandRegistry({
@@ -190,6 +273,9 @@ function menubarHarness(options?: {
     readonly model?: MenuModel;
     readonly available?: (id: string) => string | null;
     readonly execute?: (id: string) => void;
+    /** Defaults to an empty, always-`undefined` holder — the boot-ordering-honest default every
+     *  case not exercising the panel section gets for free. */
+    readonly panelHost?: { readonly current: PanelSearchHost | undefined };
 }): MenubarHarness {
     const slot = document.createElement("div");
     document.body.append(slot);
@@ -213,6 +299,7 @@ function menubarHarness(options?: {
                 }),
             commandAvailable: options?.available ?? registryAvailability,
             isMaximized: () => harness.maximized,
+            panelHost: options?.panelHost ?? { current: undefined },
         }),
         dispose: (): void => {
             harness.mount.dispose();
@@ -830,6 +917,377 @@ export const menuTests: readonly TestCase[] = [
                         "Restore",
                     ) === true,
                     "maximized windows offer Restore (02 §5's fact-driven flip)",
+                );
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    // ------------------------------------------------------------------------ the Window panel tree/search (d1/D9)
+    {
+        name: "panel row state: singleton focuses when already open, limited discloses the SAME refusal open() would give, unlimited always opens",
+        run: () => {
+            const singleton = panelManifest("builtin.settings", {
+                instances: { mode: "singleton", max: 0 },
+            });
+            assertEqual(panelRowState(singleton, []), { kind: "open" }, "no live copy — opens the first");
+            assertEqual(
+                panelRowState(singleton, ["builtin.settings#1"]),
+                { kind: "focus", instanceId: "builtin.settings#1" },
+                "already open — focuses rather than refuses (the c3 correction)",
+            );
+
+            const limited = panelManifest("acme.tilemap", { instances: { mode: "limited", max: 2 } });
+            assertEqual(
+                panelRowState(limited, ["acme.tilemap#1"]),
+                { kind: "open" },
+                "under the ceiling — opens another",
+            );
+            const atMax = panelRowState(limited, ["acme.tilemap#1", "acme.tilemap#2"]);
+            assert(atMax.kind === "disabled", "at its ceiling — disabled, never hidden");
+            assert(
+                atMax.kind === "disabled" && atMax.reason.includes("at most 2 open copies"),
+                "…naming the SAME limit `admits` (and a real refused open) would name",
+            );
+
+            const unlimited = panelManifest("builtin.viewport", {
+                instances: { mode: "unlimited", max: 0 },
+            });
+            assertEqual(
+                panelRowState(unlimited, ["builtin.viewport#1", "builtin.viewport#2"]),
+                { kind: "open" },
+                "unlimited always mints a new copy, however many are already live",
+            );
+        },
+    },
+    {
+        name: "panel tree: top-level panels first, then one group per distinct path (alphabetical), roster order within a group",
+        run: () => {
+            const panels = [
+                panelManifest("builtin.settings", { path: "" }),
+                panelManifest("acme.tilemap.paint", { title: "Tilemap Painter", path: "Scene/Debug" }),
+                panelManifest("builtin.viewport", { path: "" }),
+                panelManifest("acme.tilemap.brush", { title: "Brush", path: "Scene/Debug" }),
+                panelManifest("acme.audio.mixer", { title: "Mixer", path: "Audio" }),
+            ];
+            const rows = panelTreeRows(panels);
+            assertEqual(
+                rows.map((row) => (row.kind === "group" ? `group:${row.label}` : row.manifest.id)),
+                [
+                    "builtin.settings",
+                    "builtin.viewport",
+                    "group:Audio",
+                    "acme.audio.mixer",
+                    "group:Scene/Debug",
+                    "acme.tilemap.paint",
+                    "acme.tilemap.brush",
+                ],
+                "top-level panels precede every group; groups sort alphabetically; panels keep roster order",
+            );
+        },
+    },
+    {
+        name: "panel search: matches a path segment, the panel name, both at once (`dbg tile`), and reports a genuine non-match honestly",
+        run: () => {
+            const painter = panelManifest("acme.tilemap.paint", {
+                title: "Tilemap Painter",
+                path: "Scene/Debug",
+            });
+            const settings = panelManifest("builtin.settings", { title: "Settings", path: "" });
+            const panels = [painter, settings];
+
+            assertEqual(
+                searchPanels(panels, "debug").map((r) => r.manifest.id),
+                ["acme.tilemap.paint"],
+                "a query matching only a PATH segment finds the panel under it",
+            );
+            assertEqual(
+                searchPanels(panels, "settings").map((r) => r.manifest.id),
+                ["builtin.settings"],
+                "a query matching the PANEL NAME finds it",
+            );
+            const both = searchPanels(panels, "dbg tile");
+            assertEqual(
+                both.map((r) => r.manifest.id),
+                ["acme.tilemap.paint"],
+                "`dbg tile` crosses the path/title boundary — 04 §4's own worked example",
+            );
+            assertEqual(
+                searchPanels(panels, "zzz-not-a-panel"),
+                [],
+                "a genuine non-match returns nothing (never a degraded fallback list)",
+            );
+
+            // Highlighting is driven by the RETURNED positions, never re-derived by the renderer.
+            const hit = both[0];
+            assert(hit !== undefined, "the cross-boundary match exists");
+            if (hit !== undefined) {
+                assertEqual(
+                    hit.candidate,
+                    panelSearchCandidate(painter),
+                    "the candidate is the same string `panelSearchCandidate` builds",
+                );
+                const runs = highlightRuns(hit.candidate, hit.positions);
+                assert(
+                    runs.some((r) => r.matched),
+                    "at least one run is marked matched",
+                );
+                assertEqual(
+                    runs.map((r) => r.text).join(""),
+                    hit.candidate,
+                    "the runs reconstruct the candidate losslessly — no character dropped or duplicated",
+                );
+            }
+        },
+    },
+    {
+        name: "windowPanelOpenCommands: one view.panel.open.<panelId> command per rostered panel, single-dispatch through the ONE registry",
+        run: async () => {
+            const roster: PanelRoster = {
+                contractMajor: 3,
+                panels: [
+                    panelManifest("builtin.settings", { title: "Settings" }),
+                    panelManifest("builtin.viewport", { title: "Viewport" }),
+                ],
+            };
+            const { host, opened } = fakePanelSearchHost(roster);
+            const commands = windowPanelOpenCommands(roster, host);
+            assertEqual(
+                commands.map((c) => c.id),
+                [
+                    windowPanelOpenCommandId("builtin.settings"),
+                    windowPanelOpenCommandId("builtin.viewport"),
+                ],
+                "one command per roster panel, ids following the documented view.panel.open.<panelId> shape",
+            );
+            assert(
+                commands.every((c) => c.id.startsWith(WINDOW_PANEL_OPEN_COMMAND_PREFIX)),
+                "every id carries the ONE prefix",
+            );
+
+            // Registered like any other command (no second dispatch system) — palette-reachable too.
+            const registry = buildCommandRegistry({
+                contractDispatch: () => ({ ok: false, note: "n/a" }),
+                editorActions: {
+                    focusNextPanel: () => ({ ok: true, note: "" }),
+                    focusPreviousPanel: () => ({ ok: true, note: "" }),
+                    moveActivePanel: () => ({ ok: true, note: "" }),
+                    closeActivePanel: () => ({ ok: true, note: "" }),
+                    toggleTheme: () => ({ ok: true, note: "" }),
+                    tearOutActivePanel: () => ({ ok: true, note: "" }),
+                    movePanelToPrimary: () => ({ ok: true, note: "" }),
+                },
+                sessionActions: {
+                    undo: () => ({ ok: true, note: "" }),
+                    redo: () => ({ ok: true, note: "" }),
+                },
+                playActions: noopPlayActions(),
+                menuCommands: commands,
+                roster: EMPTY_ROSTER,
+                panelDispatch: () => ({ ok: false, note: "n/a" }),
+            });
+            assertEqual(registry.rejections.length, 0, "no collision — the ids are freshly minted");
+            const outcome = await registry.execute(windowPanelOpenCommandId("builtin.viewport"));
+            assertEqual(outcome.ok, true, "opening a fresh (unlimited) copy succeeds");
+            assertEqual(opened, ["builtin.viewport"], "dispatched through PanelHost.openInstance — the ONE path");
+        },
+    },
+    {
+        name: "menu model: the Window menu carries a panelSearch marker between Maximize and the OS-window list; menu.publish drops it (no NSMenu analogue)",
+        run: () => {
+            const m = model("custom");
+            const window = m.menus.find((menu) => menu.id === "window");
+            assert(window !== undefined, "the Window menu exists");
+            if (window === undefined) {
+                return;
+            }
+            const kinds = window.items.map((item) => item.kind);
+            assertEqual(
+                kinds,
+                ["command", "command", "separator", "panelSearch", "separator", "command", "command"],
+                "Minimize, Maximize, separator, the new search/tree marker, separator, then the two-window list",
+            );
+            // The command-id extraction the OTHER pinned model test uses is untouched (kind-filtered),
+            // proving the marker changes NOTHING a v1 reader (or the native wire) already depended on.
+            assertEqual(
+                commandIdsOf(m, "window"),
+                [
+                    WINDOW_MINIMIZE_COMMAND_ID,
+                    WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID,
+                    `${WINDOW_FOCUS_COMMAND_PREFIX}0`,
+                    `${WINDOW_FOCUS_COMMAND_PREFIX}2`,
+                ],
+                "the pinned command-id sequence is exactly unchanged",
+            );
+
+            const json = menuModelJson(m, {
+                context: {},
+                available: () => "",
+                maximized: false,
+            });
+            const menus = (
+                json as { menus: readonly { id: string; items: readonly { type: string }[] }[] }
+            ).menus;
+            const windowJson = menus.find((menu) => menu.id === "window");
+            assert(windowJson !== undefined, "the native wire still carries a Window menu");
+            assertEqual(
+                windowJson?.items.map((item) => item.type),
+                ["command", "command", "separator", "separator", "command", "command"],
+                "Minimize / Maximize / separator / separator / the two-window list — the panelSearch " +
+                    "marker is DROPPED entirely, not published as a static stand-in (no NSMenu analogue)",
+            );
+        },
+    },
+    {
+        name: "menubar: the Window menu's panel section degrades honestly before PanelHost exists",
+        run: () => {
+            const h = menubarHarness(); // default panelHost holder: { current: undefined }
+            try {
+                h.mount.openMenu("window");
+                const empty = h.slot.querySelector(`.${MENU_PANEL_SEARCH_EMPTY_CLASS}`);
+                assert(empty !== null, "an honest placeholder renders instead of a silent empty list");
+                assertEqual(empty?.textContent, "Panels are not available yet", "…naming why");
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "menubar: the Window menu's search field filters the tree, highlights via {positions}, and keeps text focus on Arrow keys",
+        run: () => {
+            const roster: PanelRoster = {
+                contractMajor: 3,
+                panels: [
+                    panelManifest("builtin.settings", { title: "Settings" }),
+                    panelManifest("acme.tilemap.paint", { title: "Tilemap Painter", path: "Scene/Debug" }),
+                ],
+            };
+            const { host } = fakePanelSearchHost(roster);
+            const h = menubarHarness({ panelHost: { current: host } });
+            try {
+                h.mount.openMenu("window");
+                const input = h.slot.querySelector<HTMLInputElement>(`.${MENU_PANEL_SEARCH_INPUT_CLASS}`);
+                assert(input !== null, "the search field renders");
+                if (input === null) {
+                    return;
+                }
+                assertEqual(input.getAttribute("role"), "combobox", "ARIA combobox role");
+
+                // Browse mode (empty query): the path tree, group header included, never hidden.
+                assertEqual(
+                    h.slot.querySelectorAll(`.${MENU_PANEL_SEARCH_ITEM_CLASS}`).length,
+                    2,
+                    "both rostered panels render",
+                );
+                assert(
+                    h.slot.querySelector(`.${MENU_PANEL_SEARCH_GROUP_CLASS}`)?.textContent === "Scene/Debug",
+                    "the group header names the full path",
+                );
+
+                // Search mode: filters to the match, and highlights via the returned positions.
+                input.value = "tile";
+                input.dispatchEvent(new Event("input"));
+                const rows = h.slot.querySelectorAll<HTMLButtonElement>(`.${MENU_PANEL_SEARCH_ITEM_CLASS}`);
+                assertEqual(rows.length, 1, "only the matching panel renders");
+                assertEqual(rows[0]?.getAttribute("data-panel-id"), "acme.tilemap.paint", "…the right one");
+                assert(
+                    rows[0]?.querySelector(`.${MENU_PANEL_SEARCH_HIGHLIGHT_CLASS}`) !== null,
+                    "the match is highlighted via a span driven by {positions}, not innerHTML",
+                );
+
+                // Arrow keys move the SELECTION while the field keeps TEXT FOCUS (04 §4's own rule).
+                assertEqual(document.activeElement, input, "the field holds focus after opening/typing");
+                input.dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowDown" }));
+                assertEqual(document.activeElement, input, "…and after ArrowDown — never a real button");
+                assertEqual(
+                    rows[0]?.getAttribute("aria-selected"),
+                    "true",
+                    "the sole result becomes (stays) selected",
+                );
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "menubar: Enter dispatches the selected panel row through executeCommand (the SAME path a click uses); Escape closes the WHOLE menu, not just the field",
+        run: async () => {
+            const roster: PanelRoster = {
+                contractMajor: 3,
+                panels: [panelManifest("builtin.viewport", { title: "Viewport" })],
+            };
+            const { host } = fakePanelSearchHost(roster);
+            const h = menubarHarness({ panelHost: { current: host } });
+            try {
+                h.mount.openMenu("window");
+                const input = h.slot.querySelector<HTMLInputElement>(`.${MENU_PANEL_SEARCH_INPUT_CLASS}`);
+                assert(input !== null, "the search field renders");
+                if (input === null) {
+                    return;
+                }
+                input.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+                await delay(0);
+                assertEqual(
+                    h.executed,
+                    [windowPanelOpenCommandId("builtin.viewport")],
+                    "Enter dispatches the selected row's command through executeCommand — the SAME " +
+                        "registry path a click, the keymap or the palette would dispatch it through " +
+                        "(the `windowPanelOpenCommands` case proves that id actually opens the panel)",
+                );
+                assertEqual(h.mount.openMenuId(), null, "activating a row also closes the menu, like any other item");
+
+                h.mount.openMenu("window");
+                assertEqual(h.mount.openMenuId(), "window", "reopened");
+                const reopened = h.slot.querySelector<HTMLInputElement>(`.${MENU_PANEL_SEARCH_INPUT_CLASS}`);
+                reopened?.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape" }));
+                assertEqual(h.mount.openMenuId(), null, "Escape closes the WHOLE menu, not only the field");
+            } finally {
+                h.dispose();
+            }
+        },
+    },
+    {
+        name: "menubar: a limited panel at its ceiling renders disabled in the Window tree and is truly inert to click and Enter",
+        run: async () => {
+            const roster: PanelRoster = {
+                contractMajor: 3,
+                panels: [
+                    panelManifest("acme.tilemap", {
+                        title: "Tilemap",
+                        instances: { mode: "limited", max: 1 },
+                    }),
+                ],
+            };
+            const { host } = fakePanelSearchHost(roster, { "acme.tilemap": ["acme.tilemap#1"] });
+            const h = menubarHarness({ panelHost: { current: host } });
+            try {
+                h.mount.openMenu("window");
+                const row = h.slot.querySelector<HTMLButtonElement>(
+                    `.${MENU_PANEL_SEARCH_ITEM_CLASS}[data-panel-id="acme.tilemap"]`,
+                );
+                assert(row !== null, "the at-ceiling panel still renders — disabled, never hidden");
+                if (row === null) {
+                    return;
+                }
+                assertEqual(row.getAttribute("aria-disabled"), "true", "disabled, per its instance mode");
+                assert(
+                    row.title.includes("at most 1 open"),
+                    "…the tooltip names the SAME limit `admits`/a real refused open would name",
+                );
+                // `h.executed` (NOT the host's own `opened`, which only the REGISTERED command's
+                // handler would populate) is what the disabled-item guard directly controls — the
+                // same discriminator the ⏳-row test above uses.
+                row.click();
+                await delay(0);
+                assertEqual(h.executed.length, 0, "a disabled row dispatches NOTHING on click — truly inert");
+
+                const input = h.slot.querySelector<HTMLInputElement>(`.${MENU_PANEL_SEARCH_INPUT_CLASS}`);
+                input?.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter" }));
+                await delay(0);
+                assertEqual(
+                    h.executed.length,
+                    0,
+                    "…and Enter on the (only, disabled) selection is ALSO inert",
                 );
             } finally {
                 h.dispose();

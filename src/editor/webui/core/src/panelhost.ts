@@ -1750,8 +1750,13 @@ function refusal(diagnostic: string): PanelOpenResult {
  * enforce it deliberately: this one is what the human meets (an honest refusal instead of a panel
  * that does not appear), the Shell's is the backstop over an untrusted renderer, and neither is a
  * substitute for the other.
+ *
+ * EXPORTED for the Window menu's panel tree (editor-UX d1, design 04 §4): "instance rules are
+ * visible, not just enforced" needs the SAME refusal wording `open()` itself would produce, so a
+ * `limited` panel's disabled tooltip and an actual refused open can never drift into two spellings
+ * of the same limit.
  */
-function admits(manifest: PanelManifest, live: number): string {
+export function admits(manifest: PanelManifest, live: number): string {
     switch (manifest.instances.mode) {
         case "singleton":
             return live < 1 ? "" : `'${manifest.id}' is a singleton panel and is already open`;

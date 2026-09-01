@@ -40,7 +40,7 @@
 import { createButton } from "../../kit/src/index.js";
 import type { Command, CommandOutcome } from "./commands.js";
 import { DEFAULT_KEYBINDINGS } from "./keymap.js";
-import { PALETTE_TOGGLE_COMMAND_ID } from "./palette.js";
+import { PALETTE_TOGGLE_COMMAND_ID, fuzzyMatch } from "./palette.js";
 import { SETTINGS_PANEL_ID } from "./settings.js";
 import type { SessionSelectSender } from "./session.js";
 import type { UpdateState } from "./banners.js";
@@ -48,6 +48,8 @@ import { evaluateWhen, type WhenContext } from "./when.js";
 import { isRecord } from "./bridge.js";
 import { UI_TOPIC_MENU, type EditorUiBus, type EditorUiSubscription } from "./uibus.js";
 import { LABEL_MAXIMIZE, LABEL_RESTORE, type ChromeWindowControls } from "./chrome.js";
+import { admits, type PanelOpenResult } from "./panelhost.js";
+import type { PanelManifest, PanelRoster } from "./panels.js";
 import {
     CHROME_MODE_HYBRID,
     type ChromeMode,
@@ -121,7 +123,25 @@ export interface MenuSubmenuEntry {
     readonly items: readonly MenuEntry[];
 }
 
-export type MenuEntry = MenuCommandEntry | MenuSeparatorEntry | MenuSubmenuEntry;
+/**
+ * The Window menu's search-field-plus-panel-tree section (editor-UX d1, design 04 §4 / D9).
+ *
+ * A MARKER, not a static item list — unlike every other `MenuEntry`, its content is LIVE (the
+ * roster, and which instances are open, can change after boot) and is rendered by a DEDICATED web
+ * widget (`mountMenubar`'s `renderPanelSearchSection`), never by `renderEntries`'s generic
+ * command/separator/submenu loop. `menuModelJson` DROPS it from the native macOS NSMenu wire shape
+ * (see its own comment): a live search field has no NSMenu analogue, and the honest degrade is to
+ * publish the menu as it stood before this task rather than a static, non-interactive stand-in.
+ */
+export interface MenuPanelSearchEntry {
+    readonly kind: "panelSearch";
+}
+
+export type MenuEntry =
+    | MenuCommandEntry
+    | MenuSeparatorEntry
+    | MenuSubmenuEntry
+    | MenuPanelSearchEntry;
 
 export interface MenuDefinition {
     /** Grep-stable (`"file"`, `"edit"`, …) — the DOM `data-menu-id` and the wire `id`. */
@@ -171,6 +191,10 @@ function command(commandId: string, label: string, disabledReason = ""): MenuCom
 
 const SEPARATOR: MenuSeparatorEntry = { kind: "separator" };
 
+/** The Window menu's one `panelSearch` marker (see `MenuPanelSearchEntry`) — a singleton, since it
+ *  carries no per-build data of its own. */
+const PANEL_SEARCH_ENTRY: MenuPanelSearchEntry = { kind: "panelSearch" };
+
 /** The Open Recent submenu — one entry per recent, or the honest disabled placeholder. */
 function openRecentSubmenu(recents: readonly RecentProject[]): MenuSubmenuEntry {
     if (recents.length === 0) {
@@ -212,6 +236,250 @@ function windowListEntries(
             `Window ${String(id + 1)}${id === selfWindowId ? " (this window)" : ""}`,
         ),
     );
+}
+
+// --------------------------------------------------------------- the Window panel tree (d1 / D9)
+// "Window opens things; Panel acts on the focused one" (04 §4). Everything below is the panel-open
+// half: a generic command per rostered panel, a search over its `path`+title, and the row-state that
+// makes a singleton/limited panel's instance rule VISIBLE rather than merely enforced. Purely data
+// in, data out — no DOM — so it is testable without a browser; `mountMenubar`'s
+// `renderPanelSearchSection` is the DOM half that reads it, the palette_view.ts split.
+
+/** The registered id for opening one rostered panel: `view.panel.open.<panelId>` (04 §4's own
+ *  wording). Deliberately the panel's REAL id, not the abbreviated `view.panel.open.settings` the
+ *  macOS App menu already registers for Settings — the two ids name the SAME action through the SAME
+ *  `PanelHost.openInstance` call, so a build simply carries one entry point per menu location; they
+ *  are not required to collide, and keeping them apart means this generic source never has to special
+ *  -case Settings. */
+export const WINDOW_PANEL_OPEN_COMMAND_PREFIX = "view.panel.open.";
+
+/** `${WINDOW_PANEL_OPEN_COMMAND_PREFIX}${panelId}` — the one place that spells the join. */
+export function windowPanelOpenCommandId(panelId: string): string {
+    return `${WINDOW_PANEL_OPEN_COMMAND_PREFIX}${panelId}`;
+}
+
+/**
+ * What the Window menu's panel section needs from `PanelHost` — a narrow structural slice (the
+ * `openPanel`/`hostHolder` late-bind pattern above), so a real `PanelHost` satisfies it with no
+ * adapter and a T1 fixture can satisfy it with a three-method fake.
+ */
+export interface PanelSearchHost {
+    openInstance(panelId: string, requestedInstanceId?: string): PanelOpenResult;
+    /** The live copies of one kind, in mount order (mirrors `PanelHost.instancesOf`). */
+    instancesOf(panelId: string): readonly string[];
+    /** `null` until `PanelHost.start()` has read `panel.list` — the section degrades honestly then. */
+    readonly roster: PanelRoster | null;
+}
+
+/**
+ * One panel row's visible state (design 04 §4: "instance rules are visible, not just enforced").
+ *
+ * THREE CASES, mirroring `PanelHost.open`'s own three outcomes exactly, computed the SAME way it
+ * computes them (`admits`, imported rather than re-derived) so the menu can never show a state the
+ * actual open would contradict:
+ *   - `singleton` already holding a live copy FOCUSES rather than refuses (the c3 correction) — this
+ *     is checked FIRST, exactly as `PanelHost.open` special-cases it before consulting `admits`.
+ *   - `limited` at its ceiling is `disabled`, carrying the SAME refusal text `open()` would answer
+ *     with, so the row's tooltip and an actual refused click can never disagree.
+ *   - everything else (`unlimited`, or under a `limited` ceiling) is `open` — the row mints a new copy.
+ */
+export type PanelRowState =
+    | { readonly kind: "open" }
+    | { readonly kind: "focus"; readonly instanceId: string }
+    | { readonly kind: "disabled"; readonly reason: string };
+
+export function panelRowState(manifest: PanelManifest, live: readonly string[]): PanelRowState {
+    if (manifest.instances.mode === "singleton" && live.length >= 1) {
+        const first = live[0];
+        if (first !== undefined) {
+            return { kind: "focus", instanceId: first };
+        }
+    }
+    const refusal = admits(manifest, live.length);
+    return refusal === "" ? { kind: "open" } : { kind: "disabled", reason: refusal };
+}
+
+/**
+ * Project the roster into ONE generic command per panel — `view.panel.open.<panelId>` — dispatching
+ * to `PanelHost.openInstance` (04 §4 fact 1: "no second dispatch system"). Registered through the
+ * ONE registry like every other command (boot.ts, `startCommandLayer`), so the palette and the
+ * keymap can invoke exactly what the Window menu's rows invoke — `menu.test.ts`'s single-dispatch
+ * assertion for the d3 set applies here unchanged.
+ *
+ * The row's FOCUS-vs-OPEN distinction is purely presentational (`panelRowState`, read by the DOM
+ * renderer): `PanelHost.open` already special-cases "singleton already open" into a `focused`
+ * outcome with no `requestedInstanceId` needed, so one handler serves every row state honestly.
+ */
+export function windowPanelOpenCommands(
+    roster: PanelRoster,
+    host: PanelSearchHost,
+): readonly Command[] {
+    return roster.panels.map((manifest) => ({
+        id: windowPanelOpenCommandId(manifest.id),
+        title: `Open ${manifest.title}`,
+        category: "editor",
+        when: "",
+        docs: {
+            summary:
+                `Open the ${manifest.title} panel` +
+                (manifest.path === "" ? "" : ` (${manifest.path})`),
+            detail:
+                `window action (d1, editor-UX D9): PanelHost.openInstance("${manifest.id}") — a ` +
+                "singleton already open focuses it, a limited panel past its max refuses naming the " +
+                "limit, everything else mints a new copy",
+        },
+        handler: (): CommandOutcome => {
+            const result = host.openInstance(manifest.id);
+            switch (result.outcome) {
+                case "opened":
+                    return { ok: true, note: `opened ${manifest.title}` };
+                case "focused":
+                    return { ok: true, note: `${manifest.title} was already open — focused it` };
+                default:
+                    return { ok: false, note: result.diagnostic };
+            }
+        },
+    }));
+}
+
+// ---------------------------------------------------------------------- the panel tree (browse mode)
+
+/** One row the browse-mode (empty query) tree renders: a non-interactive path GROUP header, or a
+ *  panel leaf. Top-level panels (`path === ""`) carry no header at all. */
+export type PanelTreeEntry =
+    | { readonly kind: "group"; readonly label: string }
+    | { readonly kind: "panel"; readonly manifest: PanelManifest };
+
+/**
+ * Group the roster by its declared `path` (04 §2: slash-separated, empty = top level) for the
+ * browse-mode tree. ONE grouping level — every panel sharing a `path` sits under ONE header naming
+ * the full path (`"Scene/Debug"`), rather than true nested folders per segment: the web menubar's
+ * generic submenu renderer already documents that a SECOND nesting level renders inert
+ * (`renderEntries`'s `depth >= 1` guard), and a hand-built widget that reproduced true recursive
+ * folders here would be the one part of the Window menu a screen reader's flat announcement and a
+ * mouse-hover flyout would disagree about depth-wise. Top-level panels render first (no header),
+ * then one header per distinct path, groups sorted alphabetically, panels in roster order within
+ * each group.
+ */
+export function panelTreeRows(panels: readonly PanelManifest[]): readonly PanelTreeEntry[] {
+    const top: PanelManifest[] = [];
+    const groups = new Map<string, PanelManifest[]>();
+    for (const panel of panels) {
+        if (panel.path === "") {
+            top.push(panel);
+            continue;
+        }
+        const list = groups.get(panel.path);
+        if (list === undefined) {
+            groups.set(panel.path, [panel]);
+        } else {
+            list.push(panel);
+        }
+    }
+    const rows: PanelTreeEntry[] = top.map((manifest) => ({ kind: "panel", manifest }));
+    for (const path of [...groups.keys()].sort((a, b) => a.localeCompare(b))) {
+        rows.push({ kind: "group", label: path });
+        for (const manifest of groups.get(path) ?? []) {
+            rows.push({ kind: "panel", manifest });
+        }
+    }
+    return rows;
+}
+
+// --------------------------------------------------------------------- the panel search (filtered)
+
+/**
+ * The ONE candidate string a search query is matched against — the path's segments and the title,
+ * SPACE-joined (`"Scene Debug Tilemap Painter"`), or bare `title` at the top level. What
+ * `PanelSearchResult.positions` indexes into.
+ *
+ * ⚠ SPACES, NOT SLASHES. `fuzzyMatch` is reused UNCHANGED (04 §4's own rule) and matches candidate
+ * characters LITERALLY — a query's space can only match a literal space in the candidate, never a
+ * `/`. Joining with `/` (matching `path`'s own display spelling) would make 04 §4's own worked
+ * example, `dbg tile` finding `Scene/Debug → Tilemap Painter`, fail: the query's space would have
+ * to land on the `/` between "Debug" and "Tilemap", and a bare character-equality match cannot
+ * treat the two as interchangeable (verified: replacing `/` with a space is what makes `fuzzyMatch`
+ * carry the match across the boundary at all — a slash-joined candidate returns no match here).
+ */
+export function panelSearchCandidate(manifest: PanelManifest): string {
+    return manifest.path === "" ? manifest.title : `${manifest.path.replace(/\//g, " ")} ${manifest.title}`;
+}
+
+export interface PanelSearchResult {
+    readonly manifest: PanelManifest;
+    readonly score: number;
+    /** Indices into `candidate` — `fuzzyMatch`'s own positions, unmodified. */
+    readonly positions: readonly number[];
+    readonly candidate: string;
+}
+
+/**
+ * Rank the roster against a query — 04 §4: "matches every path segment and the panel name
+ * simultaneously… `dbg tile` finds `Scene/Debug → Tilemap Painter`". Reuses `fuzzyMatch`
+ * (`palette.ts:102`) UNCHANGED against the joined `path/title` candidate, which is what makes a
+ * cross-boundary query like `dbg tile` an ordinary in-order subsequence match rather than a second
+ * matcher: "dbg" lands in `.../deBuG`, the space matches the `/` separator, and "tile" lands at the
+ * start of `Tilemap`. An empty (or all-whitespace) query yields no results — the caller reads that as
+ * "show the browse-mode tree instead", mirroring `Palette.results`'s own empty-query special case.
+ */
+export function searchPanels(
+    panels: readonly PanelManifest[],
+    query: string,
+): readonly PanelSearchResult[] {
+    const trimmed = query.trim();
+    if (trimmed === "") {
+        return [];
+    }
+    const results: PanelSearchResult[] = [];
+    for (const manifest of panels) {
+        const candidate = panelSearchCandidate(manifest);
+        const match = fuzzyMatch(trimmed, candidate);
+        if (match !== null) {
+            results.push({ manifest, score: match.score, positions: match.positions, candidate });
+        }
+    }
+    results.sort((a, b) => b.score - a.score || a.manifest.title.localeCompare(b.manifest.title));
+    return results;
+}
+
+/** One contiguous run of `candidate` — matched (a `positions` index) or not — for highlight rendering. */
+export interface HighlightRun {
+    readonly text: string;
+    readonly matched: boolean;
+}
+
+/**
+ * Split `text` into contiguous matched/unmatched runs from a `FuzzyMatch.positions` list (04 §4:
+ * "it returns `{score, positions}` so matched characters can be highlighted the way the palette
+ * highlights them" — the DOM half `renderPanelSearchSection` builds ONE span per run from this,
+ * never `innerHTML`). Pure and DOM-free so the mapping is unit-testable on its own; an empty
+ * `positions` (the browse-mode tree, which never highlights) yields the whole text as one
+ * unmatched run.
+ */
+export function highlightRuns(text: string, positions: readonly number[]): readonly HighlightRun[] {
+    if (text === "") {
+        return [];
+    }
+    if (positions.length === 0) {
+        return [{ text, matched: false }];
+    }
+    const marked = new Set(positions);
+    const runs: HighlightRun[] = [];
+    let current = "";
+    let currentMatched = marked.has(0);
+    for (let i = 0; i < text.length; i += 1) {
+        const isMatched = marked.has(i);
+        if (i > 0 && isMatched !== currentMatched) {
+            runs.push({ text: current, matched: currentMatched });
+            current = "";
+        }
+        current += text[i] ?? "";
+        currentMatched = isMatched;
+    }
+    if (current !== "") {
+        runs.push({ text: current, matched: currentMatched });
+    }
+    return runs;
 }
 
 /**
@@ -310,6 +578,13 @@ export function buildMenuModel(options: MenuModelOptions): MenuModel {
             // `toggleMaximizeLabel`; the model carries the resting label.
             command(WINDOW_TOGGLE_MAXIMIZE_COMMAND_ID, "Maximize"),
             SEPARATOR,
+            // D9 (editor-UX d1): "Window opens things" — a search field, then the panel tree built
+            // from manifest `path`. LIVE content (`PANEL_SEARCH_ENTRY` is a marker; the roster can
+            // change after boot), rendered by `mountMenubar`'s dedicated widget, never by the
+            // generic command/separator/submenu loop. Its own separator follows so the trailing OS-
+            // window list — 04 §4's "the existing OS-window list" — stays visually distinct.
+            PANEL_SEARCH_ENTRY,
+            SEPARATOR,
             ...windowListEntries(options.windows, options.selfWindowId),
         ],
     });
@@ -379,7 +654,11 @@ export interface MenuSerializeOptions {
     readonly maximized: boolean;
 }
 
-function entryJson(entry: MenuEntry, options: MenuSerializeOptions): Record<string, unknown> {
+/**
+ * `null` for a `panelSearch` marker (see below) — every other kind serializes to one wire item.
+ * `serializeEntries` is what drops the `null`s, so a caller never has to remember to filter.
+ */
+function entryJson(entry: MenuEntry, options: MenuSerializeOptions): Record<string, unknown> | null {
     if (entry.kind === "separator") {
         return { type: MENU_ITEM_TYPE_SEPARATOR };
     }
@@ -387,8 +666,16 @@ function entryJson(entry: MenuEntry, options: MenuSerializeOptions): Record<stri
         return {
             type: MENU_ITEM_TYPE_SUBMENU,
             label: entry.label,
-            items: entry.items.map((item) => entryJson(item, options)),
+            items: serializeEntries(entry.items, options),
         };
+    }
+    if (entry.kind === "panelSearch") {
+        // The Window menu's live search-field-plus-panel-tree (d1/D9) has no NSMenu analogue: a
+        // native menu bar cannot host an interactive text field the way the web overlay does. The
+        // honest degrade is to DROP it from the wire rather than publish a static, non-interactive
+        // stand-in that would silently disagree with what the web menu bar shows — the native bar
+        // simply keeps its pre-d1 Window menu shape (Minimize / Maximize / separator / window list).
+        return null;
     }
     const enabled = menuEntryEnabled(entry, options.context, options.available);
     const out: Record<string, unknown> = {
@@ -402,6 +689,23 @@ function entryJson(entry: MenuEntry, options: MenuSerializeOptions): Record<stri
     }
     if (!enabled) {
         out["tooltip"] = menuEntryDisabledTooltip(entry);
+    }
+    return out;
+}
+
+/** `entryJson` over a whole item list, dropping the `panelSearch` markers `entryJson` reports `null`
+ *  for — the ONE place that filters, so `menuModelJson` and a submenu's own items agree by
+ *  construction. */
+function serializeEntries(
+    entries: readonly MenuEntry[],
+    options: MenuSerializeOptions,
+): Record<string, unknown>[] {
+    const out: Record<string, unknown>[] = [];
+    for (const entry of entries) {
+        const json = entryJson(entry, options);
+        if (json !== null) {
+            out.push(json);
+        }
     }
     return out;
 }
@@ -420,7 +724,7 @@ export function menuModelJson(
         menus: model.menus.map((menu) => ({
             id: menu.id,
             label: menu.label,
-            items: menu.items.map((item) => entryJson(item, options)),
+            items: serializeEntries(menu.items, options),
         })),
     };
 }
@@ -818,6 +1122,22 @@ export const MENU_SUBMENU_ENTRY_CLASS = "ctx-menu__entry";
 /** The `<html>` report of what the menubar rendered — boot diagnosability, like every `data-editor-*`. */
 export const MENUBAR_ATTRIBUTE = "data-editor-menubar";
 
+// --------------------------------------------------------------- the Window panel search (d1/D9)
+// The DOM classes `renderPanelSearchSection` builds with — declared here alongside the rest of the
+// menu's classes (fact 4: styled in app.css from existing tokens, no inline style anywhere).
+
+export const MENU_PANEL_SEARCH_CLASS = "ctx-menu__panels";
+export const MENU_PANEL_SEARCH_INPUT_CLASS = "ctx-menu__panels-input";
+export const MENU_PANEL_SEARCH_LIST_CLASS = "ctx-menu__panels-list";
+export const MENU_PANEL_SEARCH_ITEM_CLASS = "ctx-menu__panels-item";
+export const MENU_PANEL_SEARCH_SELECTED_CLASS = "ctx-menu__panels-item--selected";
+export const MENU_PANEL_SEARCH_GROUP_CLASS = "ctx-menu__panels-group";
+export const MENU_PANEL_SEARCH_EMPTY_CLASS = "ctx-menu__panels-empty";
+export const MENU_PANEL_SEARCH_HIGHLIGHT_CLASS = "ctx-menu__panels-highlight";
+/** The `id` `renderPanelSearchSection`'s listbox carries — the input's `aria-controls` target, the
+ *  `ctx-palette__list` precedent. One Window menu exists per menubar, so a fixed id is safe. */
+export const MENU_PANEL_SEARCH_LIST_ID = "ctx-menu-panels-list";
+
 // ------------------------------------------------------------------------------- the menubar
 
 export interface MountMenubarOptions {
@@ -831,6 +1151,13 @@ export interface MountMenubarOptions {
     readonly commandAvailable: CommandAvailability;
     /** The maximized fact the Maximize/Restore label flips on (chrome.ts mount's own state). */
     readonly isMaximized: () => boolean;
+    /**
+     * The Window menu's panel section, LATE-BOUND (the `hostHolder`/`openPanel` pattern above):
+     * `mountMenubar` runs before `PanelHost` exists (boot.ts: `startMenu` precedes `startPanels`),
+     * so this holder starts `undefined` and boot.ts fills it once the host is up. Read at OPEN time,
+     * never cached, so the section always reflects whichever roster/instances are live right now.
+     */
+    readonly panelHost: { readonly current: PanelSearchHost | undefined };
 }
 
 /** What `mountMenubar` produced — the handle boot keeps and the T1 tier asserts on. */
@@ -923,6 +1250,231 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
         }
     };
 
+    /**
+     * Render the Window menu's search-field-plus-panel-tree section (d1/D9) into `container` — a
+     * SELF-CONTAINED widget with its own keyboard model (04 §4: "arrow keys move through results
+     * while the field keeps text focus, and Escape closes the menu rather than only clearing the
+     * field"), which is why it owns its `keydown` listener rather than routing through the roving-
+     * tabindex system every OTHER item in this dropdown uses (`menuItems`/`focusItem` above): a
+     * text field cannot lose DOM focus to a button on every arrow press and stay a text field.
+     *
+     * Rebuilt FRESH every time the Window menu opens (`renderEntries`'s own freshness rule): the
+     * query always starts empty, the palette's own "always opens on the full list" precedent.
+     * Degrades honestly when `options.panelHost.current` (or its roster) is not up yet — the same
+     * late-bind boot ordering `MenuActionDeps.openPanel` already tolerates.
+     */
+    const renderPanelSearchSection = (container: HTMLElement): void => {
+        const wrapper = doc.createElement("div");
+        wrapper.className = MENU_PANEL_SEARCH_CLASS;
+
+        const input = doc.createElement("input");
+        input.type = "text";
+        input.className = MENU_PANEL_SEARCH_INPUT_CLASS;
+        input.setAttribute("role", "combobox");
+        input.setAttribute("aria-expanded", "true");
+        input.setAttribute("aria-controls", MENU_PANEL_SEARCH_LIST_ID);
+        input.setAttribute("aria-autocomplete", "list");
+        input.setAttribute("placeholder", "Search panels…");
+        input.setAttribute("spellcheck", "false");
+
+        const list = doc.createElement("div");
+        list.id = MENU_PANEL_SEARCH_LIST_ID;
+        list.className = MENU_PANEL_SEARCH_LIST_CLASS;
+        list.setAttribute("role", "listbox");
+        list.setAttribute("aria-label", "Panels");
+
+        wrapper.append(input, list);
+        container.append(wrapper);
+
+        interface SelectableRow {
+            readonly element: HTMLButtonElement;
+            readonly manifest: PanelManifest;
+            readonly enabled: boolean;
+        }
+        let selectable: SelectableRow[] = [];
+        let selected = 0;
+
+        const dispatchRow = (manifest: PanelManifest): void => {
+            closeAll();
+            options.executeCommand(windowPanelOpenCommandId(manifest.id));
+        };
+
+        /** ONE span per highlight run (`highlightRuns`) — never `innerHTML` (fact 2). */
+        const buildLabel = (text: string, positions: readonly number[]): HTMLSpanElement => {
+            const label = doc.createElement("span");
+            label.className = MENU_ITEM_LABEL_CLASS;
+            for (const run of highlightRuns(text, positions)) {
+                if (!run.matched) {
+                    label.append(doc.createTextNode(run.text));
+                    continue;
+                }
+                const mark = doc.createElement("span");
+                mark.className = MENU_PANEL_SEARCH_HIGHLIGHT_CLASS;
+                mark.textContent = run.text;
+                label.append(mark);
+            }
+            return label;
+        };
+
+        const buildRow = (
+            manifest: PanelManifest,
+            labelText: string,
+            positions: readonly number[],
+            live: readonly string[],
+        ): SelectableRow => {
+            const state = panelRowState(manifest, live);
+            const enabled = state.kind !== "disabled";
+            const row = doc.createElement("button");
+            row.type = "button";
+            row.className = MENU_PANEL_SEARCH_ITEM_CLASS;
+            row.setAttribute("role", "option");
+            row.setAttribute("data-panel-id", manifest.id);
+            row.tabIndex = -1; // reached only through this widget's own virtual selection
+            // Disabled = aria-disabled, never hidden (04 §4: "an item is disabled, never hidden, so
+            // the menu's shape cannot flicker") — the SAME honest-degrade rule the ⏳ rows follow.
+            row.setAttribute("aria-disabled", enabled ? "false" : "true");
+            row.setAttribute("aria-selected", "false");
+            if (state.kind === "disabled") {
+                row.title = state.reason;
+            } else if (state.kind === "focus") {
+                row.title = `${manifest.title} is already open — selecting focuses it`;
+            }
+            row.append(buildLabel(labelText, positions));
+            row.addEventListener("click", (): void => {
+                if (row.getAttribute("aria-disabled") === "true") {
+                    return; // disabled-item honesty, the same rule every other menu item follows
+                }
+                dispatchRow(manifest);
+            });
+            return { element: row, manifest, enabled };
+        };
+
+        // The `PALETTE_EMPTY_CLASS` shape (palette_view.ts): `role="option"` + `aria-disabled`
+        // rather than `role="presentation"` — a listbox with zero options still reads as one to
+        // assistive tech, so the placeholder occupies that one slot honestly instead of vanishing.
+        const emptyRow = (text: string): HTMLDivElement => {
+            const empty = doc.createElement("div");
+            empty.className = MENU_PANEL_SEARCH_EMPTY_CLASS;
+            empty.setAttribute("role", "option");
+            empty.setAttribute("aria-disabled", "true");
+            empty.textContent = text;
+            return empty;
+        };
+
+        const setSelected = (index: number): void => {
+            if (selectable.length === 0) {
+                selected = 0;
+                return;
+            }
+            selected = ((index % selectable.length) + selectable.length) % selectable.length;
+            selectable.forEach((row, i) => {
+                const isSelected = i === selected;
+                row.element.setAttribute("aria-selected", isSelected ? "true" : "false");
+                row.element.classList.toggle(MENU_PANEL_SEARCH_SELECTED_CLASS, isSelected);
+            });
+        };
+
+        /** Rebuild the results/tree from the live host + the current query. Called at mount and on
+         *  every keystroke — cheap enough (a handful of rostered panels), the palette's own rule. */
+        const rebuild = (): void => {
+            list.replaceChildren();
+            selectable = [];
+            const host = options.panelHost.current;
+            const roster = host?.roster ?? null;
+            if (host === undefined || roster === null) {
+                list.append(emptyRow("Panels are not available yet"));
+                return;
+            }
+            const query = input.value;
+            if (query.trim() === "") {
+                // Browse mode: the path tree (04 §4), no highlighting (positions are empty).
+                let any = false;
+                for (const treeEntry of panelTreeRows(roster.panels)) {
+                    if (treeEntry.kind === "group") {
+                        const header = doc.createElement("div");
+                        header.className = MENU_PANEL_SEARCH_GROUP_CLASS;
+                        header.setAttribute("role", "presentation");
+                        header.textContent = treeEntry.label;
+                        list.append(header);
+                        continue;
+                    }
+                    any = true;
+                    const live = host.instancesOf(treeEntry.manifest.id);
+                    const row = buildRow(treeEntry.manifest, treeEntry.manifest.title, [], live);
+                    list.append(row.element);
+                    selectable.push(row);
+                }
+                if (!any) {
+                    list.append(emptyRow("No panels available"));
+                }
+            } else {
+                // Search mode: a flat, score-ranked list (`searchPanels`), highlighted by position.
+                const results = searchPanels(roster.panels, query);
+                if (results.length === 0) {
+                    list.append(emptyRow("No matching panels"));
+                }
+                for (const result of results) {
+                    const live = host.instancesOf(result.manifest.id);
+                    const row = buildRow(result.manifest, result.candidate, result.positions, live);
+                    list.append(row.element);
+                    selectable.push(row);
+                }
+            }
+            setSelected(0);
+        };
+
+        input.addEventListener("input", (): void => {
+            rebuild();
+        });
+        // The search-in-menu pattern (04 §4): arrows move the VIRTUAL row selection while the
+        // field keeps text focus; Enter dispatches through `dispatchRow` → the ONE registry;
+        // Escape closes the whole menu. See `renderPanelSearchSection`'s own doc comment above.
+        // key-handler-ok: on-the-command-path list navigation for an OPEN widget, the palette_view
+        // .ts precedent — `stopPropagation` keeps the roving-tabindex handler below from reacting.
+        input.addEventListener("keydown", (event: KeyboardEvent): void => {
+            switch (event.key) {
+                case "ArrowDown":
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelected(selected + 1);
+                    return;
+                case "ArrowUp":
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelected(selected - 1);
+                    return;
+                case "Home":
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelected(0);
+                    return;
+                case "End":
+                    event.preventDefault();
+                    event.stopPropagation();
+                    setSelected(selectable.length - 1);
+                    return;
+                case "Enter": {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    const row = selectable[selected];
+                    if (row !== undefined && row.enabled) {
+                        dispatchRow(row.manifest);
+                    }
+                    return;
+                }
+                case "Escape":
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeAll();
+                    return;
+                default:
+                    return;
+            }
+        });
+
+        rebuild();
+    };
+
     /** Build one dropdown's items against the LIVE context (called at every open). */
     const renderEntries = (
         dropdown: HTMLElement,
@@ -1011,6 +1563,10 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                 dropdown.append(wrapper);
                 continue;
             }
+            if (entry.kind === "panelSearch") {
+                renderPanelSearchSection(dropdown);
+                continue;
+            }
             const enabled = menuEntryEnabled(entry, context, options.commandAvailable);
             const item = doc.createElement("button");
             item.type = "button";
@@ -1063,7 +1619,18 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
         armOutsideCloser();
         report();
         if (focusFirst) {
-            focusItem(menuItems(entry.dropdown), 0);
+            // The Window menu's search field (d1/D9) wins initial focus over the roving-tabindex
+            // system — the design's own ordering puts "a search field" first, and every command-
+            // palette-shaped widget in this codebase auto-focuses its input on open (palette_view.ts
+            // `sync`). A mouse click still reaches Minimize/Maximize/the window list beneath it.
+            const searchInput = entry.dropdown.querySelector<HTMLInputElement>(
+                `.${MENU_PANEL_SEARCH_INPUT_CLASS}`,
+            );
+            if (searchInput !== null) {
+                searchInput.focus();
+            } else {
+                focusItem(menuItems(entry.dropdown), 0);
+            }
         }
     };
 
