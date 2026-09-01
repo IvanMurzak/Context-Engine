@@ -151,6 +151,21 @@ propagate into the delivered table — `docs/shell.md` § 16 carries the verifie
 drag task and its spec draws on the same source, so its citations must be re-derived from the pinned
 headers, never trusted. The scheduler passes this to `b1`'s worker at dispatch.
 
+**Carry-forward for `a2` — a candidate root cause, to VERIFY not to assume.** `a1`'s review pass read
+the pinned CEF headers on disk and argues that `GetScreenInfo` (`cef_shell.cpp:826`) should **not**
+take the device/DIP split at all: the header documents that split only for `GetScreenPoint`, Chromium's
+`display::ScreenInfo::rect` is DIP everywhere, and upstream `cefclient` assigns the DIP view rect. If
+that holds, then at 150 % an 800×600 DIP view reports a 1200×900 screen — `window.screen.width` is
+1.5× wrong, and the region CEF uses to fit an OSR popup (`cef_types.h:1958`) is 1.5× the view, so a
+`<select>` near the bottom opens downward past the view instead of flipping up and its `PET_POPUP`
+layer composites clipped. **That is the symptom `a2` exists to fix**, which would make this a second
+contributing cause beside the popup-rect conversion `a2` already owns. Three things make it `a2`'s call
+and not `a1`'s: the current behaviour is documented as deliberate in `dpi.h:71-80`, it is pinned by an
+existing test (`test_osr_screen_extent_follows_the_platform_convention`), and **no CI job exercises the
+path** — it is invisible at 100 % scale, which is precisely why the set mandates a test at scale ≠ 1.
+`a1` promotes the decision from a local one to a shared `kScreenCoordsAreDip` constant, so `a2` inherits
+it either way. Verify the header claim first; if it holds, changing that pinned test is in scope.
+
 **Product defects surfaced by `c1`, deliberately not fixed there.**
 
 - `read_selection_subject` gates on `params.contains("subject")`, so `{"subject": null}` is refused
