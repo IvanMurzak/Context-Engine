@@ -27,27 +27,37 @@
 // That split exists because a scaffold whose only test asserted on its own template TEXT would
 // prove nothing about whether the editor accepts the result.
 //
-// THE MIRROR LIST — the five pieces of shell-tier vocabulary this template re-spells. Each is
-// pinned by test_e13e_ext_scaffold.cpp, the ONLY target that links both tiers; an unpinned mirror
-// that drifts emits packages the store silently refuses, and nothing else in the repo can see it:
+// THE MIRROR LIST — the shell-tier vocabulary this template re-spells. Each is pinned by
+// test_e13e_ext_scaffold.cpp, the ONLY target that links both tiers; an unpinned mirror that drifts
+// emits packages the store silently refuses, and nothing else in the repo can see it:
 //   1. kExtensionPanelManifestFileName <- shell::kPackageManifestFileName  (pin: cross-tier ==)
-//   2. kExtensionPanelContractVersion  <- gui::contract::kContractMajor    (pin: the value read
-//      back out of the WRITTEN manifest)
+//   2. RETIRED by editor-UX c2 — see below.
 //   3. is_scaffold_package_id          <- shell::is_valid_package_id       (pin: id-for-id table)
 //   4. kExtUrlPrefix (in scaffold.cpp) <- shell::kExtUrlPrefix             (pin: the entry prefix)
 //   5. `window.contextPanelPort`, spelled inside the generated panel.js <- shell::kExtPortGlobalName
 //      (pin: the WRITTEN script is searched for it)
-// The reason they are mirrored is DEPENDENCY WEIGHT plus a real inversion — NOT "link order", which
-// forbids nothing here (CMake resolves target names at generate time, and context_cli already links
-// targets declared after it). Mirrors 1/3/4/5 live in context_editor_shell, which PUBLIC-links the
-// present path plus X11/AppKit, and the Shell SPAWNS the CLI as a subprocess — so the headless CLI
-// linking it would invert that dependency. Mirror 2 is the exception worth knowing: gui::contract is
-// pure C++ over context_bridge, which context_cli ALREADY links, so retiring that one costs a single
-// link edge. Deliberately not taken here — relocating the mirrors is out of this task's scope.
+// The reason the rest are mirrored is DEPENDENCY WEIGHT plus a real inversion — NOT "link order",
+// which forbids nothing here (CMake resolves target names at generate time, and context_cli already
+// links targets declared after it). Mirrors 1/3/4/5 live in context_editor_shell, which PUBLIC-links
+// the present path plus X11/AppKit, and the Shell SPAWNS the CLI as a subprocess — so the headless CLI
+// linking it would invert that dependency.
+//
+// ⚠ MIRROR 2 (the contract major) IS RETIRED, and this file predicted the price exactly: "gui::contract
+// is pure C++ over context_bridge, which context_cli ALREADY links, so retiring that one costs a single
+// link edge." editor-UX c2 paid it. `context_cli` now links `context_gui_contract` and
+// `kExtensionPanelContractVersion` IS `gui::contract::kContractMajor` rather than a literal beside it —
+// which is what the 2 -> 3 bump's own discipline demanded: every in-repo consumer of the major
+// references it SYMBOLICALLY, so the enumeration that makes a breaking bump tractable is a grep for one
+// identifier rather than a hunt for integers. It was the last hardcoded contract-major literal left.
 
 #pragma once
 
 #include "context/editor/contract/envelope.h"
+// Mirror 2's retirement (see the MIRROR LIST above): the contract major is NAMED, never copied. This
+// is the one gui::contract header the CLI's public surface reaches, and it is pure C++ over
+// context_bridge — which context_cli already linked — so the edge it adds is `context_gui_contract`
+// and nothing beneath it.
+#include "context/editor/gui/contract/extension.h"
 
 #include <string>
 #include <vector>
@@ -73,15 +83,18 @@ inline constexpr const char* kExtensionPanelEntryFileName = "panel.html";
 
 // The R-EDIT-001 contract major the `extension-panel` manifest DECLARES.
 //
-// ⚠ Mirror 2 of the MIRROR LIST above. IT MUST EQUAL `gui::contract::kContractMajor`, and is spelled
-// here because gui::contract is not on the CLI's link closure TODAY — the one mirror that could be
-// retired for a single link edge (see that list). The compatibility
-// window is a single major (extension.h), so a manifest stating any other value is REFUSED outright
-// by `read_package_manifest` — i.e. the day someone bumps the major, this template silently starts
-// emitting packages the editor rejects. `test_e13e_ext_scaffold.cpp` links both tiers and asserts
-// the value WRITTEN INTO THE FILE equals `gui::contract::kContractMajor`, so that bump reds a test
-// instead of shipping a scaffold that teaches the wrong shape.
-inline constexpr int kExtensionPanelContractVersion = 2;
+// ⚠ NO LONGER A MIRROR — it IS `gui::contract::kContractMajor`, aliased for the call sites that spell
+// it in the CLI's own vocabulary (see the MIRROR LIST above, entry 2, RETIRED). The compatibility
+// window is a single major (extension.h), so a manifest stating any other value is REFUSED outright by
+// `read_package_manifest` — i.e. under the old literal, the day someone bumped the major this template
+// silently started emitting packages the editor rejects, and only a cross-tier test stood between that
+// and a release. Now the bump cannot desynchronise it: there is one definition and this is a name for
+// it. `test_e13e_ext_scaffold.cpp` still asserts the value WRITTEN INTO THE FILE against
+// `gui::contract::kContractMajor` — that assertion is about the SCAFFOLDER's output, not about this
+// constant, so it stays falsifiable (a template that stopped writing the member, or wrote another
+// number, still reds it).
+inline constexpr int kExtensionPanelContractVersion =
+    static_cast<int>(editor::gui::contract::kContractMajor);
 
 // The list of template names `context new` accepts.
 //

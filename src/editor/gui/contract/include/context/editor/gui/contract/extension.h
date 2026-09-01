@@ -7,6 +7,11 @@
 // defaults, the content type (a headless uitree panel vs a sandboxed third-party iframe), the D6 state
 // schema version, the capability grants, the contributed commands, and the theme contributions. That
 // is a BREAKING contract change, so kContractMajor moves 1 -> 2 (see below).
+//
+// editor-UX c2 extends it again into MANIFEST v3 (design 04 §2, D6): `instances {mode, max}` REPLACES
+// v2's `dock.singleton` boolean, `path` groups the panel in the Window menu's tree, and
+// `selection.subjects[]` / `events.{publishes,subscribes}[]` declare the D2 selection subjects and the
+// D4 package facts a contribution deals in. Another BREAKING change, so kContractMajor moves 2 -> 3.
 
 #pragma once
 
@@ -30,7 +35,20 @@ namespace context::editor::gui::contract
 // registry has no out-of-repo clients yet (the M9 e05b enumeration walked EVERY in-repo consumer —
 // the four CMake targets that link context_gui_contract and their tests, harnesses and fixtures — and
 // each references this constant SYMBOLICALLY rather than hardcoding a literal).
-inline constexpr std::uint32_t kContractMajor = 2;
+//
+// 2 -> 3 (editor-UX c2, D6): the panel manifest v3 (04 §2) REMOVED `dock.singleton` — not deprecated,
+// removed — in favour of `instances {mode, max}`, and added `path`, `selection.subjects[]` and
+// `events.{publishes,subscribes}[]`. Same single-major window, so this refuses every v2 contribution
+// the instant it lands, and it is safe for the same reason and ONLY that reason: there are still no
+// out-of-repo consumers, and after v1 ships the identical change costs a deprecation cycle. The
+// enumeration was RE-RUN rather than inherited from the 1 -> 2 bump (that list was a year old): the
+// targets that link context_gui_contract today are context_gui_a11y (+ its scan executable), the five
+// context_gui_contract_test_* executables, context_gui_help_contextual, context_editor_host,
+// context_editor_shell (PUBLIC, so every shell test + the CEF smokes), the integration
+// test_m5exit3_seam_checklist executable, and — new with this bump — context_cli, which linked it in
+// order to RETIRE the last hardcoded literal in the tree (cli::kExtensionPanelContractVersion, mirror
+// 2 of scaffold.h's mirror list). Every one of them names this constant symbolically.
+inline constexpr std::uint32_t kContractMajor = 3;
 
 // The kinds of editor UI a package may contribute.
 enum class ContributionKind
@@ -81,14 +99,72 @@ enum class ContentType
 };
 
 // Docking defaults for a panel contribution (04 §3 `dock`).
+//
+// ⚠ `singleton` LIVED HERE UNTIL MANIFEST v3 and is GONE — see InstanceSpec below. It was removed
+// rather than deprecated because the compatibility window is a single major: a deprecated member
+// would have to be honoured by a registry that also honours `instances`, i.e. two sources of truth
+// for one question ("how many copies may exist?") with no rule for disagreement.
 struct DockDefaults
 {
     DockZone default_zone = DockZone::center;
-    // A singleton panel may be open at most once per window (a second open focuses the existing one).
-    bool singleton = false;
     // Minimum content size in logical pixels. 0 = "no minimum stated"; negatives are refused.
     int min_width = 0;
     int min_height = 0;
+};
+
+// How many live copies of a panel kind may exist at once (manifest v3 `instances.mode`, D6).
+//
+// This is the WHOLE of v2's `dock.singleton`, spelled as the closed vocabulary it always wanted to
+// be: `singleton` IS what `true` meant. The imperative half — minting instance ids, focusing an
+// already-open singleton, refusing past a limit — is the instance runtime (task c3); the manifest
+// only DECLARES the rule, and the declaration is inert until that runtime lands.
+enum class InstanceMode
+{
+    // At most one live copy; a second open focuses the existing instance rather than failing.
+    singleton,
+    // At most `max` live copies (`max` MUST be > 0); an open past the limit is refused with a
+    // diagnostic naming it.
+    limited,
+    // As many copies as are asked for (the Viewport: several scene views is the point).
+    unlimited,
+};
+
+// The instance declaration (manifest v3 `instances`).
+//
+// THE DEFAULT IS THE RESTRICTIVE ONE, and that is a deliberate change of meaning from v2, where
+// `DockDefaults::singleton` defaulted to FALSE. That default was decorative — nothing consulted the
+// flag, and `PanelHost` refuses a second open of ANY panel today (04 §1) — so `singleton` is both the
+// deny-by-default answer and the truthful description of the runtime a v3 manifest meets.
+struct InstanceSpec
+{
+    InstanceMode mode = InstanceMode::singleton;
+    // The ceiling for `limited`, and MEANINGFUL ONLY THERE. 0 = unstated. The registry refuses
+    // `limited` without a positive `max` AND refuses a `max` stated on either other mode, rather than
+    // ignoring it: a silently ignored ceiling is a manifest lying about what it asked for.
+    int max = 0;
+};
+
+// The selection subjects a contribution deals in (manifest v3 `selection.subjects[]`, D2).
+//
+// The subject-kind vocabulary is OPEN: `entity` / `file` / `asset` are contract-owned, and a package
+// declares its own `<pkg>.<kind>` here. The registry validates the NAMESPACING (see
+// Contribution::package_id) — a package may not name an unnamespaced kind, because that is how it
+// would claim a contract-owned one.
+struct SelectionSpec
+{
+    std::vector<std::string> subjects;
+};
+
+// The package facts a contribution deals in (manifest v3 `events`, D4).
+//
+// `publishes` are the daemon topics this contribution produces; a package may only publish under its
+// OWN namespace. `subscribes` are the topics it consumes, which is exactly where a package names
+// ANOTHER package's topic — the install-time consented, deny-by-default grant D4 describes — so the
+// namespacing rule there is "namespaced under SOMEBODY", not "namespaced under you".
+struct EventSpec
+{
+    std::vector<std::string> publishes;
+    std::vector<std::string> subscribes;
 };
 
 // The content production seam for a contribution (04 §3 `content`).
@@ -163,6 +239,24 @@ struct Contribution
     std::vector<CommandContribution> commands;
     // Optional theme.json contributions (06).
     std::vector<std::string> themes;
+
+    // --- manifest v3 (editor-UX c2, design 04 §2) -------------------------------------------------
+    // How many live copies of this panel kind may exist (replaces v2's `dock.singleton`).
+    InstanceSpec instances;
+    // Slash-separated DISPLAY grouping for the Window menu's panel tree (d1), e.g. "Scene/Debug".
+    // Empty = top level. It is NOT a filesystem path and nothing resolves it — the registry validates
+    // it only as display text (no leading/trailing slash, no empty segment).
+    std::string path;
+    SelectionSpec selection;
+    EventSpec events;
+
+    // PROVENANCE, not a manifest member: the id of the package that declared this contribution, set
+    // by the loader that read it (shell::read_package_manifest derives it from the package DIRECTORY,
+    // never from the manifest text). EMPTY means a BUILT-IN — the editor's own contribution — which
+    // is what buys a built-in the right to name an unnamespaced, contract-owned selection subject
+    // while a package may not. It is deliberately not projected onto the wire: the renderer already
+    // learns a package's identity from the contribution id's own namespace.
+    std::string package_id;
 };
 
 // The grep-stable token for a contribution kind (used in diagnostics + describe output).
@@ -173,5 +267,15 @@ struct Contribution
 
 // The grep-stable token for a content type (diagnostics + the manifest projection).
 [[nodiscard]] const char* content_type_token(ContentType type);
+
+// The grep-stable token for an instance mode (diagnostics + the manifest projection). Every inverse
+// in the tree — package_store.cpp's reader, panels.ts's parser — searches THIS table rather than
+// keeping a second hand-written copy of the vocabulary.
+[[nodiscard]] const char* instance_mode_token(InstanceMode mode);
+
+// Every instance mode, in declaration order, so a reader can invert `instance_mode_token` by search
+// instead of by a hand-written table that could drift from it.
+inline constexpr InstanceMode kInstanceModes[] = {InstanceMode::singleton, InstanceMode::limited,
+                                                  InstanceMode::unlimited};
 
 } // namespace context::editor::gui::contract

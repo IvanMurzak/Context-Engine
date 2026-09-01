@@ -16,17 +16,25 @@
 // — which spans `src/cli/` and `src/editor/shell/`, two tiers no single module's suite can link
 // together. That is what puts it in the integration tier rather than beside either half.
 //
-// THE THREE ANTI-DRIFT PINS. The CLI sits BELOW the shell in the link order, so it cannot call
-// `is_valid_package_id`, `kPackageManifestFileName` or `kContractMajor`; it mirrors all three. A
-// mirror that drifts produces a scaffold whose output the store silently refuses, and NOTHING else
-// in the repo can see it — the CLI's own suite cannot link the shell, and the shell's own suite has
-// no scaffolder. This test links both, so each pin is an assertion here:
+// THE ANTI-DRIFT PINS. The CLI sits BELOW the shell in the link order, so it cannot call
+// `is_valid_package_id` or `kPackageManifestFileName`; it mirrors both. A mirror that drifts produces
+// a scaffold whose output the store silently refuses, and NOTHING else in the repo can see it — the
+// CLI's own suite cannot link the shell, and the shell's own suite has no scaffolder. This test links
+// both, so each pin is an assertion here:
 //   (1) the manifest FILE NAME the CLI writes == the name the store reads;
 //   (2) the `contractVersion` VALUE READ BACK OUT OF THE WRITTEN FILE == `gc::kContractMajor`;
 //   (3) the CLI's package-id grammar agrees with the store's, id for id, over a table that includes
 //       every clause either one refuses on.
 // Each is read from the artifact or computed from the two live implementations — never from a
 // constant this file also spells.
+//
+// ⚠ PIN (2) CHANGED CHARACTER AT editor-UX c2 and is still worth its keep. The contract major is NO
+// LONGER MIRRORED: `context_cli` links `context_gui_contract` and `cli::kExtensionPanelContractVersion`
+// IS `gc::kContractMajor`, so the two constants can no longer disagree. What (2) still proves is the
+// thing that was always the real risk — that the SCAFFOLDER writes the member at all, and writes THAT
+// value into the file. A template that dropped `contractVersion`, or wrote a literal beside the
+// constant, still reds it; only the constant-vs-constant half became unfalsifiable, and it was
+// deleted rather than left standing as an assertion that cannot fail.
 
 #include "context/cli/app.h"
 #include "context/cli/scaffold.h"
@@ -283,8 +291,9 @@ void test_generated_contribution_is_what_the_editor_accepts()
     CHECK(c.content.type == gc::ContentType::iframe);
     CHECK(c.content.entry == std::string(shell::kExtUrlPrefix) + package_id + "/" +
                                  cli::kExtensionPanelEntryFileName);
-    // The R-EDIT-001 manifest-v2 members, asserted on the PARSED value rather than the text.
-    CHECK(c.dock.singleton);
+    // The R-EDIT-001 manifest-v2 + v3 members, asserted on the PARSED value rather than the text.
+    CHECK(c.instances.mode == gc::InstanceMode::singleton);
+    CHECK(c.path == "Packages");
     CHECK(c.dock.default_zone == gc::DockZone::right);
     CHECK(c.dock.min_width > 0);
     CHECK(c.dock.min_height > 0);
@@ -359,8 +368,8 @@ void test_cross_tier_pins()
 
     // (2) The CONTRACT MAJOR — read out of a manifest the scaffolder actually wrote, not out of the
     //     CLI's constant. `read_package_manifest` refuses any stated value that is not
-    //     `kContractMajor`, so a major bump would otherwise turn this template into one that emits
-    //     packages the editor rejects, silently.
+    //     `kContractMajor`, so a template that stopped writing the member, or wrote another number,
+    //     would emit packages the editor rejects, silently.
     const fs::path root = make_temp_root("pins");
     const fs::path package_root = root / "pinned-panel";
     CHECK(cli::run({"new", "--template", "extension-panel", package_root.string()}).ok());
@@ -385,7 +394,12 @@ void test_cross_tier_pins()
           static_cast<std::int64_t>(gc::kContractMajor));
     // Stated in the file rather than omitted, so the template TEACHES the version it targets — and
     // the assertion above is what keeps that statement true.
-    CHECK(contribution.at("contractVersion").as_int() == cli::kExtensionPanelContractVersion);
+    //
+    // ⚠ THE OLD SIBLING LINE HERE — `== cli::kExtensionPanelContractVersion` — IS DELETED, not
+    // overlooked. Since c2 that constant IS `gc::kContractMajor`, so the comparison became one the
+    // preprocessor could answer: it could not fail, and an assertion that cannot fail is worse than an
+    // absent one because it reads like coverage. The line above still compares the FILE against the
+    // live constant, which is the half that was ever falsifiable.
 
     // (3) The `context-ext://` prefix the entry carries, against the shell's own spelling.
     const std::string entry = contribution.at("content").at("entry").as_string();

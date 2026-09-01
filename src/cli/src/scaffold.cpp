@@ -169,17 +169,24 @@ bool last_label_all_digits(const std::string& id)
     return true;
 }
 
-// The manifest a scaffolded package ships: R-EDIT-001 manifest v2, ONE iframe panel contribution.
+// The manifest a scaffolded package ships: R-EDIT-001 manifest v3, ONE iframe panel contribution.
 // Built as a JSON DOM so it is well-formed by construction, exactly as the default template's two
 // files are.
 Json extension_manifest_json(const std::string& package_id)
 {
     Json dock = Json::object();
     dock.set("zone", Json("right"));
-    // One instance, because a second copy of a hello panel says nothing a first does not.
-    dock.set("singleton", Json(true));
     dock.set("minWidth", Json(std::int64_t{280}));
     dock.set("minHeight", Json(std::int64_t{160}));
+
+    // Manifest v3 (04 §2). `singleton` USED TO LIVE IN `dock` as a boolean; it is now the closed
+    // `instances.mode` vocabulary, and this template teaches the new spelling because the store
+    // refuses the old one outright (the compatibility window is a single major). One instance, because
+    // a second copy of a hello panel says nothing a first does not — and `max` is deliberately ABSENT:
+    // the registry refuses a `max` stated on any mode but `limited`, so writing 0 "for completeness"
+    // would teach a shape that gets a real package rejected.
+    Json instances = Json::object();
+    instances.set("mode", Json("singleton"));
 
     Json content = Json::object();
     // `iframe` is the ONLY content type a package contribution may declare — `uitree` and `local`
@@ -207,6 +214,11 @@ Json extension_manifest_json(const std::string& package_id)
     contribution.set("icon", Json("puzzle"));
     contribution.set("contractVersion", Json(std::int64_t{kExtensionPanelContractVersion}));
     contribution.set("dock", std::move(dock));
+    contribution.set("instances", std::move(instances));
+    // The Window menu's grouping (d1). Slash-separated DISPLAY text, never a filesystem path, and a
+    // NON-EMPTY value on purpose: "" is legal and means top level, but a template that taught the
+    // empty case would teach nothing about the member's shape.
+    contribution.set("path", Json(std::string("Packages")));
     contribution.set("content", std::move(content));
     contribution.set("state", std::move(state));
     contribution.set("capabilities", std::move(capabilities));

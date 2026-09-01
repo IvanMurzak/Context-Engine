@@ -63,8 +63,10 @@ function manifestJson(overrides: ManifestOverrides = {}): Record<string, unknown
         kind: "panel",
         title: "Hello",
         icon: "",
-        contractVersion: 2,
-        dock: { zone: "right", singleton: true, minWidth: 0, minHeight: 0 },
+        contractVersion: 3,
+        dock: { zone: "right", minWidth: 0, minHeight: 0 },
+        instances: { mode: "singleton", max: 0 },
+        path: "Packages",
         content: {
             type: overrides.contentType ?? "iframe",
             entry: overrides.entry ?? "context-ext://pkg.hello/index.html",

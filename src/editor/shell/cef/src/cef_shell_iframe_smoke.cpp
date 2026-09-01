@@ -319,7 +319,7 @@ bool write_fixture_package(const std::filesystem::path& root)
     return ok;
 }
 
-// One `iframe` contribution for the roster (manifest v2, 04 §3/§5). Built here rather than added to
+// One `iframe` contribution for the roster (manifest v3, 04 §3/§5 + 04 §2). Built here rather than added to
 // `builtin_contributions()` on purpose: the built-in roster is gated by `gui-a11y-coverage` and the
 // help/coverage manifests, and a smoke fixture has no business in the shipped panel set. PanelHost's
 // explicit roster constructor exists for exactly this.
@@ -330,7 +330,8 @@ gc::Contribution iframe_contribution(const char* id, const std::string& entry)
     c.kind = gc::ContributionKind::panel;
     c.title = id;
     c.dock.default_zone = gc::DockZone::right;
-    c.dock.singleton = true;
+    // Manifest v3 (04 §2): `instances.mode` is what v2's `dock.singleton = true` said.
+    c.instances.mode = gc::InstanceMode::singleton;
     c.content.type = gc::ContentType::iframe;
     c.content.entry = entry;
     c.state.schema_version = 1;

@@ -28,6 +28,15 @@ inline constexpr const char* kErrSandboxNonconformant = "gui.sandbox_nonconforma
 inline constexpr const char* kErrInvalidManifest = "gui.invalid_manifest";
 inline constexpr const char* kErrUnknownCapability = "gui.unknown_capability";
 
+// Why a manifest is structurally invalid (04 §3 v2 + 04 §2 v3), or an empty string when it is
+// well-formed. This is the SAME function `register_contribution` refuses on — exposed rather than
+// duplicated because a second reader exists: `shell::read_package_manifest` promises (package_store.h
+// § the scan) never to report as ACCEPTED a package the registry would then refuse, and the only way
+// to keep that promise as the manifest grows is to ask the registry itself. A hand-copied second
+// opinion would drift, and the drift would be invisible until a package was accepted at scan time and
+// rejected at registration — which is exactly the state that promise forbids.
+[[nodiscard]] std::string manifest_defect(const Contribution& contribution);
+
 struct RegistrationResult
 {
     bool ok = false;

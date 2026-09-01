@@ -1,4 +1,4 @@
-// R-EDIT-001 extension contract: the manifest-v2 token tables + the capability allowlist.
+// R-EDIT-001 extension contract: the manifest-v3 token tables + the capability allowlist.
 
 #include "context/editor/gui/contract/extension.h"
 
@@ -53,6 +53,22 @@ const char* content_type_token(ContentType type)
         return "local";
     }
     return "uitree";
+}
+
+const char* instance_mode_token(InstanceMode mode)
+{
+    switch (mode)
+    {
+    case InstanceMode::singleton:
+        return "singleton";
+    case InstanceMode::limited:
+        return "limited";
+    case InstanceMode::unlimited:
+        return "unlimited";
+    }
+    // The deny-by-default fallback, matching InstanceSpec's own default: an unreachable enumerator
+    // must read as the MOST restrictive mode, never as `unlimited`.
+    return "singleton";
 }
 
 bool capability_supported(const std::string& capability)

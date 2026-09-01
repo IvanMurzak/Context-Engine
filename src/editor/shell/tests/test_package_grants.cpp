@@ -91,7 +91,7 @@ using shell::GrantDiagnostic;
       "id": ")" + id + R"(.panel",
       "kind": "panel",
       "title": "Hello Panel",
-      "contractVersion": 2,
+      "contractVersion": )" + std::to_string(gc::kContractMajor) + R"(,
       "content": { "type": "iframe", "entry": "context-ext://)" + id + R"(/panel.html" },
       "capabilities": [ "read_query", "ui_events", "file_write" ]
     },
@@ -99,7 +99,7 @@ using shell::GrantDiagnostic;
       "id": ")" + id + R"(.viewer",
       "kind": "panel",
       "title": "Hello Viewer",
-      "contractVersion": 2,
+      "contractVersion": )" + std::to_string(gc::kContractMajor) + R"(,
       "content": { "type": "iframe", "entry": "context-ext://)" + id + R"(/viewer.html" },
       "capabilities": [ "read_query" ]
     }
@@ -118,7 +118,7 @@ using shell::GrantDiagnostic;
       "id": ")" + id + R"(.panel",
       "kind": "panel",
       "title": "Bare",
-      "contractVersion": 2,
+      "contractVersion": )" + std::to_string(gc::kContractMajor) + R"(,
       "content": { "type": "iframe", "entry": "context-ext://)" + id + R"(/panel.html" }
     }
   ]

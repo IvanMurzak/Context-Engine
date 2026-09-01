@@ -1,5 +1,5 @@
 // The built-in editor-UI roster (see builtin_roster.h) — the single source of truth for the panels
-// the editor ships, as panel-manifest-v2 Contributions.
+// the editor ships, as panel-manifest-v3 Contributions.
 //
 // ADDING A BUILT-IN PANEL is a FOUR-anchor edit, mechanically cross-checked by two standing ctests:
 //   1. append its Contribution HERE (the roster / listing order),
@@ -33,8 +33,14 @@ namespace
 
 // One built-in panel manifest. Built-ins are all `uitree` content (their C++ panel model IS the
 // content) at the read/query capability baseline; a built-in that needs more states it explicitly.
+//
+// `instances` + `path` are the manifest-v3 members (04 §2) that replaced v2's `bool singleton`
+// argument. `path` is the Window menu's grouping (d1) and is display text only — it is inert until
+// that menu lands, which is expected. `package_id` stays EMPTY for every entry here: these ARE the
+// editor's own contributions, which is what lets a built-in name an unnamespaced contract-owned
+// selection subject.
 Contribution builtin_panel(std::string id, std::string title, std::string icon, DockZone zone,
-                           bool singleton, int min_width, int min_height,
+                           InstanceMode instances, std::string path, int min_width, int min_height,
                            std::vector<std::string> capabilities)
 {
     Contribution c;
@@ -43,9 +49,10 @@ Contribution builtin_panel(std::string id, std::string title, std::string icon, 
     c.title = std::move(title);
     c.icon = std::move(icon);
     c.dock.default_zone = zone;
-    c.dock.singleton = singleton;
     c.dock.min_width = min_width;
     c.dock.min_height = min_height;
+    c.instances.mode = instances;
+    c.path = std::move(path);
     c.content.type = ContentType::uitree;
     c.state.schema_version = 1;
     c.capabilities = std::move(capabilities);
@@ -62,11 +69,11 @@ Contribution builtin_panel(std::string id, std::string title, std::string icon, 
 // the content, which is exactly what `content.type` is for. See extension.h's `ContentType::local`
 // for when this is the right answer and when it is not.
 Contribution builtin_local_panel(std::string id, std::string title, std::string icon, DockZone zone,
-                                 bool singleton, int min_width, int min_height,
-                                 std::vector<std::string> capabilities)
+                                 InstanceMode instances, std::string path, int min_width,
+                                 int min_height, std::vector<std::string> capabilities)
 {
-    Contribution c = builtin_panel(std::move(id), std::move(title), std::move(icon), zone, singleton,
-                                   min_width, min_height, std::move(capabilities));
+    Contribution c = builtin_panel(std::move(id), std::move(title), std::move(icon), zone, instances,
+                                   std::move(path), min_width, min_height, std::move(capabilities));
     c.content.type = ContentType::local;
     return c;
 }
@@ -78,22 +85,29 @@ std::vector<Contribution> build_roster()
     std::vector<Contribution> roster;
 
     // M5-F0b — the built-in placeholder panel the CEF editor host boots (gui/uitree/builtin.h).
-    roster.push_back(builtin_panel("placeholder", "Context Editor", "logo", DockZone::center, true,
-                                   320, 200, Caps{kCapabilityReadQuery}));
+    roster.push_back(builtin_panel("placeholder", "Context Editor", "logo", DockZone::center,
+                                   InstanceMode::singleton, "General", 320, 200,
+                                   Caps{kCapabilityReadQuery}));
 
     // M5-F2 — the scene-tree observer panel (gui/panels/scenetree/).
-    roster.push_back(builtin_panel("builtin.scene-tree", "Scene Tree", "tree", DockZone::left, true,
-                                   240, 200, Caps{kCapabilityReadQuery}));
+    roster.push_back(builtin_panel("builtin.scene-tree", "Scene Tree", "tree", DockZone::left,
+                                   InstanceMode::singleton, "Scene", 240, 200,
+                                   Caps{kCapabilityReadQuery}));
 
     // M5-F3 — the inspector panel (gui/panels/inspector/). Authors composed overrides through the
     // ONE L-30 write path, so it declares the file_write grant explicitly (never ambient).
     roster.push_back(builtin_panel("builtin.inspector", "Inspector", "inspect", DockZone::right,
-                                   true, 280, 200,
+                                   InstanceMode::singleton, "Scene", 280, 200,
                                    Caps{kCapabilityReadQuery, kCapabilityFileWrite}));
 
     // M5-F1 — the native viewport observer panel (gui/viewport/). Read-only observer.
+    //
+    // THE ONE NON-SINGLETON BUILT-IN, and it was already declared so under v2 (`singleton: false`) —
+    // `unlimited` is that same statement in the v3 vocabulary. Several scene views at once is the
+    // point of a viewport, which makes it the natural first proof that c3's instance runtime works.
     roster.push_back(builtin_panel("builtin.viewport", "Viewport", "viewport", DockZone::center,
-                                   false, 320, 240, Caps{kCapabilityReadQuery}));
+                                   InstanceMode::unlimited, "Scene", 320, 240,
+                                   Caps{kCapabilityReadQuery}));
 
     // M5-F5's docked `builtin.playbar` was RETIRED here by editor-window-chrome e1 (D2): the d1
     // titlebar strip is the Play Bar's ONLY home now, driving the same `PlaybarModel`/`SessionFeed`
@@ -103,20 +117,22 @@ std::vector<Contribution> build_roster()
 
     // M5-F4 — the Problems observer panel (gui/panels/problems/).
     roster.push_back(builtin_panel("builtin.problems", "Problems", "warning", DockZone::bottom,
-                                   true, 320, 120, Caps{kCapabilityReadQuery}));
+                                   InstanceMode::singleton, "Diagnostics", 320, 120,
+                                   Caps{kCapabilityReadQuery}));
 
     // M8.5 a18 — the tilemap-painter authoring panel (gui/panels/tilemap/, R-2D-003).
     roster.push_back(builtin_panel("builtin.tilemap-painter", "Tilemap Painter", "brush",
-                                   DockZone::right, true, 280, 240,
+                                   DockZone::right, InstanceMode::singleton, "Scene/2D", 280, 240,
                                    Caps{kCapabilityReadQuery, kCapabilityFileWrite}));
 
     // M8.5 a19 — the in-context viewport override-editing panel (gui/viewport/, R-HUX-006).
     roster.push_back(builtin_panel("builtin.viewport-edit", "Viewport Edit", "gizmo",
-                                   DockZone::right, true, 280, 200,
+                                   DockZone::right, InstanceMode::singleton, "Scene", 280, 200,
                                    Caps{kCapabilityReadQuery, kCapabilityFileWrite}));
 
     // M8.5 a20 — the in-editor contextual Help / getting-started panel (gui/help/, R-HUX-010).
-    roster.push_back(builtin_panel("builtin.help", "Help", "help", DockZone::right, true, 280, 200,
+    roster.push_back(builtin_panel("builtin.help", "Help", "help", DockZone::right,
+                                   InstanceMode::singleton, "Help", 280, 200,
                                    Caps{kCapabilityReadQuery}));
 
     // M5-F7 — the Ctrl+Z/Y session history surface (gui/session/undo/, R-HUX-001). PROMOTED into the
@@ -124,7 +140,7 @@ std::vector<Contribution> build_roster()
     // from BOTH the host registry and the a11y scan list, so its keyboard surface was never gated.
     // Its undo/redo replays are override writes through the ONE L-30 path, hence the file_write grant.
     roster.push_back(builtin_panel("builtin.session.undo", "Session History", "history",
-                                   DockZone::bottom, true, 240, 120,
+                                   DockZone::bottom, InstanceMode::singleton, "Session", 240, 120,
                                    Caps{kCapabilityReadQuery, kCapabilityFileWrite}));
 
     // M9 e06d — the Settings panel (06 §4 / C-F14): theme picker, keymap-file shortcut, update info.
@@ -133,7 +149,8 @@ std::vector<Contribution> build_roster()
     // there is no C++ model to bind. `read_query` only — it changes NOTHING in the project; the user
     // config it does change is written by the Shell through `config.set`, never by this panel.
     roster.push_back(builtin_local_panel("builtin.settings", "Settings", "settings", DockZone::right,
-                                         true, 280, 200, Caps{kCapabilityReadQuery}));
+                                         InstanceMode::singleton, "General", 280, 200,
+                                         Caps{kCapabilityReadQuery}));
 
     return roster;
 }

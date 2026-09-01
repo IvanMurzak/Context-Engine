@@ -9,6 +9,7 @@
 
 #include "context/editor/contract/json.h"
 #include "context/editor/gui/contract/panel_state.h" // kStateSchemaVersionKey — the D6 state key
+#include "context/editor/gui/contract/registry.h"    // manifest_defect — the registry's own verdict
 #include "context/editor/shell/keybindings_bridge.h" // home_directory() — the ONE home resolver
 
 #include <algorithm>
@@ -59,7 +60,10 @@ namespace
     return true;
 }
 
-// --- the permissive readers (mirroring panels.ts's `readString` / `readNumber` / `readBoolean`) ----
+// --- the permissive readers (mirroring panels.ts's `readString` / `readNumber`) --------------------
+// ⚠ There is no `read_bool` any more. It had exactly one caller — `dock.singleton` — and manifest v3
+// removed that member, so it went with it rather than staying as a helper nothing calls (which under
+// -Werror is not even a style question: an unused static function is a build failure).
 
 [[nodiscard]] std::string read_string(const Json& source, const char* key,
                                       const std::string& fallback = std::string())
@@ -70,12 +74,6 @@ namespace
     }
     const Json& value = source.at(key);
     return value.is_string() ? value.as_string() : fallback;
-}
-
-[[nodiscard]] bool read_bool(const Json& source, const char* key)
-{
-    return source.is_object() && source.contains(key) && source.at(key).is_bool() &&
-           source.at(key).as_bool();
 }
 
 // RANGE-GUARDED, through the Shell's ONE numeric reader (json_number_read.h) — never `as_int()`
@@ -93,6 +91,38 @@ namespace
     const std::optional<double> raw =
         detail::number_in_range(source, key, static_cast<double>(lo), static_cast<double>(hi));
     return raw ? static_cast<std::int64_t>(*raw) : fallback;
+}
+
+// A manifest string array, read STRICTLY: a non-string entry is a defect the caller refuses, never an
+// entry silently dropped. That is the opposite direction from `readStringArray` in panels.ts, and
+// deliberately so — that parser reads a projection the SHELL produced, where a non-string can only be
+// a Shell defect; this one reads a third-party file, where dropping an entry would present the package
+// to a consent surface as declaring less than it wrote down (the same reasoning rule (d) states for
+// capabilities).
+[[nodiscard]] bool read_string_array(const Json& source, const char* key,
+                                     std::vector<std::string>& out, std::string& bad_entry)
+{
+    if (!source.is_object() || !source.contains(key))
+    {
+        return true; // absent = declared nothing
+    }
+    const Json& value = source.at(key);
+    if (!value.is_array())
+    {
+        bad_entry = "<not an array>";
+        return false;
+    }
+    for (std::size_t i = 0; i < value.size(); ++i)
+    {
+        const Json& entry = value.at(i);
+        if (!entry.is_string())
+        {
+            bad_entry = "<non-string entry #" + std::to_string(i) + ">";
+            return false;
+        }
+        out.push_back(entry.as_string());
+    }
+    return true;
 }
 
 [[nodiscard]] const Json& read_object(const Json& source, const char* key)
@@ -359,8 +389,7 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
 
         const Json& dock = read_object(source, "dock");
         contribution.dock.default_zone = read_dock_zone(dock);
-        contribution.dock.singleton = read_bool(dock, "singleton");
-        // Clamped at 0 rather than refused: `DockDefaults` documents 0 as "no minimum stated" and
+                // Clamped at 0 rather than refused: `DockDefaults` documents 0 as "no minimum stated" and
         // negatives as refused, so a negative arriving from a manifest becomes "unstated" — the
         // permissive-default half of the rule, since the cost is cosmetic.
         // BOUNDED TO THE i32 RANGE THE FIELD CASTS TO, and that bound is the correctness half rather
@@ -376,6 +405,72 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
         contribution.dock.min_height =
             static_cast<int>(std::max<std::int64_t>(0, read_int(dock, "minHeight", -2147483648LL,
                                                                2147483647LL)));
+
+        // --- manifest v3 (04 §2) ------------------------------------------------------------------
+        // (f) `instances`, `path`, `selection.subjects[]` and `events.{publishes,subscribes}[]`.
+        //
+        // The DECLARING PACKAGE ID is provenance, not manifest text: it is the directory name this
+        // scan already agreed with the manifest's own `id` (decision 2 above), and it is what the
+        // registry's namespacing rules are stated against. Set it before any v3 member is read so a
+        // diagnostic can name it.
+        contribution.package_id = expected_package_id;
+
+        const Json& instances = read_object(source, "instances");
+        if (instances.contains("mode"))
+        {
+            // FAILS CLOSED, unlike `dock.zone` above and for the reason that one states: an
+            // unrecognised zone costs a panel its first position, while an unrecognised instance mode
+            // would decide HOW MANY LIVE COPIES may exist. Defaulting that is not cosmetic, so the
+            // token is refused rather than absorbed. Absent is still fine — `InstanceSpec`'s own
+            // default is `singleton`, the restrictive answer, so a manifest stating nothing gets the
+            // one mode that cannot surprise anybody.
+            const std::string mode_token = read_string(instances, "mode");
+            const gc::InstanceMode* matched = nullptr;
+            for (const gc::InstanceMode& mode : gc::kInstanceModes)
+            {
+                if (mode_token == gc::instance_mode_token(mode))
+                {
+                    matched = &mode;
+                    break;
+                }
+            }
+            if (matched == nullptr)
+            {
+                error_code = kErrManifestInvalid;
+                message = at + " declares instances.mode '" + mode_token +
+                          "'; the vocabulary is closed (singleton | limited | unlimited)";
+                return false;
+            }
+            contribution.instances.mode = *matched;
+        }
+        // Bounded to the i32 the field casts to, for the reason `minWidth` above states — an
+        // out-of-range value reads as "unstated" (0), which the registry then refuses on `limited`
+        // and accepts on the other two, exactly as an absent `max` would.
+        contribution.instances.max = static_cast<int>(
+            read_int(instances, "max", -2147483648LL, 2147483647LL));
+        contribution.path = read_string(source, "path");
+
+        std::string bad_entry;
+        const Json& selection = read_object(source, "selection");
+        if (!read_string_array(selection, "subjects", contribution.selection.subjects, bad_entry))
+        {
+            error_code = kErrManifestInvalid;
+            message = at + "'s `selection.subjects` is malformed: " + bad_entry;
+            return false;
+        }
+        const Json& events = read_object(source, "events");
+        if (!read_string_array(events, "publishes", contribution.events.publishes, bad_entry))
+        {
+            error_code = kErrManifestInvalid;
+            message = at + "'s `events.publishes` is malformed: " + bad_entry;
+            return false;
+        }
+        if (!read_string_array(events, "subscribes", contribution.events.subscribes, bad_entry))
+        {
+            error_code = kErrManifestInvalid;
+            message = at + "'s `events.subscribes` is malformed: " + bad_entry;
+            return false;
+        }
 
         // (b) content.type FAILS CLOSED, and only `iframe` is legal for a package. `uitree` and
         // `local` both mean "the editor renders this from its own code", which a third-party package
@@ -491,6 +586,24 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
         // what it is GIVEN comes from e13c-4's consent surface, and a reader that honoured a
         // self-declared grant would be the whole capability model bypassed by one JSON member.
         // `themes` is likewise not read here (e06's package-theme validation is its own gate).
+
+        // (g) THE REGISTRY'S OWN STRUCTURAL VERDICT, ASKED RATHER THAN RE-IMPLEMENTED. This file
+        // promises (package_store.h § the scan) never to report as ACCEPTED a package the registry
+        // would then refuse, and that promise has already been broken twice by arithmetic — an
+        // oversized `minWidth` narrowing to -1, an oversized `schemaVersion` narrowing to 0 — each
+        // fixed by a bespoke guard bolted on beside the parse. Manifest v3 adds five more members
+        // with structural rules (instances.mode/max coherence, `path` display form, and the D2/D4
+        // namespacing of subjects and topics), so a sixth bespoke guard would be a second opinion
+        // free to drift from the one that actually decides. Asking `gc::manifest_defect` — the SAME
+        // function `register_contribution` refuses on — makes the promise structurally true instead
+        // of maintained by hand. Run LAST so every rule above keeps its own, more specific
+        // diagnostic; this one only answers for what those did not check.
+        if (const std::string defect = gc::manifest_defect(contribution); !defect.empty())
+        {
+            error_code = kErrManifestInvalid;
+            message = at + " has an invalid manifest: " + defect;
+            return false;
+        }
         parsed.push_back(std::move(contribution));
     }
 

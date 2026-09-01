@@ -592,6 +592,26 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
   the schema version read from the MANIFEST, not the provider. A version mismatch is not an error: the
   panel keeps its defaults and the caller gets a diagnostic — the degrade e05d2's layout restore needs
   so one stale blob cannot discard a whole layout.
+- **Manifest v3 (editor-UX c2, D6): `kContractMajor` 2 → 3, BREAKING.** `dock.singleton` is REMOVED —
+  not deprecated — and replaced exactly by `instances: {mode: singleton|limited|unlimited, max}`;
+  `path` (slash-separated DISPLAY text for d1's Window-menu tree, empty = top level),
+  `selection.subjects[]` (D2) and `events.{publishes,subscribes}[]` (D4) are added. The compatibility
+  window is a SINGLE major, so this refuses every v2 contribution the instant it lands — safe today and
+  only today, because there are no out-of-repo consumers; after v1 ships the same change costs a
+  deprecation cycle. **This task is declaration + validation ONLY**: the registry refuses an incoherent
+  `instances`, a malformed `path`, and a package naming a selection subject or a published topic
+  outside its own namespace (the `validatePackageTopic` / `validatePackageCommandId` discipline, with
+  `events.subscribes[]` deliberately weaker — cross-package subscription is the point of the member,
+  so the rule there is "namespaced under SOMEBODY"). Nothing yet ACTS on the declarations: the
+  instance runtime is c3, the Window menu d1, the package fact bus d2, and the declared members being
+  inert until then is expected. `PanelHost::list` projects all four; `read_package_manifest` parses
+  them and then asks `gui::contract::manifest_defect` — the same verdict `register_contribution`
+  refuses on — rather than restating the rules, which is what keeps package_store.h's promise that the
+  scan never reports a package the registry would then reject. **The consumer enumeration was RE-RUN**,
+  not inherited from the 1 → 2 bump: every in-repo consumer of the major now names it symbolically, and
+  the last hardcoded literal (`cli::kExtensionPanelContractVersion`) was retired by linking
+  `context_gui_contract` into `context_cli` — the single link edge `scaffold.h`'s MIRROR LIST had
+  already priced.
 
 ## 8. Test map
 

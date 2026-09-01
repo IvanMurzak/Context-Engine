@@ -1072,8 +1072,7 @@ export class PanelHost {
     }
 
     /**
-     * Open one panel. Returns false when it is already open and `singleton` (the manifest's own rule)
-     * or when the docking root is not up.
+     * Open one panel. Returns false when it is already open, or when the docking root is not up.
      */
     open(manifest: PanelManifest): boolean {
         if (this.#api === null) {
@@ -1089,8 +1088,11 @@ export class PanelHost {
             return false;
         }
         if (this.#panels.has(manifest.id)) {
-            // A second open of a singleton FOCUSES the existing one rather than duplicating it —
-            // the manifest's `dock.singleton` contract (04 §3).
+            // ⚠ THE MODE IS NOT CONSULTED YET, and saying so is the point: this refuses a second open
+            // of EVERY panel, whatever its `instances.mode` declares (04 §1). Manifest v3 (c2) landed
+            // the DECLARATION; the instance runtime that honours it — focusing an existing singleton,
+            // refusing past a `limited` ceiling, minting a new `unlimited` copy — is c3, and it rekeys
+            // `#panels` by (panelId, instanceId) to do it.
             return false;
         }
         const previous = this.mounted[this.mounted.length - 1];
