@@ -366,6 +366,11 @@ bool EditorSessionState::apply_json(const Json& doc)
     };
 
     std::map<std::string, std::vector<std::string>> selections;
+    // Every subject the document MENTIONS, pruned or not. Deliberately not `selections` itself: an
+    // empty entry is pruned rather than inserted, so keying the duplicate check on the map would let
+    // `[{file, []}, {file, [a]}]` through — a document saying two things about one subject, accepted
+    // because the first thing it said was "nothing".
+    std::vector<std::string> mentioned;
     if (doc.contains("selections"))
     {
         // v2: an ARRAY of objects carrying their key (L-33), never map-keyed.
@@ -381,8 +386,9 @@ bool EditorSessionState::apply_json(const Json& doc)
             const std::string& subject = entry.at("subject").as_string();
             // A document saying two different things about ONE subject is not readable — refusing it
             // is the same discipline the rest of this loader applies to a wrong type.
-            if (selections.find(subject) != selections.end())
+            if (std::find(mentioned.begin(), mentioned.end(), subject) != mentioned.end())
                 return false;
+            mentioned.push_back(subject);
             std::vector<std::string> ids;
             if (entry.contains("ids") && !read_ids(entry.at("ids"), ids))
                 return false;

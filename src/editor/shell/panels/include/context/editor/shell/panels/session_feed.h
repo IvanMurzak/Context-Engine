@@ -145,6 +145,16 @@ public:
     // WHICH selection subject the daemon says the human is working on. `entity` until a
     // `selection-focus` fact says otherwise — the same boot default the daemon holds, so an
     // unattached Shell and a fresh daemon agree without a round trip.
+    //
+    // ⚠ IT IS A MIRROR, so it must be maintained on BOTH edges: a foreign fact moves it here, and
+    // `request_selection` moves it for OUR OWN write, whose focus fact is echo-suppressed. A mirror
+    // updated on only one edge does not merely go stale — the `subject == selection_focus_` dedup
+    // then swallows the next real move to the subject it wrongly names.
+    //
+    // ⚠ It is NOT hydrated at attach: a daemon that restored `selectionFocus` from
+    // `.editor/session.json` can already be on `file` when this Shell boots believing `entity`.
+    // Reconciling that needs an `editor.selection-focus-get` read on the attach path (the Shell
+    // hydrates no session state today, selection included).
     [[nodiscard]] const std::string& selection_focus() const noexcept { return selection_focus_; }
 
     // React to a focus MOVE. Called with the new subject, only when it actually changed, so a

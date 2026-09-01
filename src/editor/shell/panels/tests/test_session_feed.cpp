@@ -343,11 +343,25 @@ int main()
         CHECK(*inspector.pending() == "e2");
 
         // A focus fact with no readable subject is not a focus claim: nothing moves.
+        //
+        // ⚠ ASSERTED FROM A NON-ENTITY FOCUS ON PURPOSE. From `entity` this test cannot fail: an
+        // absent `subject` read as `entity` (the `selection-changed` default) would equal the focus
+        // already held and be dropped by the dedup, so the assertion would pass with the "absent is
+        // not a claim" rule entirely removed. Parked on `asset`, the two readings diverge.
+        CHECK(feed.apply_event(kSessionTopicName, focus_fact(kOtherClientId, "asset")));
+        CHECK(feed.selection_focus() == "asset");
         Json bare = Json::object();
         bare.set("event", Json(std::string(kSelectionFocusEvent)));
         bare.set("origin", Json(kOtherClientId));
         CHECK(!feed.apply_event(kSessionTopicName, bare));
-        CHECK(feed.selection_focus() == kSelectionSubjectEntity);
+        CHECK(feed.selection_focus() == "asset");
+        // A NON-STRING subject is not a claim either — and, again, not coerced to `entity`.
+        Json typed_wrong = Json::object();
+        typed_wrong.set("event", Json(std::string(kSelectionFocusEvent)));
+        typed_wrong.set("origin", Json(kOtherClientId));
+        typed_wrong.set("subject", Json(std::uint64_t{7}));
+        CHECK(!feed.apply_event(kSessionTopicName, typed_wrong));
+        CHECK(feed.selection_focus() == "asset");
     }
 
     // --- an UNATTACHED feed (client id 0) is a plain subscriber, not an echo swallower ------------
@@ -484,6 +498,51 @@ int main()
         CHECK(cleared.applied);
         CHECK(cleared.ids.empty());
         CHECK(wired.channel->requests_for("editor.select").size() == 3);
+    }
+
+    // --- c1/D3: OUR OWN write moves the focus mirror, because its focus fact is echo-suppressed ---
+    // The daemon focuses the subject a non-empty change leaves behind and publishes `selection-focus`
+    // stamped with OUR origin — which `apply_event` drops. Without mirroring the move at the writer,
+    // `selection_focus_` keeps naming the subject a foreign client focused last, and the dedup then
+    // SWALLOWS the next genuine move back to it. That is the failure mode, and it is why the third
+    // assertion below (a later foreign `file` fact is APPLIED) carries the weight here.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+        scenetree::SceneTreePanel tree(&feed);
+        tree.set_model(two_node_model());
+        feed.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
+
+        Wired wired = make_client(kShellId);
+        wired.channel->on("editor.select",
+                          [](const clientmock::Request& request)
+                          {
+                              Json data = Json::object();
+                              data.set("ids", request.params.at("ids"));
+                              data.set("subject", Json(std::string(kSelectionSubjectEntity)));
+                              data.set("mode", Json(std::string("replace")));
+                              data.set("changed", Json(true));
+                              return clientmock::MockChannel::ok_envelope(std::move(data));
+                          });
+        feed.bind_client(wired.client.get(), wired.client->client_id());
+
+        // A foreign client is working on files.
+        CHECK(feed.apply_event(kSessionTopicName, focus_fact(kOtherClientId, "file")));
+        CHECK(feed.selection_focus() == "file");
+
+        // The human selects an entity HERE: the daemon focuses `entity`, and its fact never reaches
+        // us. The mirror must move anyway.
+        CHECK(tree.select("e1"));
+        CHECK(feed.selection_focus() == kSelectionSubjectEntity);
+
+        // ...and the consequence that makes it matter: the next real move to `file` is a CHANGE, so
+        // the Inspector is told. With a stale mirror this fact would be deduped into silence.
+        CHECK(feed.apply_event(kSessionTopicName, focus_fact(kOtherClientId, "file")));
+        CHECK(feed.selection_focus() == "file");
+
+        // A write that EMPTIES the selection moves no focus — the daemon's rule, mirrored exactly.
+        CHECK(tree.clear_selection());
+        CHECK(feed.selection_focus() == "file");
     }
 
     // --- a daemon no-op still renders the daemon's selection; a refusal renders nothing ------------

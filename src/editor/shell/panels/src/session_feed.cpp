@@ -160,7 +160,14 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
         // adopted whatever the subject — including a subject this build cannot render, which is
         // precisely the case a consumer needs to be told about (the Inspector stops showing an entity
         // nobody is working on). An empty/absent subject is not a focus claim and moves nothing.
-        const std::string subject = read_subject(payload);
+        //
+        // ⚠ ABSENT IS READ DIFFERENTLY HERE THAN ON `selection-changed`, deliberately. There,
+        // absence is the wire parameter's documented default (`entity`) because an OLDER daemon
+        // published the fact without the member. `selection-focus` is NEW in c1 — no daemon ever
+        // published it without a `subject` — so an absent member is a MALFORMED fact, and reading it
+        // as `entity` would move the focus off whatever the human is really working on.
+        const std::string subject =
+            payload.contains("subject") ? read_subject(payload) : std::string();
         if (subject.empty() || subject == selection_focus_)
         {
             return false;
@@ -230,7 +237,27 @@ SessionFeed::request_selection(const std::vector<std::string>& ids)
     // where it is exactly what is already selected. It is the panel's only path to seeing its own
     // selection, because the `selection-changed` fact this write publishes carries OUR origin and is
     // dropped by apply_event below (session_feed.h's echo-suppression note).
-    return read_ids(envelope_data(*reply));
+    const contract::Json& data = envelope_data(*reply);
+
+    // ⚠ c1/D3 — THE FOCUS MIRROR, and it rides the SAME echo-suppression note. The daemon focuses
+    // the subject a NON-EMPTY change leaves behind, and the `selection-focus` fact it publishes for
+    // this write carries OUR origin, so `apply_event` drops it. Left unmirrored, `selection_focus_`
+    // keeps naming whatever a foreign client focused last — and then SWALLOWS the next genuine move
+    // back to that subject (`subject == selection_focus_` returns false), so the Inspector goes on
+    // rendering an entity nobody is working on. That is the exact failure D3 exists to prevent.
+    //
+    // `entity` is not a guess: this writer sends no `subject`, so the daemon applied the default.
+    // A future writer that names one must mirror THAT subject here.
+    //
+    // Listeners are deliberately NOT notified — this window's own write already re-points the
+    // Inspector through the Scene tree's selection listener, and firing them would re-enter the
+    // L-30 seams a second time for one gesture.
+    std::vector<std::string> applied = read_ids(data);
+    if (read_bool(data, "changed") && !applied.empty())
+    {
+        selection_focus_ = kSelectionSubjectEntity;
+    }
+    return applied;
 }
 
 playbar::PlayCommandResult SessionFeed::drive_play(const char* method, contract::Json params)

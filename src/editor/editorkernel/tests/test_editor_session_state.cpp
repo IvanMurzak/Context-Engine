@@ -536,6 +536,13 @@ void test_corrupt_file_recovery()
         "corrupt-selections-dup",
         "{\"version\": 2, \"selections\": [{\"subject\": \"file\", \"ids\": [\"a\"]},"
         " {\"subject\": \"file\", \"ids\": [\"b\"]}]}");
+    // ...INCLUDING when the first of the two says "nothing". An empty entry is PRUNED rather than
+    // inserted, so a duplicate check keyed on the resulting map (rather than on what the document
+    // MENTIONS) would accept this contradictory document silently.
+    assert_corrupt_recovery(
+        "corrupt-selections-dup-empty-first",
+        "{\"version\": 2, \"selections\": [{\"subject\": \"file\", \"ids\": []},"
+        " {\"subject\": \"file\", \"ids\": [\"b\"]}]}");
     assert_corrupt_recovery("corrupt-focus-shape",
                             "{\"version\": 2, \"selectionFocus\": \"entity\"}");
 }
