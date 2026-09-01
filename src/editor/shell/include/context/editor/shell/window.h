@@ -109,8 +109,8 @@ public:
     [[nodiscard]] virtual bool alive() const = 0;
 
     // The CLIENT area's top-left ON SCREEN, in the platform's own screen convention — device
-    // pixels on Windows/Linux, DIP on macOS, the same predicate `osr_screen_extent` /
-    // `osr_screen_point` take (dpi.h). The other half of the OSR geometry contract next to
+    // pixels on Windows/Linux, DIP on macOS, the same predicate `osr_screen_point` /
+    // `osr_root_screen_rect` take (dpi.h). The other half of the OSR geometry contract next to
     // `client_size()`: an off-screen browser is told its view size by `resize()` and WHERE that
     // view is by this, and without the second it reports view coordinates as screen coordinates —
     // which is the offset context menu (a1, docs/shell.md § 16).

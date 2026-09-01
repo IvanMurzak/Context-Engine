@@ -819,15 +819,28 @@ public:
         // The other half of real DPI: the scale CEF multiplies the DIP view rect by to decide how
         // many PHYSICAL pixels to paint. Without it a 2x monitor gets a 1x-resolution UI.
         screen_info.device_scale_factor = dpi_.factor();
-        // CefScreenInfo::rect is a RAW cef_rect_t (unlike CefRect it carries no Set()). Which
-        // convention it wants is a per-platform choice; the ARITHMETIC lives in dpi.h so both
-        // branches are compiled and tested on all three legs (see osr_screen_extent), and WHICH
-        // branch is the file-scope kScreenCoordsAreDip this callback shares with the two below.
-        const render::Extent2D screen = osr_screen_extent(logical_size_, dpi_, kScreenCoordsAreDip);
+        // DIP, on EVERY platform — this member does NOT take the device/DIP split above it (a2).
+        // The split is documented for `GetScreenPoint` alone; `GetScreenInfo`'s own doc names
+        // `GetViewRect` as the fallback CEF substitutes when this rect is left empty ("If the screen
+        // info rectangle is left empty the rectangle from GetViewRect will be used",
+        // cef_render_handler.h:102-115), and `GetViewRect` is DIP — a fallback in a different unit
+        // from the value it replaces would be a defect in the SDK, so the unit here is DIP.
+        // Upstream `cefclient` agrees on both of its branches (`osr_window_win.cc`: the default is
+        // `screen_info.rect = view_rect`, and the real-screen-bounds branch takes
+        // `CefDisplay::GetBounds()`, itself DIP).
+        //
+        // WHAT THE DEVICE-PIXEL VERSION COST: `rect`/`available_rect` are what CEF fits an OSR popup
+        // into (cef_types.h — "used to determine the available surface for rendering popup views"),
+        // so at 150 % an 800x600 DIP view claimed a 1200x900 screen. A `<select>` near the bottom
+        // then had 300 imaginary DIP of room below it, opened DOWNWARD past the view instead of
+        // flipping up, and its PET_POPUP layer composited clipped by the window edge. Invisible at
+        // 100 %, where the two units coincide — like the popup-rect half of a2 next to it.
+        //
+        // CefScreenInfo::rect is a RAW cef_rect_t (unlike CefRect it carries no Set()).
         screen_info.rect.x = 0;
         screen_info.rect.y = 0;
-        screen_info.rect.width = static_cast<int>(screen.width);
-        screen_info.rect.height = static_cast<int>(screen.height);
+        screen_info.rect.width = static_cast<int>(logical_size_.width);
+        screen_info.rect.height = static_cast<int>(logical_size_.height);
         screen_info.available_rect = screen_info.rect;
         return true;
     }
@@ -847,6 +860,13 @@ public:
         // CEF sends the rect and the visibility as separate callbacks with no guaranteed order, so
         // both are held here and the sink is told the COMBINED state — the sink keeps no partial
         // state of its own (see browser.h).
+        //
+        // FORWARDED IN DIP, deliberately (a2). The header calls this rect "the new location and size
+        // in view coordinates", and view coordinates are DIP. It is NOT converted here: the sink
+        // converts, so the arithmetic sits in the CEF-free compositor that all three CI `build` legs
+        // compile and execute, rather than in this TU — which the local gate cannot build and which
+        // only the live Windows/Linux smoke ever runs. dpi.h states the same rule for the screen
+        // mapping a1 added.
         popup_rect_ = to_rect(rect);
         if (popup_visible_)
         {

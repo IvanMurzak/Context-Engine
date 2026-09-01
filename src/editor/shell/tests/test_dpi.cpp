@@ -1,6 +1,7 @@
 // Per-monitor DPI arithmetic (03 §1): scale derivation, the clamp, round-to-nearest, the
-// never-collapse rule, the signed point conversions, and — a1 — the OSR screen mapping the two
-// `CefRenderHandler` geometry members answer with.
+// never-collapse rule, the signed point conversions, — a1 — the OSR screen mapping the two
+// `CefRenderHandler` geometry members answer with, and — a2 — the popup rect's DIP -> physical
+// conversion.
 
 #include "context/editor/shell/dpi.h"
 
@@ -116,30 +117,95 @@ void test_scale_equality_is_by_dpi()
 
 } // namespace
 
-// Both conventions of the OSR screen rect, on every leg. The macOS branch of this choice is the one
-// piece of the CEF binding that no CI job EXECUTES (the live smoke is Windows/Linux only) and that
-// the local gate cannot even compile, so the arithmetic lives in dpi.h to be pinned here instead.
-void test_osr_screen_extent_follows_the_platform_convention()
+// -------------------------------------------------------------- a2: the OSR popup rect (DIP -> px)
+
+// `OnPopupSize` reports "the new location and size in view coordinates" — DIP — while the popup's
+// own `OnPaint` buffer is PHYSICAL. `osr_popup_dest_rect` is the one place that split is resolved.
+//
+// A NON-INTEGRAL SCALE IS THE WHOLE POINT (again): at 1.0 the converted and the raw rect are the
+// same bytes, so a test there passes with the conversion deleted.
+void test_osr_popup_dest_rect_scales_the_origin_and_takes_the_texture_size()
 {
-    const render::Extent2D logical{800, 500};
-    const DpiScale two_x = DpiScale{192};
+    const DpiScale one_five{144}; // 150%
+    // A dropdown 200x120 DIP, anchored 260x400 DIP into the view. CEF paints ceil(DIP x 1.5).
+    const render::Rect2D popup_dip = shelltest::rect(260, 400, 200, 120);
+    const render::Extent2D texture{300, 180};
 
-    // Windows/Linux: CEF wants DEVICE pixels, so the view size scales by the monitor factor.
-    const render::Extent2D device = osr_screen_extent(logical, two_x, /*screen_rect_is_dip*/ false);
-    CHECK(device.width == 1600u);
-    CHECK(device.height == 1000u);
-    CHECK(shelltest::extent_eq(device, to_physical(logical, two_x)));
+    const render::Rect2D dest = osr_popup_dest_rect(popup_dip, texture, one_five);
 
-    // macOS: CEF wants DIP, so the logical size passes through UNSCALED. Returning the device size
-    // here would report a screen twice the real one and mis-place every popup and screen-point.
-    const render::Extent2D dip = osr_screen_extent(logical, two_x, /*screen_rect_is_dip*/ true);
-    CHECK(shelltest::extent_eq(dip, logical));
+    // The ORIGIN is converted: 260 x 1.5 = 390, 400 x 1.5 = 600.
+    CHECK(dest.origin.x == 390u);
+    CHECK(dest.origin.y == 600u);
+    // The SIZE is the texture's, not the DIP rect's — here they agree numerically with the scaled
+    // DIP size, and the case below is the one that tells them apart.
+    CHECK(shelltest::extent_eq(dest.size, texture));
 
-    // At 1x the two conventions coincide — which is exactly why a wrong choice stays invisible until
-    // someone runs the editor on a scaled monitor.
-    const DpiScale one_x = DpiScale{96};
-    CHECK(shelltest::extent_eq(osr_screen_extent(logical, one_x, false),
-                               osr_screen_extent(logical, one_x, true)));
+    // The three ways this has been or could be wrong, each of them a DIFFERENT rect at this scale
+    // and NONE of them distinguishable at 1.0:
+    CHECK(!shelltest::rect_eq(dest, popup_dip)); // the shipped bug: the DIP rect used raw
+    CHECK(dest.origin.x != popup_dip.origin.x);  // the origin left unconverted
+    CHECK(!shelltest::extent_eq(dest.size, popup_dip.size)); // the size left unconverted (cropped)
+
+    // At 1.0 the conversion is the identity — the existing behaviour, kept pinned.
+    const render::Rect2D at_one =
+        osr_popup_dest_rect(popup_dip, popup_dip.size, DpiScale{kReferenceDpi});
+    CHECK(shelltest::rect_eq(at_one, popup_dip));
+}
+
+// WHY THE SIZE COMES FROM THE TEXTURE RATHER THAN FROM round(DIP x scale). CEF paints
+// ceil(DIP x scale) pixels; the two disagree whenever the product's fraction is under a half, and a
+// destination one pixel off the texture crops a column of the menu (CPU path) or resamples the whole
+// thing (GPU path).
+void test_osr_popup_dest_rect_size_is_not_the_rounded_dip_size()
+{
+    const DpiScale one_two_five{120};                            // 125%
+    const render::Rect2D popup_dip = shelltest::rect(0, 0, 1, 1); // 1 DIP: 1.25 px -> CEF paints 2
+    const render::Extent2D texture{2, 2};
+
+    const render::Rect2D dest = osr_popup_dest_rect(popup_dip, texture, one_two_five);
+    CHECK(shelltest::extent_eq(dest.size, texture));
+    // round(1 x 1.25) is 1 — the answer a "scale the DIP size" implementation gives, and it is a
+    // pixel short of what CEF actually painted.
+    CHECK(to_physical(popup_dip.size, one_two_five).width == 1u);
+    CHECK(dest.size.width != to_physical(popup_dip.size, one_two_five).width);
+}
+
+// The origin ROUNDS TO NEAREST, and rounds the same way `osr_screen_point` does.
+//
+// Deliberately NOT a test that `to_physical` (the extent form, with its never-collapse clamp) would
+// be wrong here: over the supported kMinDpi..kMaxDpi range the two agree on every non-negative
+// integer, so such a test could not fail and would be asserting nothing. What CAN be wrong is
+// TRUNCATION, which is what a hand-rolled `x * factor` cast gives.
+void test_osr_popup_dest_rect_origin_rounds_to_nearest_like_the_screen_mapping()
+{
+    const DpiScale one_five{144};
+    // 5 x 1.5 = 7.5 and 3 x 1.5 = 4.5 — both halfway, and both a different integer from the
+    // truncating answer.
+    const render::Rect2D popup_dip = shelltest::rect(5, 3, 40, 20);
+    const render::Rect2D dest = osr_popup_dest_rect(popup_dip, render::Extent2D{60, 30}, one_five);
+    CHECK(dest.origin.x == 8u); // truncation gives 7
+    CHECK(dest.origin.y == 5u); // truncation gives 4
+
+    // The SAME arithmetic the screen mapping uses, stated as an identity so the two cannot drift:
+    // where the popup is drawn and where CEF is told that point lives must round together.
+    const PointI as_offset = osr_screen_point(PointI{5, 3}, PointI{0, 0}, one_five, false);
+    CHECK(static_cast<std::int32_t>(dest.origin.x) == as_offset.x);
+    CHECK(static_cast<std::int32_t>(dest.origin.y) == as_offset.y);
+
+    // A popup anchored at the view origin stays there, at the low clamp as well as at 1.5.
+    CHECK(osr_popup_dest_rect(shelltest::rect(0, 0, 200, 120), render::Extent2D{100, 60},
+                              DpiScale{48})
+              .origin.x == 0u);
+}
+
+// An empty texture — a popup rect that arrived before its first paint — yields an empty destination
+// rather than a rect the present paths would draw at. Both paths gate on `have_popup_frame_`, so
+// this pins the accessor's own answer rather than the gate.
+void test_osr_popup_dest_rect_with_no_texture_is_empty()
+{
+    const render::Rect2D dest =
+        osr_popup_dest_rect(shelltest::rect(10, 20, 30, 40), render::Extent2D{}, DpiScale{144});
+    CHECK(render::is_empty(dest.size));
 }
 
 // --------------------------------------------------------------- a1: the OSR screen mapping (D12)
@@ -204,9 +270,9 @@ void test_osr_screen_point_handles_a_window_left_of_the_primary_monitor()
 }
 
 // `GetRootScreenRect` is "the root window rectangle in screen DIP coordinates" — DIP on EVERY
-// platform, with no per-platform split (pinned cef_render_handler.h:70-78). Giving it
-// `osr_screen_extent`'s treatment multiplies the rect by the scale factor on Windows/Linux, which is
-// the same class of mistake a2 fixes and is likewise invisible at 1.0.
+// platform, with no per-platform split (pinned cef_render_handler.h:70-78). Multiplying it by the
+// scale factor on Windows/Linux is the same class of mistake a2 fixes and is likewise invisible at
+// 1.0.
 void test_osr_root_screen_rect_is_dip_on_every_platform_convention()
 {
     const DpiScale one_five{144};
@@ -290,7 +356,10 @@ void test_the_screen_mapping_lands_on_the_client_origin_not_the_window_rect()
 
 int main()
 {
-    test_osr_screen_extent_follows_the_platform_convention();
+    test_osr_popup_dest_rect_scales_the_origin_and_takes_the_texture_size();
+    test_osr_popup_dest_rect_size_is_not_the_rounded_dip_size();
+    test_osr_popup_dest_rect_origin_rounds_to_nearest_like_the_screen_mapping();
+    test_osr_popup_dest_rect_with_no_texture_is_empty();
     test_osr_screen_point_converts_view_dip_to_the_platform_convention();
     test_osr_screen_point_handles_a_window_left_of_the_primary_monitor();
     test_osr_root_screen_rect_is_dip_on_every_platform_convention();

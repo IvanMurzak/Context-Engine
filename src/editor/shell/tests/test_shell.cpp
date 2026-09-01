@@ -462,6 +462,56 @@ void test_a_popup_composites_through_the_loop()
     CHECK(surface[inside + 2] == 100);
 }
 
+// a2: THE WIRING, end to end — and the reason this test exists at the SHELL level rather than only
+// at the compositor's. `WindowCompositor` gets its scale from exactly one place,
+// `EditorWindow::sync_browser_size`, and every compositor test sets that scale BY HAND. So a change
+// that landed the DIP -> physical conversion but not the push would composite every real dropdown
+// at 1.0 and leave the whole compositor suite green: deleting the wiring must redden something, and
+// this is that something.
+//
+// It also pins the startup case the `resize`/`dpi_changed` arms alone do not cover: the scale is
+// seeded by the FIRST pump's unconditional sync, so a window opened on a 150 % monitor that is
+// never resized still places its popups correctly.
+void test_a_popup_composites_at_the_physical_rect_on_a_scaled_monitor()
+{
+    Harness harness(render::Extent2D{200, 150});
+    // A 150% monitor: a 200x150 DIP window is 300x225 physical.
+    ShellEvent dpi;
+    dpi.kind = ShellEventKind::dpi_changed;
+    dpi.dpi = DpiScale{144};
+    harness.backend->post(dpi);
+    ShellEvent resize;
+    resize.kind = ShellEventKind::resize;
+    resize.size = render::Extent2D{300, 225};
+    harness.backend->post(resize);
+
+    harness.queue_view_frame(render::Extent2D{300, 225}, 0, 0, 0);
+    // CEF reports the popup in DIP (20, 20) 40x30 and paints it as a 60x45 PHYSICAL texture.
+    harness.browser->queue_popup_state(true, shelltest::rect(20, 20, 40, 30));
+    harness.browser->queue_solid_frame(BrowserLayer::popup, render::Extent2D{60, 45},
+                                       shelltest::rect(0, 0, 60, 45), 200, 150, 100, 255);
+    CHECK(harness.window->pump_once(1000));
+
+    CHECK(harness.window->compositor().dpi().dpi == 144u);
+    CHECK(shelltest::rect_eq(harness.window->compositor().popup_dest_rect(),
+                             shelltest::rect(30, 30, 60, 45)));
+
+    const std::vector<std::uint8_t>& surface = harness.window->compositor().cpu_surface();
+    const std::size_t stride = static_cast<std::size_t>(harness.window->compositor().size().width);
+    const auto is_popup = [&surface, stride](std::size_t x, std::size_t y) {
+        const std::size_t i = (y * stride + x) * 4u;
+        return surface[i + 0] == 200 && surface[i + 1] == 150 && surface[i + 2] == 100;
+    };
+    // INSIDE the physical rect, at both corners.
+    CHECK(is_popup(30, 30));
+    CHECK(is_popup(89, 74)); // 30 + 60 - 1, 30 + 45 - 1
+    // OUTSIDE it — including at the DIP rect's own origin, which is where an unwired (or
+    // unconverted) shell would have drawn the menu.
+    CHECK(!is_popup(20, 20));
+    CHECK(!is_popup(29, 30));
+    CHECK(!is_popup(90, 74));
+}
+
 void test_close_ends_the_loop()
 {
     Harness harness;
@@ -728,6 +778,7 @@ int main()
     test_focus_events_reach_the_browser_and_drop_a_live_drag();
     test_a_browser_paint_presents_and_an_idle_pump_does_not();
     test_a_popup_composites_through_the_loop();
+    test_a_popup_composites_at_the_physical_rect_on_a_scaled_monitor();
     test_close_ends_the_loop();
     test_manager_persists_placement_and_restores_it();
     test_manager_drops_a_closed_window_and_ends_when_none_are_left();
