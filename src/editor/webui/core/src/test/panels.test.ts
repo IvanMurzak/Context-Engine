@@ -110,6 +110,21 @@ export const panelsTests: readonly TestCase[] = [
                 0,
                 "a negative max is not a ceiling",
             );
+            // A ceiling is dropped off every mode but `limited`, mirroring the C++ registry, which
+            // REFUSES a stray `max` rather than ignoring it. It matters most where the mode itself
+            // failed closed: a `max` surviving that fallback would hand the c3 instance runtime a
+            // limit no manifest the registry accepts could have declared.
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "many", max: 5 } })?.instances,
+                { mode: "singleton", max: 0 },
+                "a failed-closed mode carries no ceiling",
+            );
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "unlimited", max: 5 } })?.instances
+                    .max,
+                0,
+                "max is meaningful only for limited",
+            );
             // `path` is display text with an empty default (= top level), read permissively.
             assertEqual(parsePanelManifest({ id: "p" })?.path, "", "absent path -> top level");
             assertEqual(

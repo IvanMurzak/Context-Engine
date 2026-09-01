@@ -253,12 +253,18 @@ function readDock(source: Record<string, unknown>): PanelDock {
  * copies of a panel may exist, so an absent, non-record or unrecognised `mode` reads as the MOST
  * RESTRICTIVE answer, which is also `InstanceSpec`'s own C++ default. `max` is clamped at 0 for the
  * same reason the C++ side refuses a negative: a ceiling below one is not a ceiling.
+ *
+ * `max` is ALSO dropped on any mode but `limited`, mirroring the C++ registry, which REFUSES a `max`
+ * stated elsewhere rather than ignoring it. Carrying it through would matter precisely when the mode
+ * failed closed: `{mode: "many", max: 5}` would parse as `{mode: "singleton", max: 5}`, and the c3
+ * instance runtime reading `max` without re-checking `mode` would apply a ceiling no manifest the
+ * registry accepts could ever have declared.
  */
 function readInstances(source: Record<string, unknown>): PanelInstances {
     const instances = isRecord(source["instances"]) ? source["instances"] : {};
     const token = readString(instances, "mode");
     const mode = PANEL_INSTANCE_MODES.find((candidate) => candidate === token) ?? "singleton";
-    return { mode, max: Math.max(0, readNumber(instances, "max")) };
+    return { mode, max: mode === "limited" ? Math.max(0, readNumber(instances, "max")) : 0 };
 }
 
 const CONTENT_TYPES: readonly PanelContentType[] = ["uitree", "iframe", "local"];
