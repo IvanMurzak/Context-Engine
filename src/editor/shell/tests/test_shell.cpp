@@ -67,6 +67,21 @@ struct Harness
         browser->queue_solid_frame(BrowserLayer::view, coded,
                                    render::Rect2D{render::Origin2D{}, coded}, b, g, r, 255);
     }
+
+    // Put the window on a scaled monitor: the scale, then the PHYSICAL client size it implies. The
+    // pair always travels together (a window that changes monitor changes both), which is the same
+    // reason WindowCompositor::on_resize carries them in one call.
+    void post_scale(DpiScale dpi, render::Extent2D physical)
+    {
+        ShellEvent dpi_event;
+        dpi_event.kind = ShellEventKind::dpi_changed;
+        dpi_event.dpi = dpi;
+        backend->post(dpi_event);
+        ShellEvent resize;
+        resize.kind = ShellEventKind::resize;
+        resize.size = physical;
+        backend->post(resize);
+    }
 };
 
 // ------------------------------------------------------------------- the D10 authenticated attach
@@ -123,14 +138,7 @@ void test_pump_syncs_the_browser_size_in_dip_on_the_first_iteration()
     Harness harness(render::Extent2D{800, 600});
     // A 2x monitor: the browser's view rect is DIP, so reporting the physical size would lay the
     // document out at twice the intended size.
-    ShellEvent dpi;
-    dpi.kind = ShellEventKind::dpi_changed;
-    dpi.dpi = DpiScale{192};
-    harness.backend->post(dpi);
-    ShellEvent resize;
-    resize.kind = ShellEventKind::resize;
-    resize.size = render::Extent2D{1600, 1200}; // physical
-    harness.backend->post(resize);
+    harness.post_scale(DpiScale{192}, render::Extent2D{1600, 1200});
 
     CHECK(harness.window->pump_once(1000));
     CHECK(shelltest::extent_eq(harness.browser->last_logical_size(), render::Extent2D{800, 600}));
@@ -476,14 +484,7 @@ void test_a_popup_composites_at_the_physical_rect_on_a_scaled_monitor()
 {
     Harness harness(render::Extent2D{200, 150});
     // A 150% monitor: a 200x150 DIP window is 300x225 physical.
-    ShellEvent dpi;
-    dpi.kind = ShellEventKind::dpi_changed;
-    dpi.dpi = DpiScale{144};
-    harness.backend->post(dpi);
-    ShellEvent resize;
-    resize.kind = ShellEventKind::resize;
-    resize.size = render::Extent2D{300, 225};
-    harness.backend->post(resize);
+    harness.post_scale(DpiScale{144}, render::Extent2D{300, 225});
 
     harness.queue_view_frame(render::Extent2D{300, 225}, 0, 0, 0);
     // CEF reports the popup in DIP (20, 20) 40x30 and paints it as a 60x45 PHYSICAL texture.

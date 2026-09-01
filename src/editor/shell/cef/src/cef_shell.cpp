@@ -85,13 +85,13 @@ namespace
 
 // WHICH CONVENTION THIS PLATFORM'S SCREEN COORDINATES USE, in ONE place.
 //
-// CEF documents the same split three times over — `GetScreenInfo::rect`, `GetScreenPoint`, and (by
-// its absence) `GetRootScreenRect`: Windows/Linux speak screen DEVICE pixels, macOS speaks screen
-// DIP. All three callbacks below read this constant rather than each carrying their own `#if
-// defined(__APPLE__)`, because three copies of one platform decision are three chances for the
-// macOS branch — the one no CI job in this repo EXECUTES and the local gate cannot even compile —
-// to disagree with itself. The ARITHMETIC each callback applies lives in dpi.h, tested on all three
-// legs; this constant is only which side of it this build is on.
+// CEF documents this split for `GetScreenPoint` ALONE: Windows/Linux speak screen DEVICE pixels,
+// macOS speaks screen DIP. `GetRootScreenRect` is DIP everywhere (by its absence), and a2 settled
+// that `GetScreenInfo::rect` is DIP too — so this constant has TWO readers, not three. Both read it
+// rather than each carrying their own `#if defined(__APPLE__)`, because two copies of one platform
+// decision are two chances for the macOS branch — the one no CI job in this repo EXECUTES and the
+// local gate cannot even compile — to disagree with itself. The ARITHMETIC each callback applies
+// lives in dpi.h, tested on all three legs; this constant is only which side of it this build is on.
 #if defined(__APPLE__)
 constexpr bool kScreenCoordsAreDip = true;
 #else

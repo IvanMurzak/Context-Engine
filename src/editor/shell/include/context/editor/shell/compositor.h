@@ -244,6 +244,11 @@ private:
                                   render::ITextureView& view, const render::Rect2D& visible_rect,
                                   render::Extent2D coded_size, std::size_t slot);
     void reconfigure();
+    // The popup TEXTURE's visible rect inside its own allocation — the source half of the popup
+    // composite, and the half `popup_dest_rect()` takes its SIZE from. One definition, because the
+    // GPU path reads it for the draw's source rect and the accessor reads it for the destination
+    // extent: two spellings of the same intersection could drift apart and mis-sample the menu.
+    [[nodiscard]] render::Rect2D popup_source_rect() const;
     // Copy a producer frame into CPU storage (the fallback path presents it later, after the
     // callback's pointer is gone).
     static void capture_cpu_frame(CpuFrame& out, const render::present::OsrFrame& frame);

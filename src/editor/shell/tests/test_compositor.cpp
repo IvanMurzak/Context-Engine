@@ -41,6 +41,17 @@ BrowserFrame make_view_frame(std::vector<std::uint8_t>& storage, render::Extent2
     return frame;
 }
 
+// The same frame, tagged as the PET_POPUP layer. The tag is the ONE thing that makes a frame a
+// popup, so it belongs beside the construction rather than as a line every caller re-types.
+BrowserFrame make_popup_frame(std::vector<std::uint8_t>& storage, render::Extent2D coded,
+                              const render::Rect2D& visible, std::uint8_t b, std::uint8_t g,
+                              std::uint8_t r, std::uint8_t a)
+{
+    BrowserFrame frame = make_view_frame(storage, coded, visible, b, g, r, a);
+    frame.layer = BrowserLayer::popup;
+    return frame;
+}
+
 CompositorConfig software_config()
 {
     CompositorConfig config;
@@ -48,6 +59,15 @@ CompositorConfig software_config()
     // smoke and these tests both take the software path deliberately.
     config.import_options.force_software = true;
     return config;
+}
+
+// One pixel of a composed CPU surface, addressed from the surface's own extent rather than from a
+// literal stride repeated at every call site.
+[[nodiscard]] const std::uint8_t* surface_px(const std::vector<std::uint8_t>& surface,
+                                             render::Extent2D size, std::uint32_t x,
+                                             std::uint32_t y)
+{
+    return surface.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
 }
 
 // ------------------------------------------------------------------------------ compute_layer_uv
@@ -251,9 +271,8 @@ void test_layer_order_and_the_popup_scissor()
     const render::Rect2D popup_rect = shelltest::rect(120, 90, 160, 200);
     compositor.on_popup_state(true, popup_rect);
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{256, 256},
-                                         shelltest::rect(0, 0, 160, 200), 255, 255, 255, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{256, 256},
+                                          shelltest::rect(0, 0, 160, 200), 255, 255, 255, 255);
     compositor.on_browser_frame(popup);
 
     CHECK(compositor.render_frame());
@@ -296,9 +315,8 @@ void test_the_popup_destination_size_comes_from_the_texture_not_the_scaled_dip_s
     // while round(21 x 1.25) = 26 and round(9 x 1.25) = 11 — one short on BOTH axes.
     compositor.on_popup_state(true, shelltest::rect(8, 4, 21, 9));
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{27, 12},
-                                         shelltest::rect(0, 0, 27, 12), 255, 128, 64, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{27, 12},
+                                          shelltest::rect(0, 0, 27, 12), 255, 128, 64, 255);
     compositor.on_browser_frame(popup);
     CHECK(compositor.render_frame());
 
@@ -308,16 +326,16 @@ void test_the_popup_destination_size_comes_from_the_texture_not_the_scaled_dip_s
     // A "scale the DIP size" destination is 26x11 and stops one pixel short of it on each axis, so
     // the view shows through the last column and the last row of the menu.
     const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
-    const std::size_t corner = (static_cast<std::size_t>(16) * 125u + 36u) * 4u;
-    CHECK(surface[corner + 0] == 255);
-    CHECK(surface[corner + 1] == 128);
-    CHECK(surface[corner + 2] == 64);
+    const std::uint8_t* corner = surface_px(surface, compositor.size(), 36, 16);
+    CHECK(corner[0] == 255);
+    CHECK(corner[1] == 128);
+    CHECK(corner[2] == 64);
     // ...and one pixel further out is still the view, so the assertion above is a boundary and not
     // a popup that spilled.
-    const std::size_t past = (static_cast<std::size_t>(16) * 125u + 37u) * 4u;
-    CHECK(surface[past + 0] == 0);
-    CHECK(surface[past + 1] == 0);
-    CHECK(surface[past + 2] == 0);
+    const std::uint8_t* past = surface_px(surface, compositor.size(), 37, 16);
+    CHECK(past[0] == 0);
+    CHECK(past[1] == 0);
+    CHECK(past[2] == 0);
 }
 
 void test_a_hidden_popup_drops_its_layer()
@@ -332,9 +350,8 @@ void test_a_hidden_popup_drops_its_layer()
                                                 shelltest::rect(0, 0, 400, 300), 0, 0, 0, 255));
     compositor.on_popup_state(true, shelltest::rect(10, 10, 100, 100));
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{128, 128},
-                                         shelltest::rect(0, 0, 100, 100), 255, 0, 0, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{128, 128},
+                                          shelltest::rect(0, 0, 100, 100), 255, 0, 0, 255);
     compositor.on_browser_frame(popup);
     CHECK(compositor.render_frame());
     CHECK(compositor.stats().popup_draws == 1);
@@ -513,9 +530,8 @@ void test_gpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5()
     const render::Rect2D popup_dip = shelltest::rect(260, 400, 200, 120);
     compositor.on_popup_state(true, popup_dip);
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{512, 512},
-                                         shelltest::rect(0, 0, 300, 180), 255, 255, 255, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{512, 512},
+                                          shelltest::rect(0, 0, 300, 180), 255, 255, 255, 255);
     compositor.on_browser_frame(popup);
 
     CHECK(compositor.render_frame());
@@ -575,9 +591,8 @@ void test_cpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5()
     const render::Rect2D popup_dip = shelltest::rect(10, 5, 20, 10);
     compositor.on_popup_state(true, popup_dip);
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{30, 15},
-                                         shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{30, 15},
+                                          shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
     compositor.on_browser_frame(popup);
 
     CHECK(compositor.render_frame());
@@ -585,17 +600,14 @@ void test_cpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5()
     CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), shelltest::rect(15, 8, 30, 15)));
 
     const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
-    const auto at = [](std::uint32_t x, std::uint32_t y) {
-        return (static_cast<std::size_t>(y) * 120u + x) * 4u;
+    const render::Extent2D window = compositor.size();
+    const auto is_popup = [&surface, window](std::uint32_t x, std::uint32_t y) {
+        const std::uint8_t* px = surface_px(surface, window, x, y);
+        return px[0] == 255 && px[1] == 128 && px[2] == 64;
     };
-    const auto is_popup = [&surface, &at](std::uint32_t x, std::uint32_t y) {
-        const std::size_t i = at(x, y);
-        return surface[i + 0] == 255 && surface[i + 1] == 128 && surface[i + 2] == 64;
-    };
-    const auto is_view = [&surface, &at](std::uint32_t x, std::uint32_t y) {
-        const std::size_t i = at(x, y);
-        return surface[i + 0] == 0 && surface[i + 1] == 0 && surface[i + 2] == 0 &&
-               surface[i + 3] == 255;
+    const auto is_view = [&surface, window](std::uint32_t x, std::uint32_t y) {
+        const std::uint8_t* px = surface_px(surface, window, x, y);
+        return px[0] == 0 && px[1] == 0 && px[2] == 0 && px[3] == 255;
     };
 
     // INSIDE the physical rect, on all four corners — the popup's pixels.
@@ -753,13 +765,6 @@ BrowserFrame make_coordinate_view_frame(std::vector<std::uint8_t>& storage, rend
     return frame;
 }
 
-[[nodiscard]] const std::uint8_t* surface_px(const std::vector<std::uint8_t>& surface,
-                                             render::Extent2D size, std::uint32_t x,
-                                             std::uint32_t y)
-{
-    return surface.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
-}
-
 void test_cpu_path_presents_the_view_1_to_1_cropped_to_the_window()
 {
     // THE DPI-ROUNDING SHAPE: the browser painted one pixel more than the client on both axes
@@ -872,9 +877,8 @@ void test_cpu_path_composites_the_popup_rather_than_skipping_it()
     const render::Rect2D popup_rect = shelltest::rect(10, 5, 20, 10);
     compositor.on_popup_state(true, popup_rect);
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{20, 10},
-                                         shelltest::rect(0, 0, 20, 10), 255, 128, 64, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{20, 10},
+                                          shelltest::rect(0, 0, 20, 10), 255, 128, 64, 255);
     compositor.on_browser_frame(popup);
 
     CHECK(compositor.render_frame());
@@ -958,9 +962,8 @@ void test_a_refused_popup_frame_leaves_the_last_good_geometry_in_place()
     // A GOOD popup first: 20x10 DIP at (10, 5) painted as a 30x15 physical texture -> (15, 8) 30x15.
     compositor.on_popup_state(true, shelltest::rect(10, 5, 20, 10));
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{30, 15},
-                                         shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{30, 15},
+                                          shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
     compositor.on_browser_frame(popup);
     CHECK(compositor.render_frame());
     CHECK(compositor.stats().popup_draws == 1);

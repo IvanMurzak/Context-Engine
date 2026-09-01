@@ -386,6 +386,11 @@ void WindowCompositor::on_resize(render::Extent2D physical_size, DpiScale dpi)
     damage_.resize = true;
 }
 
+render::Rect2D WindowCompositor::popup_source_rect() const
+{
+    return visible_within(popup_visible_rect_, popup_coded_size_);
+}
+
 render::Rect2D WindowCompositor::popup_dest_rect() const
 {
     // The SIZE is the popup texture's own visible extent, which is PHYSICAL (CEF scales its OnPaint
@@ -394,8 +399,7 @@ render::Rect2D WindowCompositor::popup_dest_rect() const
     // what makes the GPU and CPU paths composite the popup at the SAME place by construction —
     // `on_browser_frame` sets that pair from whichever frame each path ACCEPTED, so it describes the
     // texture that path is actually holding.
-    const render::Rect2D source = visible_within(popup_visible_rect_, popup_coded_size_);
-    return osr_popup_dest_rect(popup_rect_, source.size, dpi_);
+    return osr_popup_dest_rect(popup_rect_, popup_source_rect().size, dpi_);
 }
 
 void WindowCompositor::reconfigure()
@@ -577,7 +581,7 @@ bool WindowCompositor::render_gpu_frame()
         popup_layer = popup_importer_.texture()->create_view();
         if (popup_layer != nullptr)
         {
-            const render::Rect2D popup_src = visible_within(popup_visible_rect_, popup_coded_size_);
+            const render::Rect2D popup_src = popup_source_rect();
             if (draw_layer(*pass, popup_dest_rect(), *popup_layer, popup_src, popup_coded_size_,
                            slot))
             {

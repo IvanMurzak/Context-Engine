@@ -1,10 +1,12 @@
 // Per-monitor DPI for the Shell (design 03 §1) — the arithmetic that replaces the spike's DPI-1.0 pin.
 //
-// Three consumers need the SAME number and would otherwise each derive it: the swapchain (physical
-// backbuffer pixels), CEF (`device_scale_factor` + the view rect it reports in DIP), and the input
-// pump (an OS pointer position is physical; a browser mouse event is DIP). A per-monitor-v2 window
-// changes this number while running — dragged to a second monitor, or the user changing scaling —
-// so it is a live value threaded through the frame, not a boot-time constant.
+// Four consumers need the SAME number and would otherwise each derive it: the swapchain (physical
+// backbuffer pixels), CEF (`device_scale_factor` + the view rect it reports in DIP), the input
+// pump (an OS pointer position is physical; a browser mouse event is DIP), and — since a2 — the
+// compositor, which composites the one geometry CEF reports in DIP (the `OnPopupSize` popup rect,
+// see `osr_popup_dest_rect`) onto a physical surface. A per-monitor-v2 window changes this number
+// while running — dragged to a second monitor, or the user changing scaling — so it is a live value
+// threaded through the frame, not a boot-time constant.
 //
 // The DPI is the stored value and the scale factor is DERIVED from it. Storing both is the classic
 // pair that drifts: Windows hands us an integer DPI (WM_DPICHANGED), CEF wants the float, and a
@@ -120,8 +122,8 @@ struct PointI
 // invisible at scale 1.0, where the two conventions coincide. (a2 removed the third caller of that
 // split, `GetScreenInfo::rect`, for the same reason — see `cef_shell.cpp`'s `GetScreenInfo`.)
 //
-// Both take the window's CLIENT origin on screen, in the platform's own screen convention (the
-// same predicate as `screen_rect_is_dip` above: device pixels on Windows/Linux, DIP on macOS).
+// Both take the window's CLIENT origin on screen, in the platform's own screen convention — device
+// pixels on Windows/Linux, DIP on macOS — as the `screen_coords_are_dip` argument they share.
 // THE CLIENT ORIGIN, NEVER THE WINDOW RECT: a frameless window's client is inset from its window
 // rect (`win32_frameless_client_insets` in window.h), and feeding the window origin here puts
 // every context menu that inset away from the cursor. `IWindowBackend::client_origin()` is the one
