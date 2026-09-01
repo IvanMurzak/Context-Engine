@@ -1,0 +1,27 @@
+src/editor/shell/tests/test_osr_drag.cpp
+  s_782aa603d2bdb2::t_caf49e104d02bc 374
+  s_782aa603d2bdb2::t_8bb5a94896ef36 319-346
+src/editor/shell/tests/test_window_registry.cpp
+  s_782aa603d2bdb2::t_cc48dde0a27939 983
+  s_782aa603d2bdb2::t_59f52dba2bf81f 919-955
+src/editor/shell/cef/src/cef_shell_osrdrag_smoke.cpp
+  s_782aa603d2bdb2::t_ca12beef1bb6cc 557-566,569-570
+  s_782aa603d2bdb2::t_006f803e4f5d2e 74
+  s_782aa603d2bdb2::t_edf36592efbc43 152-156,158-160
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "048207819b5610bb4374c5cdbece4bb0afb069b4",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
