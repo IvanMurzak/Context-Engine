@@ -419,6 +419,49 @@ export const kitTests: readonly TestCase[] = [
         },
     },
 
+    // ------------------------------------------------------------------ disabled excludes hover/pressed (a3, 07 §2)
+    {
+        // A disabled `<button>` never matches `:hover`/`:active` in Chromium by itself, but
+        // `[aria-disabled="true"]` is a plain attribute on an otherwise fully mouse-interactive
+        // element (the ARIA-menu-pattern path `app.css:389-391` documents) — so WITHOUT an explicit
+        // exclusion on the `:hover`/`:active` rules, a disabled `<li aria-disabled="true">` would
+        // still step to `colors.panel2`/`colors.panel3` on hover/press, contradicting the disabled
+        // ink step the rule above this one proves. Genuine `:hover`/`:active` cannot be synthesized
+        // from in-page script (same harness limitation the pressed case below documents), so this
+        // proves the mechanically checkable half: the SERVED sheet's `:hover`/`:active` rules for
+        // every role that has them carry the exclusion in their selector text.
+        name: "kit: the served `:hover`/`:active` rules exclude a disabled element (both paths)",
+        run: () => {
+            const engine = documentEngine();
+            const mounted = mountWidgets();
+            try {
+                applyToDocument(engine, BUILTIN_DARK);
+                const sheet = kitStyleSheet();
+                for (const role of ["listitem", "treeitem", "button"] as const) {
+                    const widgetClass = WIDGET_CLASSES[role];
+                    for (const pseudo of [":hover", ":active"] as const) {
+                        const rule = [...sheet.cssRules].find(
+                            (candidate) => candidate.cssText.includes(`.${widgetClass}${pseudo}`),
+                        ) as CSSStyleRule | undefined;
+                        assert(rule !== undefined, `kit.css declares .${widgetClass}${pseudo}`);
+                        assert(
+                            rule?.selectorText.includes(':not([aria-disabled="true"])') ?? false,
+                            `.${widgetClass}${pseudo} excludes [aria-disabled="true"] (found ` +
+                                `\`${rule?.selectorText ?? ""}\`)`,
+                        );
+                        assert(
+                            rule?.selectorText.includes(":not(:disabled)") ?? false,
+                            `.${widgetClass}${pseudo} excludes :disabled too (found ` +
+                                `\`${rule?.selectorText ?? ""}\`)`,
+                        );
+                    }
+                }
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+
     // ------------------------------------------------------------------ pressed (a3, 07 §2)
     {
         // A real `:active` cannot be synthesized from in-page script any more than `:hover` can (same

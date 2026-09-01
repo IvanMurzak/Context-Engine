@@ -91,8 +91,14 @@
     cursor: default;
 }
 
-.ctx-widget-listitem:hover,
-.ctx-widget-treeitem:hover {
+/* `:not([aria-disabled="true"]):not(:disabled)` on every hover/active rule below: the ARIA menu
+ * pattern (07 §2, `app.css:389-391`) keeps a disabled item FOCUSABLE and fully mouse-interactive, so
+ * without this exclusion a disabled `<li aria-disabled="true">` would still step to panel2/panel3 on
+ * hover/press — indistinguishable from an enabled row except for its ink and cursor. Native
+ * `:disabled` is excluded too for the same reason, defensively, even though most engines already
+ * refuse to match `:hover`/`:active` on a disabled form control. */
+.ctx-widget-listitem:hover:not([aria-disabled="true"]):not(:disabled),
+.ctx-widget-treeitem:hover:not([aria-disabled="true"]):not(:disabled) {
     background: var(--ctx-colors-panel2);
 }
 
@@ -101,8 +107,8 @@
  * header's own rule). Declaration ORDER matters: `:active` must follow `:hover` in the sheet so a
  * genuine click — which matches both pseudo-classes on the same element at once — resolves to the
  * pressed step rather than the hover step at equal specificity. */
-.ctx-widget-listitem:active,
-.ctx-widget-treeitem:active {
+.ctx-widget-listitem:active:not([aria-disabled="true"]):not(:disabled),
+.ctx-widget-treeitem:active:not([aria-disabled="true"]):not(:disabled) {
     background: var(--ctx-colors-panel3);
 }
 
@@ -122,12 +128,13 @@
     cursor: pointer;
 }
 
-.ctx-widget-button:hover {
+.ctx-widget-button:hover:not([aria-disabled="true"]):not(:disabled) {
     background: var(--ctx-colors-panel2);
 }
 
-/* Pressed (a3, 07 §2) — see the listitem/treeitem pair above for why the token and the ordering. */
-.ctx-widget-button:active {
+/* Pressed (a3, 07 §2) — see the listitem/treeitem pair above for why the token, the ordering, and
+ * the disabled exclusion. */
+.ctx-widget-button:active:not([aria-disabled="true"]):not(:disabled) {
     background: var(--ctx-colors-panel3);
 }
 
