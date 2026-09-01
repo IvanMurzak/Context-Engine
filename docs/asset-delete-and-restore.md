@@ -98,8 +98,8 @@ Every one is fail-closed and named. Nothing is written on any of them.
 | `asset.delete_referenced` | a schema-bound document still references the asset |
 | `asset.delete_source_missing` | the asset raced away mid-delete |
 | `asset.meta_invalid` | the sidecar is malformed — repair it before deleting, never discard it |
-| `asset.restore_missing` | nothing is filed under the token (cleared trash, or already restored) |
-| `asset.restore_invalid` | the quarantine entry names a path outside the asset domain |
+| `asset.restore_missing` | nothing is filed under the token (cleared trash, or already restored), or the quarantined sidecar is gone and the asset would come back without its identity |
+| `asset.restore_invalid` | the restore token is a path rather than one quarantine directory name, or the quarantine entry names a path outside the asset domain |
 | `asset.restore_destination_exists` | a different file now occupies the deleted asset's path |
 | `path.jail_violation` | the path escapes the project root (R-SEC-008) |
 | `scope.denied` | the session does not hold `file_write` |

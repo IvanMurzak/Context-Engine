@@ -790,12 +790,29 @@ DeleteResult AssetDatabase::delete_asset(filesync::FileStore& fs, std::string_vi
     // Quarantine FIRST (the bytes exist in two places before they exist in one), then the source
     // asset, then the identity-bearing sidecar LAST -- see the header for why the reverse order
     // would let ensure_metas() re-key a half-deleted asset.
-    filesync::atomic_write(fs, trash_asset_path(token), *asset_bytes, "assetdb-delete");
-    if (meta_parsed.has_value())
+    //
+    // AND THE QUARANTINE WRITES ARE CHECKED, unlike move_asset's destination writes -- the asymmetry
+    // is the point. A failed destination write on a MOVE leaves the source intact, so ignoring it
+    // costs a confusing result at worst; a failed quarantine write on a DELETE would remove the only
+    // copy while reporting a `restore_token` that resolves to nothing. Refuse before the removal:
+    // nothing has left the project yet, so the honest answer is "the delete did not happen".
+    const bool quarantined_asset =
+        filesync::atomic_write(fs, trash_asset_path(token), *asset_bytes, "assetdb-delete");
+    const bool quarantined_meta =
+        !meta_parsed.has_value() ||
         filesync::atomic_write(fs, trash_meta_path(token), *meta_bytes, "assetdb-delete");
-    filesync::atomic_write(fs, trash_entry_path(token),
-                           serialize_trash_entry({path_s, token, meta_parsed.has_value()}),
-                           "assetdb-delete");
+    const bool quarantined_entry = filesync::atomic_write(
+        fs, trash_entry_path(token), serialize_trash_entry({path_s, token, meta_parsed.has_value()}),
+        "assetdb-delete");
+    if (!quarantined_asset || !quarantined_meta || !quarantined_entry)
+    {
+        result.diagnostics.push_back(make_diag(
+            "internal.error",
+            "the asset could not be quarantined under `" + std::string(kTrashRoot) +
+                "`, so nothing was deleted -- an irreversible delete is never the fallback",
+            path_s, trash_entry_path(token), existing_guid));
+        return result;
+    }
 
     fs.remove(path_s);
     result.removed_asset = true;
@@ -820,6 +837,21 @@ RestoreResult AssetDatabase::restore_asset(filesync::FileStore& fs, std::string_
     {
         result.diagnostics.push_back(
             make_diag("asset.restore_missing", "no restore token was supplied", ""));
+        return result;
+    }
+
+    // The token is interpolated straight into a filesystem path, so it must be ONE directory name.
+    // A token carrying a separator (or a dot segment) would address `.editor/trash/` relative to
+    // somewhere else entirely -- and the READ side of the FileStore seam is lexical
+    // (native_file_store.h: only write-side ops carry the R-SEC-008 physical jail), so an escaping
+    // token would read an `entry.json` from outside the project root. Refused here rather than only
+    // at the daemon boundary, so every caller of the engine operation gets the same guarantee.
+    if (token.front() == '.' || token.find('/') != std::string::npos ||
+        token.find('\\') != std::string::npos)
+    {
+        result.diagnostics.push_back(
+            make_diag("asset.restore_invalid",
+                      "a restore token names ONE quarantine directory; this one is a path", token));
         return result;
     }
 
@@ -853,6 +885,20 @@ RestoreResult AssetDatabase::restore_asset(filesync::FileStore& fs, std::string_
     const std::string dest_meta = meta_path_for(dest);
     const std::optional<std::string> quarantined_meta =
         entry->has_meta ? fs.read(trash_meta_path(token)) : std::nullopt;
+    if (entry->has_meta && !quarantined_meta.has_value())
+    {
+        // The entry says this asset HAD a sidecar and the sidecar is not there (a partially cleared
+        // `.editor/trash/`, an I/O failure). Restoring the payload alone would put back a META-LESS
+        // asset -- which the very next ensure_metas() pass re-keys with a FRESH GUID, resurrecting it
+        // under a new identity and dangling every reference to the old one. That is the exact failure
+        // delete_asset orders its removals to avoid, so restore refuses it rather than producing it.
+        result.diagnostics.push_back(make_diag(
+            "asset.restore_missing",
+            "the quarantined sidecar for this restore token is missing, so the asset cannot come "
+            "back with its identity; nothing was written",
+            trash_meta_path(token), entry->asset_path, entry->guid));
+        return result;
+    }
 
     // CAS-honesty, the occupied-destination rule move_asset states: something else may have taken
     // this path since the delete. Identical bytes are our own interrupted restore (fall through and

@@ -20,6 +20,7 @@
 #include "assetdb_test.h"
 
 #include <string>
+#include <utility>
 #include <string_view>
 #include <vector>
 
@@ -118,6 +119,53 @@ const schema::SchemaSet& empty_set()
     doc += "}}\n";
     return doc;
 }
+
+// A FileStore whose writes FAIL (return false) for any path containing a chosen fragment, forwarding
+// everything else to a real MemoryFileStore. MemoryFileStore is `final` and its fault injection
+// THROWS (it models a crash), so this decorator is the only way to reach the quieter failure that
+// matters for a delete: a write that merely returns false -- a full disk, an EACCES, or
+// NativeFileStore's R-SEC-008 write-side jail refusing the destination.
+class WriteRefusingFileStore final : public filesync::FileStore
+{
+public:
+    explicit WriteRefusingFileStore(std::string refuse_fragment)
+        : refuse_(std::move(refuse_fragment))
+    {
+    }
+
+    // Disarm, so the SAME fixture can produce the success the refusal is compared against.
+    void allow_everything() { refuse_.clear(); }
+
+    [[nodiscard]] bool exists(std::string_view path) const override { return inner_.exists(path); }
+    [[nodiscard]] std::optional<std::string> read(std::string_view path) const override
+    {
+        return inner_.read(path);
+    }
+    [[nodiscard]] std::optional<filesync::FileStat> stat(std::string_view path) const override
+    {
+        return inner_.stat(path);
+    }
+    [[nodiscard]] std::vector<std::string> list(std::string_view dir) const override
+    {
+        return inner_.list(dir);
+    }
+    bool write(std::string_view path, std::string_view data) override
+    {
+        if (!refuse_.empty() && path.find(refuse_) != std::string_view::npos)
+            return false;
+        return inner_.write(path, data);
+    }
+    bool rename(std::string_view from, std::string_view to) override
+    {
+        return inner_.rename(from, to);
+    }
+    bool remove(std::string_view path) override { return inner_.remove(path); }
+    void fsync(std::string_view path) override { inner_.fsync(path); }
+
+private:
+    filesync::MemoryFileStore inner_;
+    std::string refuse_;
+};
 
 } // namespace
 
@@ -458,6 +506,123 @@ int main()
         AssetDatabase db(guids);
         CHECK(has_diag(db.restore_asset(fs, "").diagnostics, "asset.restore_missing"));
         CHECK(has_diag(db.restore_asset(fs, kGuidA).diagnostics, "asset.restore_missing"));
+    }
+
+    // ===================== the review pass's three refusals (M9 e2 code-review) =================
+    // Each pins a path added after the first implementation pass, and each carries the producible
+    // sibling this suite's header demands: the SAME fixture succeeding once the injected condition
+    // is lifted, so a refusal cannot score green on a fixture that could never have succeeded.
+    {
+        // FINDING 1 -- a failed QUARANTINE write must refuse BEFORE anything is removed. The silent
+        // version of this is the worst outcome the whole feature can produce: the only copy of the
+        // asset destroyed, and an "applied" reply carrying a restore token that resolves to nothing.
+        WriteRefusingFileStore fs{std::string(kTrashRoot)};
+        put_asset(fs, "proj/art/hero.png", "PNGBYTES", kGuidA, "ctx:texture");
+        SequenceGuidGenerator guids;
+        AssetDatabase db(guids);
+        CHECK(db.scan(fs, "proj").assets_indexed == 1);
+
+        const DeleteResult refused = db.delete_asset(fs, "proj", "proj/art/hero.png", empty_set());
+        CHECK(!refused.ok);
+        CHECK(has_diag(refused.diagnostics, "internal.error"));
+        CHECK(!refused.removed_asset);
+        CHECK(!refused.removed_meta);
+        // No token is offered for an undo that could not work -- the specific lie being prevented.
+        CHECK(refused.restore_token.empty());
+
+        // NOTHING left the project: both halves are still on disk, byte-for-byte, and still indexed.
+        CHECK(fs.read("proj/art/hero.png") == std::optional<std::string>("PNGBYTES"));
+        CHECK(fs.exists(meta_path_for("proj/art/hero.png")));
+        CHECK(db.find_by_path("proj/art/hero.png") != nullptr);
+        CHECK(db.find_by_guid(kGuidA) != nullptr);
+
+        // The producible sibling: the ONLY variable is the quarantine write succeeding.
+        fs.allow_everything();
+        const DeleteResult applied = db.delete_asset(fs, "proj", "proj/art/hero.png", empty_set());
+        CHECK(applied.ok);
+        CHECK(applied.removed_asset);
+        CHECK(applied.restore_token == std::string(kGuidA));
+        CHECK(!fs.exists("proj/art/hero.png"));
+        CHECK(fs.read(trash_asset_path(kGuidA)) == std::optional<std::string>("PNGBYTES"));
+    }
+    {
+        // FINDING 2 -- the quarantined SIDECAR is gone while the entry says the asset had one.
+        // Restoring the payload alone would put back a meta-less file that the next ensure_metas()
+        // re-keys with a FRESH guid: the asset resurrects under a new identity and every reference
+        // to the old one dangles. Refuse instead, and write nothing.
+        filesync::MemoryFileStore fs;
+        put_asset(fs, "proj/art/hero.png", "PNGBYTES", kGuidA, "ctx:texture");
+        SequenceGuidGenerator guids;
+        AssetDatabase db(guids);
+        (void)db.scan(fs, "proj");
+        const DeleteResult deleted = db.delete_asset(fs, "proj", "proj/art/hero.png", empty_set());
+        CHECK(deleted.ok);
+
+        // A partially cleared `.editor/trash/`: the sidecar only.
+        CHECK(fs.remove(trash_meta_path(deleted.restore_token)));
+        const RestoreResult refused = db.restore_asset(fs, deleted.restore_token);
+        CHECK(!refused.ok);
+        CHECK(has_diag(refused.diagnostics, "asset.restore_missing"));
+        CHECK(!refused.restored_asset);
+        CHECK(!refused.restored_meta);
+        // NOTHING was written -- in particular no meta-less asset at the destination.
+        CHECK(!fs.exists("proj/art/hero.png"));
+        CHECK(!fs.exists(meta_path_for("proj/art/hero.png")));
+        CHECK(db.find_by_path("proj/art/hero.png") == nullptr);
+        // And this is NOT the "nothing is filed under this token" arm wearing the same code: the
+        // entry and the quarantined payload are both still there, so the restore is still re-runnable.
+        CHECK(fs.exists(trash_entry_path(deleted.restore_token)));
+        CHECK(fs.exists(trash_asset_path(deleted.restore_token)));
+
+        // The producible sibling: put the quarantined sidecar back and the SAME restore lands whole.
+        AssetMeta meta;
+        meta.guid = std::string(kGuidA);
+        meta.kind = "ctx:texture";
+        CHECK(fs.write(trash_meta_path(deleted.restore_token), serialize_meta(meta)));
+        const RestoreResult allowed = db.restore_asset(fs, deleted.restore_token);
+        CHECK(allowed.ok);
+        CHECK(allowed.restored_asset);
+        CHECK(allowed.restored_meta);
+        CHECK(fs.read("proj/art/hero.png") == std::optional<std::string>("PNGBYTES"));
+    }
+    {
+        // FINDING 3 -- a restore token is ONE quarantine directory name, never a path. The token is
+        // interpolated straight into `.editor/trash/<token>/entry.json`, normalize_path folds `..`,
+        // and the FileStore's READ side is lexical only (native_file_store.h: the R-SEC-008 physical
+        // jail guards writes), so an escaping token would make the daemon read an entry -- and copy
+        // the bytes it names -- from outside the project root.
+        filesync::MemoryFileStore fs;
+        put_asset(fs, "proj/art/hero.png", "PNGBYTES", kGuidA, "ctx:texture");
+        SequenceGuidGenerator guids;
+        AssetDatabase db(guids);
+        (void)db.scan(fs, "proj");
+        const DeleteResult deleted = db.delete_asset(fs, "proj", "proj/art/hero.png", empty_set());
+        CHECK(deleted.ok);
+
+        // This token is NOT a dead end: `x/..` folds away, so it resolves to the very entry the
+        // sibling below restores from. Without the guard the restore would SUCCEED through it --
+        // which is what makes the refusal attributable to the guard and not to an unreadable path.
+        const std::string traversing = "x/../" + deleted.restore_token;
+        CHECK(fs.exists(trash_entry_path(traversing)));
+        CHECK(fs.read(trash_asset_path(traversing)) == std::optional<std::string>("PNGBYTES"));
+
+        for (const std::string& bad : {traversing, std::string("../") + deleted.restore_token,
+                                       std::string(".."), std::string(".editor")})
+        {
+            const RestoreResult refused = db.restore_asset(fs, bad);
+            CHECK(!refused.ok);
+            CHECK(has_diag(refused.diagnostics, "asset.restore_invalid"));
+            CHECK(!refused.restored_asset);
+            CHECK(!refused.restored_meta);
+        }
+        // Every refusal above wrote nothing, and consumed nothing.
+        CHECK(!fs.exists("proj/art/hero.png"));
+        CHECK(fs.exists(trash_entry_path(deleted.restore_token)));
+
+        // The producible sibling: the SAME quarantine, addressed by its plain token, restores.
+        const RestoreResult allowed = db.restore_asset(fs, deleted.restore_token);
+        CHECK(allowed.ok);
+        CHECK(fs.read("proj/art/hero.png") == std::optional<std::string>("PNGBYTES"));
     }
 
     ASSETDB_TEST_MAIN_END();
