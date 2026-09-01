@@ -1154,6 +1154,110 @@ across the three OSes is who DELIVERS the gesture: since e12a-x11-legs the Linux
 leg drives a real pointer gesture and a real Tab into a LIVE CEF browser through the X server, which
 Windows and macOS still do not (on macOS the real-window proof is the CEF-FREE smoke above).
 
+## 16. The OSR contract audit (D12)
+
+The editor runs CEF **windowless (OSR)** (§ 5), which puts on the host a burden a normal browser
+window gets from the OS for free: reporting geometry, accepting pixels, delivering input, and driving
+the drag protocol. This section is the first full walk of that contract as a list, rather than one
+member discovered per bug report — three of the owner's seven 2026-08-29 UX reports (the dead tab
+drag, the misplaced/click-swallowing dropdown, and the offset context menu) all traced to
+unimplemented members this table would have named on day one. Produced for task `a0`
+(`.taskflow/2026-08-29-editor-ux-packages-events/tasks/a0-osr-contract-audit.md`; design doc
+`03-osr-geometry-and-drag.md`, decision `D12`). **This is a table, not a code change.**
+
+**Audited against CEF `149.0.6+g0d0eeb6+chromium-149.0.7827.201`** (`chromium_version:
+149.0.7827.201`) — the version pinned in `tools/cef-prebuilt.json`, the single source of truth
+`tools/fetch_cef.py` reads. The three headers below were read verbatim from that exact pinned
+distribution (`include/cef_render_handler.h`, `include/cef_browser.h`,
+`include/cef_context_menu_handler.h`), staged standalone with
+`python tools/fetch_cef.py --triple x86_64-pc-windows-msvc --dest <dest>` — the identical fetch
+`context_acquire_cef()` (`cmake/ContextCef.cmake`) runs at configure time into
+`<CMAKE_BINARY_DIR>/_cef/<triple>/include/` (e.g. `src/build/dev/_cef/x86_64-pc-windows-msvc/include/`
+with the `dev` preset). Reading the headers needs no MSVC and no link step, so this audit runs on the
+box whose GCC dev gate cannot build the CEF-linking targets (see this repo's `CLAUDE.md`).
+
+`ShellCefClient` (`src/editor/shell/cef/src/cef_shell.cpp:653-658`) derives `CefClient`,
+`CefRenderHandler`, `CefLifeSpanHandler`, `CefLoadHandler`, `CefDisplayHandler` and
+`CefRequestHandler` — **not** `CefContextMenuHandler`, and nothing in `src/` derives `CefDragHandler`
+or calls the windowless-only `CefBrowserHost` drag/IME/visibility family.
+
+### `CefRenderHandler` — 17 of 17 members
+
+| Member | Verdict | Detail |
+|---|---|---|
+| `GetAccessibilityHandler` | gap | An OS-level screen reader sees nothing in this window; the `gui-a11y-*` gates assert the C++ models and the DOM only, which is honestly green and still blind here — sharp for a repo with R-A11Y-001. Registered outside this set's scope (no task id yet); tracked in `01-current-architecture.md` §1 and this table pending a follow-up issue. |
+| `GetRootScreenRect` | gap | Same family as `GetScreenPoint` below — the other input to menu/popup placement. Closed by task `a1`. |
+| `GetViewRect` | **implemented** | `cef_shell.cpp:762` — reports the view in DIP. |
+| `GetScreenPoint` | gap | Default returns `false`, so CEF treats view coordinates as screen coordinates — this **is** the reported offset context menu (owner item #5). Closed by task `a1`. |
+| `GetScreenInfo` | **implemented** | `cef_shell.cpp:770` — `device_scale_factor` plus the per-platform DIP/device screen-rect split. |
+| `OnPopupShow` | **implemented** | `cef_shell.cpp:792`. |
+| `OnPopupSize` | **implemented** | `cef_shell.cpp:802` — the rect itself is reported correctly, in DIP; the bug that mis-places/crops the popup is downstream, in how the compositor consumes it (`01-current-architecture.md` §2; task `a2`), not a gap in this member. |
+| `OnPaint` | **implemented** | `cef_shell.cpp:814`. |
+| `OnAcceleratedPaint` | deliberately not needed | Owner ruling 2026-07-19: stock wgpu-native exposes no external-texture import and a patched fork was rejected; rationale recorded in `cef_shell.h:13-17`. The seam stays wired (`CefShellOptions::accelerated_osr` feeds e03's `OsrImportOptions`) and `shared_texture_enabled` is left at its default (off), so CEF never calls this. |
+| `GetTouchHandleSize` | gap | No touch input pipeline exists anywhere in the Shell (`input.h` has no touch event type). `01-current-architecture.md` §1 already flags this "not needed today" but explicitly **not yet decided** — no ruling is recorded. Tracked here pending a follow-up issue. |
+| `OnTouchHandleStateChanged` | gap | Pairs with `GetTouchHandleSize` above — same absent decision, same absent input source. |
+| `StartDragging` | gap | Default returns `false`, which the header defines as *"abort the drag operation"*: every HTML5 drag in the editor is actively refused (owner item #3, dead tab drag). Closed by task `b1`. |
+| `UpdateDragCursor` | gap | No drag-feedback cursor once dragging exists. Closed by task `b1`. |
+| `OnScrollOffsetChanged` | gap | `01-current-architecture.md` §1: "not needed today" but explicitly **not yet decided**; no ruling recorded. Tracked here pending a follow-up issue. |
+| `OnImeCompositionRangeChanged` | gap | Composition-based text input has no candidate-window placement. Registered outside this set's scope (IME family); tracked in `01-current-architecture.md` §1 pending a follow-up issue. |
+| `OnTextSelectionChanged` | gap | OS services that read the current selection (e.g. a screen reader's text cursor, macOS Services) get nothing. Registered outside this set's scope; tracked pending a follow-up issue. |
+| `OnVirtualKeyboardRequested` | gap | Same IME family as `OnImeCompositionRangeChanged` — an on-screen keyboard is never shown or hidden automatically. Registered outside this set's scope; tracked pending a follow-up issue. |
+
+Count: 17/17 — five implemented, one deliberately not needed, eleven gaps.
+
+### `CefBrowserHost` — windowless-only members
+
+Enumerated from the pinned `include/cef_browser.h`. Each is documented *"only used when window
+rendering is disabled"* (or, for `SetFocus` / `SendKeyEvent` / `SendMouse*` / `SendTouchEvent`, is the
+windowless input-injection surface the render-handler contract above depends on).
+
+| Member | Verdict | Detail |
+|---|---|---|
+| `SetFocus` (`cef_browser.h:401`) | **implemented** | `cef_shell.cpp:1320`. |
+| `WasResized` (`:699`) | **implemented** | `cef_shell.cpp:1254` — the resize protocol: makes CEF re-read `GetViewRect` and repaint. |
+| `WasHidden` (`:707`) | gap | No call site in `src/`. CEF keeps laying out and calling `OnPaint` at full rate while the window is minimized or hidden — a CPU/GPU cost with no correctness effect. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
+| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1243-1255`) drives only `WasResized` on a DPI change, and `WasResized`'s own doc re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — so a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
+| `SendKeyEvent` (`:751`) | **implemented** | `cef_shell.cpp:1312`. |
+| `SendMouseClickEvent` (`:758`) | **implemented** | `cef_shell.cpp:1282,1286`. |
+| `SendMouseMoveEvent` (`:768`) | **implemented** | `cef_shell.cpp:1274,1279`. |
+| `SendMouseWheelEvent` (`:780`) | **implemented** | `cef_shell.cpp:1290`. |
+| `SendTouchEvent` (`:788`) | gap | Same absent decision as `GetTouchHandleSize` / `OnTouchHandleStateChanged` above — no touch input pipeline exists in the Shell. Tracked here pending a follow-up issue. |
+| `NotifyMoveOrResizeStarted` (`:801`) | gap | Popups are not dismissed or repositioned when the window moves. Registered outside this set's scope; tracked in `01-current-architecture.md` §1 pending a follow-up issue. |
+| `SetWindowlessFrameRate` (`:821`) | deliberately not needed | The frame rate is fixed at browser-creation time via `CefBrowserSettings.windowless_frame_rate` (`cef_shell.h:116`, set at `cef_shell.cpp:1731-1732`; default 60, most smokes pin 10) and never needs a runtime change — consistent with `cef_shell.h`'s `NEVER SendExternalBeginFrame … CEF-internal pacing only` rule for the same reason: let CEF own pacing rather than drive it from the host. |
+| `ImeSetComposition` and siblings — `ImeSetComposition` (`:849`), `ImeCommitText` (`:865`), `ImeFinishComposingText` (`:876`), `ImeCancelComposition` (`:885`) | gap | The host-injection half of the same IME family as `OnImeCompositionRangeChanged` / `OnVirtualKeyboardRequested` above — no call site for any of the four. Registered outside this set's scope; tracked pending a follow-up issue. |
+| `DragTargetDragEnter` / `DragTargetDragOver` / `DragTargetDragLeave` / `DragTargetDrop` (`:897-927`) | gap | No call site — the injection half of the drag protocol `StartDragging` above needs. Closed by task `b1`. |
+| `DragSourceEndedAt` / `DragSourceSystemDragEnded` (`:939-951`) | gap | No call site. Closed by task `b1`. |
+
+### `CefContextMenuHandler` — 0 of 7 members
+
+Not derived by `ShellCefClient` at all (`cef_shell.cpp:653-658`), so CEF displays its own built-in
+context menu for every member below.
+
+| Member | Verdict | Detail |
+|---|---|---|
+| `OnBeforeContextMenu` (`cef_context_menu_handler.h:106`) | deliberately not needed | CEF's own built-in menu is used; task `a1`'s own scope note records this as acceptable: *"CEF's own menu, positioned through this callback, is acceptable once positioned correctly."* The reported offset (owner item #5) is fully explained by the missing `GetScreenPoint` above, not by this handler. |
+| `RunContextMenu` (`:120`) | deliberately not needed | Same reason. |
+| `OnContextMenuCommand` (`:138`) | deliberately not needed | Same reason. |
+| `OnContextMenuDismissed` (`:151`) | deliberately not needed | Same reason. |
+| `RunQuickMenu` (`:163`) | deliberately not needed | Same reason (the touch-context-menu counterpart of `RunContextMenu`; moot while `SendTouchEvent` above is also a gap). |
+| `OnQuickMenuCommand` (`:179`) | deliberately not needed | Same reason. |
+| `OnQuickMenuDismissed` (`:191`) | deliberately not needed | Same reason. |
+
+### What this closes and what it opens
+
+- Replaces an impression ("is this the wrong framework?", `README.md` § "The framework question,
+  answered once") with a count: 5 implemented, 3 deliberately-not-needed groups (`OnAcceleratedPaint`,
+  `SetWindowlessFrameRate`, all of `CefContextMenuHandler`), and the rest gaps.
+- Tasks `a1` and `b1` each close a named subset of the gaps above; their own task files cite the exact
+  rows they close.
+- Six gaps surfaced by this audit were **not** already on `03-osr-geometry-and-drag.md`'s
+  pre-registered list: `WasHidden`, `NotifyScreenInfoChanged`, `SendTouchEvent` (plus its render-handler
+  counterparts `GetTouchHandleSize` / `OnTouchHandleStateChanged`), and `OnScrollOffsetChanged`. None
+  has a follow-up issue filed yet — filing one each is the natural next step, and this table is what a
+  filed issue should point back to.
+- No promise is made here about when any gap row gets fixed — per this task's own scope, that is a
+  decision for whichever task or issue closes the row.
+
 ## 11. What this does NOT yet do
 
 Named so the gaps are visible rather than assumed:
