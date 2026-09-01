@@ -1453,6 +1453,15 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                     event.stopPropagation();
                     setSelected(selectable.length - 1);
                     return;
+                case "ArrowLeft":
+                case "ArrowRight":
+                    // A TEXT FIELD, not a menu item: ArrowLeft/ArrowRight move the caret within the
+                    // typed query (native input behavior, left un-preventDefault'd) rather than the
+                    // slot-level menubar handler's top-level-menu-switch meaning — without this,
+                    // typing a query and pressing ArrowLeft to edit it closed the Window menu and
+                    // opened the adjacent one, discarding the query.
+                    event.stopPropagation();
+                    return;
                 case "Enter": {
                     event.preventDefault();
                     event.stopPropagation();
