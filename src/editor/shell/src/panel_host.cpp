@@ -15,6 +15,7 @@
 #include <cstdint>
 #include <string_view>
 #include <utility>
+#include <vector>
 
 namespace context::editor::shell
 {
@@ -58,13 +59,11 @@ namespace ut = gui::uitree;
     {
         return true;
     }
-    const contract::Json& value = params.at(key);
-    if (!value.is_string())
-    {
-        return false;
-    }
-    out = value.as_string();
-    return true;
+    // PRESENT, so the only remaining question is "is it a string" -- which is exactly what
+    // `read_string` answers once the member is known to exist. Delegating keeps ONE definition of
+    // "a string member": a tolerance added there (reading a `null` as absent, say) can never leave
+    // the required and optional readers disagreeing about the same wire payload.
+    return read_string(params, key, out);
 }
 
 // The manifest-v3 projection of one roster entry (04 §3 + 04 §2). `hosted`, `gestures` and `state`
@@ -282,8 +281,11 @@ bool PanelHost::provide_factory(const std::string& panel_id, PanelProviderFactor
         return false;
     }
     // THE PROBE (panel_host.h states why it is taken here rather than deferred). Its provider is
-    // used ONLY for the capability read inside `bind` and then dropped: no instance holds it, so the
-    // throwaway model it may have built dies with this statement.
+    // used for the capability read inside `bind`, which then RETAINS it as `Entry::provider` for the
+    // entry's lifetime -- so a throwaway model it may have built is kept alive too. No instance ever
+    // renders from it (`create_instance` calls the factory whenever one is bound), but do not read
+    // this as "the probe is discarded": anything added that reads `Entry::provider` without checking
+    // `factory` first would silently serve every copy of this kind the probe's model.
     PanelProvider probe = factory(std::string());
     if (probe.build == nullptr)
     {
@@ -573,15 +575,11 @@ bool PanelHost::close_instance(const std::string& panel_id, const std::string& i
     {
         return false;
     }
-    for (std::size_t i = 0; i < entry->instances.size(); ++i)
-    {
-        if (entry->instances[i].id == instance_id)
-        {
-            entry->instances.erase(entry->instances.begin() + static_cast<std::ptrdiff_t>(i));
-            return true;
-        }
-    }
-    return false;
+    // ONE spelling of "which live copy does this id name" (the predicate `find_instance` applies).
+    // Erasing at most one is not an assumption: every creation path checks `find_instance` first, so
+    // ids are unique within an entry. Hand-rolling the scan is what forced the iterator arithmetic.
+    return std::erase_if(entry->instances,
+                         [&](const Instance& in) { return in.id == instance_id; }) > 0;
 }
 
 std::vector<std::string> PanelHost::instances(const std::string& panel_id) const

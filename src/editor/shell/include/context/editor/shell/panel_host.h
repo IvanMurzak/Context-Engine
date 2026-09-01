@@ -429,15 +429,20 @@ private:
     struct Entry
     {
         gui::contract::Contribution manifest;
-        // The shared-model binding (`provide`). Null `build` when the kind is factory-bound.
+        // The shared-model binding (`provide`) -- or, for a factory-bound kind, the PROBE provider
+        // `provide_factory` built (see there). Never a null `build` on a hosted entry either way, so
+        // it is NOT the discriminator between the two bindings: `factory != nullptr` is, and that is
+        // what `create_instance` branches on.
         PanelProvider provider;
         // The per-instance binding (`provide_factory`). Null when the kind is shared-model bound.
         PanelProviderFactory factory;
         bool hosted = false;
         // The binding's CAPABILITY shape, decided once at bind time and reported by `panel.list`.
-        // Stored rather than re-derived because a factory-bound kind has no provider on the entry to
-        // ask, and asking a LIVE instance would make the roster's answer depend on whether a copy
-        // happens to be open -- a fact that flips under the renderer mid-session.
+        // Stored rather than re-derived so the roster's answer cannot depend on a LIVE instance --
+        // asking one would make the answer flip under the renderer according to whether a copy
+        // happens to be open. Deriving from `provider` above would agree TODAY (`bind` reads these
+        // from the very provider it stores), but only for as long as the probe keeps being retained,
+        // which is an implementation detail of `provide_factory` rather than a promise to `list()`.
         bool offers_gestures = false;
         bool offers_state = false;
         std::uint64_t revision = 1; // 1, not 0: "never rendered" is distinguishable from "revision 0"

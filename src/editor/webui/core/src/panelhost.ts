@@ -52,7 +52,6 @@ import { HydrationRuntime } from "./hydration.js";
 // literals here would drift SILENTLY past that gate — the gate gets a matching constant, not a
 // matching consumer (editorstate.ts § the same reasoning for its own keys).
 import {
-    PANEL_INSTANCE_SEPARATOR,
     STATE_DATA_KEY,
     STATE_SCHEMA_VERSION_KEY,
     makeInstanceId,
@@ -1297,11 +1296,14 @@ export class PanelHost {
 
     /** Advance a kind's mint counter past an id minted elsewhere. A non-numeric tail is ignored. */
     #noteInstanceId(panelId: string, instanceId: string): void {
-        const prefix = `${panelId}${PANEL_INSTANCE_SEPARATOR}`;
-        if (!instanceId.startsWith(prefix)) {
+        // Ask the PUBLISHED decomposer rather than re-splitting on the raw separator: `panels.ts`
+        // owns the compose/decompose rule precisely so it has one home, and its own comment calls a
+        // drift here "the quietest failure in the panel family". Equivalent on every input --
+        // including a panel id that itself contains the separator, since both split on the LAST one.
+        if (panelIdOfInstance(instanceId) !== panelId) {
             return;
         }
-        const tail = instanceId.slice(prefix.length);
+        const tail = instanceId.slice(panelId.length + 1);
         if (tail === "" || !/^[0-9]+$/.test(tail)) {
             return;
         }
