@@ -1,0 +1,25 @@
+src/editor/gui/contract/src/builtin_roster.cpp
+  s_782aa603d2bdb2::t_c63032244eef0d 43,54,72,75
+src/editor/gui/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_ded23cc27132a7 262-263,267-270,385
+src/editor/shell/include/context/editor/shell/package_store.h
+  s_782aa603d2bdb2::t_8a52cd3de0ed39 250-254,266-268
+src/editor/shell/src/package_store.cpp
+  s_782aa603d2bdb2::t_620f5ad2cdc10e 392
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "bc675344cc52b30e802a13d9bb922700edc89961",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
