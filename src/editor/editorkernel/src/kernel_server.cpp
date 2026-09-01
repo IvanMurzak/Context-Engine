@@ -959,10 +959,14 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         const filesync::NativeFileStore store(kernel_.config().project_root);
         assetdb::RandomGuidGenerator guids; // never invoked: scan() mints nothing, only indexes
         assetdb::AssetDatabase db(guids);
-        (void)db.scan(store, "");
+        // One listing feeds both the scan (guid/kind index) and the tree builder below — the
+        // two-argument scan() overload reuses it instead of walking + sorting the whole project
+        // tree twice for one request.
+        const std::vector<std::string> listing = store.list("");
+        (void)db.scan(store, listing);
 
         gui::panels::files::FilesModel model =
-            gui::panels::builders::build_files_model(store.list(""), db);
+            gui::panels::builders::build_files_model(listing, db);
         model.ok = project_exists;
 
         Json data = Json::object();

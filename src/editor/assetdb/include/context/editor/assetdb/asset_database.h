@@ -104,6 +104,13 @@ public:
     // duplicated GUID). Never writes.
     ScanResult scan(const filesync::FileStore& fs, std::string_view root);
 
+    // Same as scan(fs, root) but reuses an ALREADY-FETCHED file listing instead of re-walking the
+    // tree — for a caller that needs both the scan index AND the raw file list for one request
+    // (the `editor.files` daemon read: one `fs.list()` feeds both this and the file-tree builder),
+    // avoiding a second full directory walk + sort. `listed_paths` must be the full listing
+    // scan(fs, root) would otherwise have fetched via `fs.list(root)` itself.
+    ScanResult scan(const filesync::FileStore& fs, const std::vector<std::string>& listed_paths);
+
     // GUID move-healing (the second R-FILE-003 enumerated write): heal raw filesystem moves the
     // watcher observed by GUID match. Pairs an orphaned meta with a meta-less asset when the pair
     // is UNIQUE — by basename anywhere, else as the sole orphan+newcomer of one directory —
