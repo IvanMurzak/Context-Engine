@@ -82,6 +82,11 @@ enum class WindowDestroyOutcome
     destroyed,
     unknown_window,  // no live window carries that id
     primary_refused, // window 0 hosts the menu/welcome screen; it is closed by app shutdown only
+    // `close_window(kPrimaryWindowId)` — the primary's ✕ / the Window menu's Quit. The window was
+    // NOT destroyed on its own (`destroy_window` still refuses it, and that invariant is what makes
+    // this the only path that can close window 0): every live window was asked to close, so the
+    // owner loop ends and the app shuts down. Never returned by `destroy_window`.
+    app_quit,
 };
 
 [[nodiscard]] const char* to_string(WindowCreateOutcome outcome);
@@ -153,6 +158,14 @@ struct WindowDestroyResult
     std::string error;
 
     [[nodiscard]] bool ok() const { return outcome == WindowDestroyOutcome::destroyed; }
+    // The ask was ACCEPTED — this window is gone, OR the app is on its way out (`app_quit`). `ok()`
+    // stays the narrower "THIS window was destroyed", which is what the rehome / seed-forget paths
+    // key on: an app quit has no surviving window to hand anything to.
+    [[nodiscard]] bool accepted() const
+    {
+        return outcome == WindowDestroyOutcome::destroyed ||
+               outcome == WindowDestroyOutcome::app_quit;
+    }
 };
 
 // THE DEGRADATION SEAM (03 §7). A failed secondary-window creation is reported through this, once

@@ -208,6 +208,31 @@ void test_outcome_names_are_distinct_and_stable()
     CHECK(std::string(to_string(WindowDestroyOutcome::primary_refused)) == "primary-refused");
     CHECK(std::string(to_string(WindowDestroyOutcome::destroyed)) == "destroyed");
     CHECK(std::string(to_string(WindowDestroyOutcome::unknown_window)) == "unknown-window");
+    CHECK(std::string(to_string(WindowDestroyOutcome::app_quit)) == "app-quit");
+    const WindowDestroyOutcome destroys[] = {
+        WindowDestroyOutcome::destroyed, WindowDestroyOutcome::unknown_window,
+        WindowDestroyOutcome::primary_refused, WindowDestroyOutcome::app_quit};
+    for (std::size_t i = 0; i < std::size(destroys); ++i)
+    {
+        for (std::size_t j = i + 1; j < std::size(destroys); ++j)
+        {
+            CHECK(std::string(to_string(destroys[i])) != std::string(to_string(destroys[j])));
+        }
+    }
+
+    // `ok()` and `accepted()` are DIFFERENT questions, and the difference is the whole point of the
+    // quit outcome: the ask was honoured, and no window was destroyed by it.
+    WindowDestroyResult sample;
+    sample.outcome = WindowDestroyOutcome::destroyed;
+    CHECK(sample.ok());
+    CHECK(sample.accepted());
+    sample.outcome = WindowDestroyOutcome::app_quit;
+    CHECK(!sample.ok());
+    CHECK(sample.accepted());
+    sample.outcome = WindowDestroyOutcome::primary_refused;
+    CHECK(!sample.accepted());
+    sample.outcome = WindowDestroyOutcome::unknown_window;
+    CHECK(!sample.accepted());
 }
 
 void test_the_failure_report_names_the_class_the_source_and_the_reason()
@@ -652,6 +677,136 @@ void test_a_window_that_dies_on_its_own_is_retired_not_freed()
     shelltest::cleanup(project);
 }
 
+// --------------------------------------------------------- 4b. the `window.close` policy (the ✕)
+
+void test_the_primary_close_is_the_app_quit_and_reaches_every_window()
+{
+    // The bug this exists to pin: the primary's ✕ dispatches `window.close`, which used to land on
+    // `destroy_window`'s primary refusal and do NOTHING — the button was dead while the minimize and
+    // maximize buttons beside it worked (measured on Windows, 2026-08-29). `close_window` is the
+    // policy, and a quit that reached only window 0 would leave a secondary window running the app
+    // with no menu bar, so "every window" is asserted, not just the primary's.
+    const fs::path project = shelltest::make_temp_project("shell-registry", "primary-close");
+    Deaths deaths;
+    int browsers_alive = 0;
+    ScriptedFactory factory{&deaths, &browsers_alive, {}, false, false, 0};
+    {
+        WindowManager manager(project);
+        manager.bind_window_factory(std::ref(factory));
+        manager.add(make_primary_window(deaths, &browsers_alive));
+        const WindowCreateResult second = manager.create_window(secondary_spec());
+        const WindowCreateResult third = manager.create_window(secondary_spec("Context Editor — 3"));
+        CHECK(second.ok());
+        CHECK(third.ok());
+        CHECK(!manager.quit_requested());
+        // The BEFORE half of the plant: with nothing asked, the loop keeps running. Without this the
+        // "pump_once is false afterwards" assertion below could be satisfied by a manager that was
+        // already finished.
+        CHECK(manager.pump_once(1000u));
+        CHECK(manager.window_count() == 3);
+
+        const WindowDestroyResult quit = manager.close_window(kPrimaryWindowId);
+        CHECK(quit.outcome == WindowDestroyOutcome::app_quit);
+        CHECK(quit.accepted());
+        CHECK(!quit.ok()); // nothing was destroyed BY the call — the windows die on their own pump
+        CHECK(quit.error.empty());
+        CHECK(manager.quit_requested());
+        // Every window was ASKED, none was torn down under the caller (the re-entrancy rule).
+        CHECK(manager.window_count() == 3);
+        for (const WindowId id : manager.window_ids())
+        {
+            CHECK(!manager.window(id)->backend().alive());
+        }
+
+        // ...and the ask is what ends the owner loop: every window dies on its next pump and is
+        // retired through the ordinary path, so the loop's ONE termination condition fires.
+        CHECK(!manager.pump_once(2000u));
+        CHECK(manager.window_count() == 0);
+        CHECK(manager.retired_session_count() == 3);
+        CHECK(deaths.detaches == 3);
+        CHECK(deaths.closes == 0); // deferred to the shared shutdown() drain, as for any retire
+    }
+    CHECK(browsers_alive == 0);
+    shelltest::cleanup(project);
+}
+
+void test_closing_a_secondary_destroys_only_it_and_an_unknown_id_never_quits()
+{
+    const fs::path project = shelltest::make_temp_project("shell-registry", "secondary-close");
+    Deaths deaths;
+    int browsers_alive = 0;
+    ScriptedFactory factory{&deaths, &browsers_alive, {}, false, false, 0};
+    {
+        WindowManager manager(project);
+        manager.bind_window_factory(std::ref(factory));
+        manager.add(make_primary_window(deaths, &browsers_alive));
+        const WindowCreateResult second = manager.create_window(secondary_spec());
+        CHECK(second.ok());
+
+        // A stale id must never be read as "close the app".
+        const WindowDestroyResult unknown = manager.close_window(41);
+        CHECK(unknown.outcome == WindowDestroyOutcome::unknown_window);
+        CHECK(!unknown.accepted());
+        CHECK(shelltest::mentions(unknown.error, "41"));
+        CHECK(!manager.quit_requested());
+        CHECK(manager.window_count() == 2);
+
+        // The secondary half is unchanged: its ✕ destroys exactly that window, and the primary — and
+        // therefore the app — keeps running.
+        const WindowDestroyResult closed = manager.close_window(second.id);
+        CHECK(closed.outcome == WindowDestroyOutcome::destroyed);
+        CHECK(closed.ok());
+        CHECK(closed.accepted());
+        CHECK(!manager.quit_requested());
+        CHECK(manager.window(second.id) == nullptr);
+        CHECK(manager.window(kPrimaryWindowId) != nullptr);
+        CHECK(manager.window(kPrimaryWindowId)->backend().alive());
+        CHECK(manager.pump_once(1000u));
+
+        // And `destroy_window` itself still REFUSES the primary — the invariant close_window is
+        // built on. If this ever flips, window 0 can be destroyed as a window and the app is left
+        // running with no primary at all.
+        const WindowDestroyResult refused = manager.destroy_window(kPrimaryWindowId);
+        CHECK(refused.outcome == WindowDestroyOutcome::primary_refused);
+        CHECK(!refused.accepted());
+        CHECK(manager.window(kPrimaryWindowId) != nullptr);
+    }
+    shelltest::cleanup(project);
+}
+
+void test_the_primary_id_stops_quitting_once_window_zero_is_gone()
+{
+    // The discriminating case for close_window's liveness check, and the ONLY one: every other
+    // unknown id already resolves through destroy_window's own refusal, so id 41 above says nothing
+    // about the check (it was GREEN with the check disabled — measured). Here window 0 has died on
+    // its own while a secondary is still up, which is exactly when a late `window.close` carrying
+    // the primary's id can arrive, and quitting on it would tear the app down from a stale ask.
+    const fs::path project = shelltest::make_temp_project("shell-registry", "stale-primary");
+    Deaths deaths;
+    int browsers_alive = 0;
+    ScriptedFactory factory{&deaths, &browsers_alive, {}, false, false, 0};
+    {
+        WindowManager manager(project);
+        manager.bind_window_factory(std::ref(factory));
+        manager.add(make_primary_window(deaths, &browsers_alive));
+        const WindowCreateResult second = manager.create_window(secondary_spec());
+        CHECK(second.ok());
+
+        manager.window(kPrimaryWindowId)->backend().close(); // window 0 dies on its own
+        CHECK(manager.pump_once(1000u));
+        CHECK(manager.window(kPrimaryWindowId) == nullptr);
+
+        const WindowDestroyResult stale = manager.close_window(kPrimaryWindowId);
+        CHECK(stale.outcome == WindowDestroyOutcome::unknown_window);
+        CHECK(!stale.accepted());
+        CHECK(!manager.quit_requested());
+        CHECK(manager.window(second.id) != nullptr);
+        CHECK(manager.window(second.id)->backend().alive());
+        CHECK(manager.pump_once(2000u));
+    }
+    shelltest::cleanup(project);
+}
+
 // ------------------------------------------------------------------------ 5. per-window `origin`
 
 void test_each_window_reports_its_own_origin()
@@ -768,6 +923,10 @@ int main()
     test_repeated_create_destroy_tears_down_cleanly_and_leaks_nothing();
     test_shutdown_retires_the_session_of_every_window_still_open();
     test_a_window_that_dies_on_its_own_is_retired_not_freed();
+
+    test_the_primary_close_is_the_app_quit_and_reaches_every_window();
+    test_closing_a_secondary_destroys_only_it_and_an_unknown_id_never_quits();
+    test_the_primary_id_stops_quitting_once_window_zero_is_gone();
 
     test_each_window_reports_its_own_origin();
     test_a_window_that_owns_a_connection_answers_from_it_not_from_what_it_was_told();

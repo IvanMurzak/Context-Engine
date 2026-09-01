@@ -222,10 +222,13 @@ void bind_window_bridge_handlers(shell::WindowBridge& wb, shell::WindowManager& 
     wb.bind_close(
         [&manager, &store](shell::WindowId self) -> shell::WindowMoveResult
         {
-            const shell::WindowDestroyResult d = manager.destroy_window(self);
+            // `close_window`, NOT `destroy_window`: the primary's ✕ is the app quit (the policy and
+            // the reason live in shell.h § close_window). `ok()` stays "this window is gone", which
+            // is what the seed-forget below keys on; `accepted()` is what the renderer is told.
+            const shell::WindowDestroyResult d = manager.close_window(self);
             if (d.ok())
                 store.forget(self); // drop any seeds queued for a window that is now gone
-            return {d.ok(), self, shell::to_string(d.outcome), d.error};
+            return {d.accepted(), self, shell::to_string(d.outcome), d.error};
         });
 
     // --- the chrome contract (editor-window-chrome a1, target design 02 §1 / §5) ------------------

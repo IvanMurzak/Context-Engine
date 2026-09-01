@@ -553,7 +553,9 @@ export function makeMenuActions(deps: MenuActionDeps): MenuCommandActions {
             return { ok: true, note: "window close requested" };
         },
         quit: async (): Promise<CommandOutcome> => {
-            // The primary-window close path IS the quit (03's table: window_bridge close policy).
+            // The primary-window close path IS the quit (03's table: window_bridge close policy) —
+            // and since the close-button fix it genuinely quits: the Shell asks every window to
+            // close. From a SECONDARY window this still closes only that window (docs/shell.md).
             await deps.windowControls.close();
             return { ok: true, note: "quit requested (primary-window close policy)" };
         },

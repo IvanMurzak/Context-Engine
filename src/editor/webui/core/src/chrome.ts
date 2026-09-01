@@ -460,7 +460,9 @@ export function mountChrome(elements: ChromeStripElements, options: MountChromeO
             label: GLYPH_CLOSE,
             accessibleLabel: LABEL_CLOSE,
             onActivate: (): void => {
-                // `window.close` already carries the primary-vs-secondary policy Shell-side.
+                // `window.close` carries the primary-vs-secondary policy Shell-side: a secondary
+                // window is destroyed, the PRIMARY's close is the app quit (WindowManager::
+                // close_window). Nothing is read back — on the primary this window is going away.
                 void options.controls.close();
             },
         });

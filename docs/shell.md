@@ -56,6 +56,10 @@ app knows how to make a browser. Three properties are load-bearing, and each is 
   proof CEF is done with the client.
 - **Ids are never reused.** A stale id resolves to nullptr forever rather than silently addressing a
   different window — which is what a vector index would do to a panel e10b moved.
+- **Closing window 0 is the APP QUIT, not a window destroy.** `destroy_window` refuses the primary;
+  `close_window` — the one home of the `window.close` policy — turns that ask into `request_quit`,
+  which asks every live window to close so the owner loop ends normally. § 15 has the whole story
+  (and the bug it fixes: the primary's ✕ used to collect the refusal and do nothing).
 
 **Creation failure is LOUD** (03 §7): `create_window` never partially adopts, reports one of
 `no-factory` / `factory-failed` / `incomplete-parts` / `limit-reached`, fires
@@ -568,7 +572,7 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_smoke_window` | e12a-x11-legs + e12c-3: the smoke-tier window seam, asserted with no display — the `--real-window` flag parse, headless construction/present/injection, `browser_geometry`'s DIP conversion at a non-identity DPI, BOTH key-table inverses (X11 keysym and macOS virtual key) SWEPT back through their shipping decoder map, a THIRD sweep pinning the two tables to EACH OTHER (a VK one arm accepts and the other refuses is a smoke that silently cannot inject on one OS), and the load-bearing negatives: real mode REFUSING a headless backend (pointer, key AND resize) and a window with no presentable native surface, rather than degrading |
 | `editor-cef-smoke-shell` | The LIVE CEF half: a real browser through the real integrated pump, its `OnPaint` frames composited + presented, input round-tripped, a live resize repainted. Windowless on Windows and (since e12c-1) on macOS, where it boots from a real `.app` with five helper bundles; since e12a-x11-legs the Linux leg runs it through a REAL X11 window and injects its gestures through the X server (`editor-cef-smoke` job; BUILT and RUN on all three OSes — macOS included since issue #437 was fixed at its cause, `docs/cef-keychain-isolation.md`) |
 | `editor-shell-cef-keychain` | #437: the source gate that every CEF smoke isolates Chromium's OSCrypt key from the MACHINE keychain — each source constructing a `CefShellOptions` under `src/editor/shell/cef/src/` sets `use_mock_keychain`, each source defining `OnBeforeCommandLineProcessing` under `src/editor/` names the switch, and the option is still declared/latched/appended (`tools/check_cef_keychain_isolation.py`). Needs no CEF build, so it runs on the CEF-OFF legs too — see `docs/cef-keychain-isolation.md` |
-| `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open |
+| `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open. Since the close-button fix it also carries the `window.close` POLICY: the primary's close is the app quit and reaches EVERY window, a secondary's destroys only it, `destroy_window` still refuses the primary, and a stale primary id (window 0 already dead, a secondary still up) is `unknown-window`, never a quit |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, all three OSes since e12c-2) |
 
 All `editor-shell-*` tests are a plain (non-gate) family: the `build` job's general ctest step runs
@@ -846,6 +850,28 @@ is installed in ALL TEN live CEF smokes in the PR that introduced it (the ten-sm
 `window_bridge.h`) — a1 for `chrome.state` + the three verbs, d1 for `session.control`, d3 for
 `menu.publish`.
 
+**The ✕ — `window.close` is TWO asks, and for a long time only one of them worked.** The titlebar's
+close button and the Window menu's Close / Quit all dispatch `window.close` on THIS window's bridge,
+and the Shell decides what that means: a SECONDARY window is destroyed (its panels rehome to window 0
+first — the D6 relay above), while the PRIMARY window's close is the **app quit**. It has to be:
+window 0 hosts the app menu and the welcome screen, so `destroy_window` refuses it by design
+("it closes with the app, not on its own"). Until 2026-08-29 nothing acted on the other half of that
+sentence — the app's handler called `destroy_window` directly, so the primary's ✕ dispatched its
+verb, collected `primary-refused`, and did NOTHING, while the minimize and maximize buttons 40 px to
+its left worked perfectly. `WindowManager::close_window` is now the ONE home of that policy
+(`shell.h`): unknown id → `unknown-window` (a stale id must never quit the app), secondary →
+`destroy_window`, primary → `request_quit`, which ASKS every live window's backend to close — the
+same ask the OS makes for Alt+F4, per backend — and lets each die on its own next pump, so windows are
+retired through the path that already exists, `pump_once` reports the empty registry, and the owner
+loop ends through its ordinary termination condition with the whole teardown sequence (state flush,
+`shutdown()`, `CefShutdown`) unchanged. `destroy_window`'s primary refusal is deliberately untouched:
+it stays the honest answer to "destroy window 0 as a window", which is what makes `close_window` the
+only path that can close it. Pinned by `editor-shell-test_window_registry` (the quit reaches EVERY
+window — a quit that reached only window 0 would leave a secondary running the app with no menu bar —
+the secondary path, the still-refusing `destroy_window`, and the stale-primary-id case) and verified
+live on Windows: with the measured `HTCLOSE` rect clicked by a real synthetic press, the process exits
+0 and writes its editor state, in both project and welcome modes.
+
 **The strips (a2, 02 §2).** `app/index.html` is a flex column: `#editor-titlebar` (38 px) /
 `#editor-playbar` (40 px) / `#editor-root` (flex: 1, the dock) / `#editor-statusbar` (24 px), with
 `#editor-banners` staying the fixed overlay. Strips are app chrome in the banners pattern — styled in
@@ -1088,7 +1114,7 @@ live halves ride the windowed smokes (§ 15's verification map).
 |---|---|---|
 | Windows: drag the titlebar strip | The window MOVES with the pointer, the OS drag (not a hand-rolled loop); a double-click on the strip maximizes / restores; right-click on the strip opens the system menu | `hit_test_frame` → `HTCAPTION` over the live rects (`editor-cef-smoke-shell`, Windows self-hosted leg); the sweep corpus |
 | Windows: Snap | Win+Arrow, drag-to-edge and Snap Layouts on hover over the web-drawn maximize button all behave as on a stock window | `HTMAXBUTTON` over the live maximize rect; NC moves over a control forwarded, never consumed (`translate_win32_nc_mouse`) |
-| Windows: the web-drawn controls | Hover lights them (CSS), a click minimizes / toggles maximize / closes exactly once (no double action from `DefWindowProc`'s classic tracking), sliding off a control clears its hover | NC press/release forwarded AND consumed, the synthetic leave — `editor-shell-test_window`; the verbs — `editor-shell-test_window_bridge` |
+| Windows: the web-drawn controls | Hover lights them (CSS), a click minimizes / toggles maximize / closes exactly once (no double action from `DefWindowProc`'s classic tracking), sliding off a control clears its hover | NC press/release forwarded AND consumed, the synthetic leave — `editor-shell-test_window`; the verbs — `editor-shell-test_window_bridge`; the close POLICY — `editor-shell-test_window_registry`. ⚠ This row is why the dead ✕ shipped: it was never actually walked, and the ✕ is the one control whose verb the Shell could refuse. Verified by hand 2026-08-29 (minimize as the positive control, then close → exit 0). |
 | Windows: maximize on a multi-monitor mix (a secondary monitor, a docked taskbar, 150 %) | The client fills the work area exactly — no 8 px spill off any edge, no letterbox gap | `win32_frameless_max_geometry` ∘ `win32_frameless_client_insets` == work area at 96 and 144 dpi, taskbar offset included |
 | Windows: the DWM dark-mode tint | Switching the theme flips the frame's edge tint / drop shadow to match | `window.set-appearance` tokens (`editor-shell-test_window_bridge`, `webui-panel-contract`); the Dwm call itself is CI-unreachable |
 | Windows: the real NC message stream | `WM_NCCALCSIZE` / `WM_NCHITTEST` / the NC mouse family arriving from a REAL `HWND` on an interactive desktop | The pure decisions on all three legs; the Session-0 runner cannot deliver NC messages |
@@ -1393,7 +1419,9 @@ Named so the gaps are visible rather than assumed:
   the sources arrive with e11 / the build pipeline. `compiling` / `error` play states are unreachable
   until those facts are published. The strip inherits CE #356 (play-state staleness after a daemon
   restart) — fixed upstream, not here. `window.quit` from a SECONDARY window closes only that window
-  (a Shell-side "close primary" surface would be needed); the web menubar's dropdown does not close
+  (the Window menu's Quit dispatches `window.close` on its OWN window; the Shell-side quit that
+  the primary's ✕ now reaches — `WindowManager::request_quit` — has no bridge verb of its own,
+  so a secondary cannot ask for it); the web menubar's dropdown does not close
   on focus-out and has no Alt-mnemonics; the About dialog is `aria-modal` without a focus trap (all
   three recorded by d3). No keymap wiring beyond what the menu needs (the e07c resolver seam is
   untouched); the accelerator column DISPLAYS `DEFAULT_KEYBINDINGS` strings, and only the macOS

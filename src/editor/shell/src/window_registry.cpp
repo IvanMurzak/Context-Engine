@@ -37,6 +37,8 @@ const char* to_string(WindowDestroyOutcome outcome)
         return "unknown-window";
     case WindowDestroyOutcome::primary_refused:
         return "primary-refused";
+    case WindowDestroyOutcome::app_quit:
+        return "app-quit";
     }
     return "unknown";
 }

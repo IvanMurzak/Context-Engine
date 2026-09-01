@@ -656,6 +656,46 @@ WindowDestroyResult WindowManager::destroy_window(WindowId id)
     return result;
 }
 
+WindowDestroyResult WindowManager::close_window(WindowId id)
+{
+    // An unknown id is answered FIRST, before the primary test, so a stale id can never quit the
+    // app: `find` is the same lookup destroy_window uses, and window 0 always resolves while it is
+    // live. (After the last window is gone the manager has nothing to close and says so.)
+    if (find(id) == nullptr)
+    {
+        WindowDestroyResult unknown;
+        unknown.outcome = WindowDestroyOutcome::unknown_window;
+        unknown.error =
+            "no live window carries id " + std::to_string(static_cast<unsigned long long>(id));
+        return unknown;
+    }
+    if (!is_primary(id))
+    {
+        return destroy_window(id);
+    }
+    request_quit();
+    WindowDestroyResult quit;
+    quit.outcome = WindowDestroyOutcome::app_quit;
+    quit.error.clear();
+    return quit;
+}
+
+void WindowManager::request_quit()
+{
+    quit_requested_ = true;
+    // ASK, never destroy: see the header. Closing a window here would free a session out from under
+    // the pump that is very likely running above this call (a `window.close` arrives INSIDE a
+    // browser pump, which runs inside `pump_once`'s loop over `windows_`) — the same re-entrancy
+    // `destroy_window` avoids by retiring rather than tearing down.
+    for (WindowEntry& entry : windows_)
+    {
+        if (entry.window != nullptr)
+        {
+            entry.window->backend().close();
+        }
+    }
+}
+
 WindowManager::WindowEntry* WindowManager::find(WindowId id)
 {
     for (WindowEntry& entry : windows_)

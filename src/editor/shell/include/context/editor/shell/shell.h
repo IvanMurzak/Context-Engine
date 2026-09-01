@@ -259,6 +259,30 @@ public:
     // closes it via `shutdown()`), and refuses an unknown id. Its session is retired, not freed.
     WindowDestroyResult destroy_window(WindowId id);
 
+    // The `window.close` POLICY, in the ONE place that owns both halves (design 03's window-close
+    // table): a SECONDARY window's ✕ destroys that window; the PRIMARY's ✕ is the app QUIT, because
+    // window 0 hosts the app menu and the welcome screen. "It closes with the app, not on its own"
+    // is only true if asking it to close actually closes the app — before this existed the primary's
+    // ✕ dispatched `window.close`, hit `destroy_window`'s primary refusal, and did NOTHING at all
+    // (the minimize/maximize buttons beside it worked, so the frame looked alive and the ✕ was dead).
+    //
+    // `destroy_window`'s refusal is UNCHANGED and deliberately so: it stays the honest answer for
+    // anyone asking to destroy window 0 as a window, which is what makes this the only path that
+    // can close it. An unknown id is `unknown_window` here too — a stale id must never quit the app.
+    [[nodiscard]] WindowDestroyResult close_window(WindowId id);
+
+    // Ask EVERY live window to close — the same ask the OS makes for Alt+F4, per backend (win32
+    // posts itself WM_CLOSE, X11 a self-addressed WM_DELETE_WINDOW, cocoa records `close_requested`,
+    // headless flips its alive flag). Nothing is destroyed HERE: each window dies on its own next
+    // pump and `pump_once` retires it through the one path that already exists, so the owner loop
+    // ends through its ordinary termination condition (`windows_` empty) and the whole teardown
+    // sequence — state flush, `shutdown()`, `CefShutdown` — runs unchanged. Idempotent: a second
+    // call simply re-asks whatever has not died yet.
+    void request_quit();
+    // Whether a quit has been asked for. Assertable state, not a diagnostic: a window created after
+    // this is a window nobody will see.
+    [[nodiscard]] bool quit_requested() const { return quit_requested_; }
+
     // The window carrying `id`, or nullptr. `window(kPrimaryWindowId)` is the primary.
     [[nodiscard]] EditorWindow* window(WindowId id);
     [[nodiscard]] std::vector<WindowId> window_ids() const;
@@ -362,6 +386,7 @@ private:
     WindowId next_id_ = 0;
     int pumps_ = 0;
     bool shut_down_ = false;
+    bool quit_requested_ = false;
 };
 
 } // namespace context::editor::shell

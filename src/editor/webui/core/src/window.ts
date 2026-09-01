@@ -132,7 +132,11 @@ export interface BootSeed {
     readonly seed: WindowSeed | null;
 }
 
-/** The outcome of a `window.close` (the source window closing itself after moving its panels away). */
+/**
+ * The outcome of a `window.close`. `closed` means the ask was ACCEPTED, and `outcome` says what
+ * was accepted: `destroyed` (a secondary window closing itself after moving its panels away) or
+ * `app-quit` (the primary's — the app is on its way out, so no reply after it is worth reading).
+ */
 export interface CloseResult {
     readonly closed: boolean;
     readonly outcome: string;
@@ -479,7 +483,11 @@ export class WindowClient {
         }
     }
 
-    /** Ask the Shell to close THIS window (refused for the primary, which the app shuts down). */
+    /**
+     * Ask the Shell to close THIS window. A SECONDARY window is destroyed; the PRIMARY window's
+     * close IS the app quit (`outcome: "app-quit"`, the Shell asks every window to close and the
+     * process ends), which is why the titlebar's ✕ and the Window menu's Quit both come here.
+     */
     async close(): Promise<CloseResult> {
         try {
             const result = await this.#bridge.call(WINDOW_CLOSE_METHOD);
