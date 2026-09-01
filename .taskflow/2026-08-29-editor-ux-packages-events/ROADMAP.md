@@ -122,6 +122,7 @@ Gates specific to this set — each is a way a task could ship green and wrong:
 | 2026-08-29 | D12 added mid-planning after the owner questioned whether the framework itself was the problem. Answer recorded in `README.md`: CEF OSR's contract is adopted at 5 of 17 `CefRenderHandler` members; the defect is an incomplete adoption, not a wrong framework, and every alternative framework costs more or loses the single-window scene compositing already built. `a0` is the task that response earned |
 | 2026-08-29 | Verified during planning that `assetdb` has **no delete operation** and the registry carries only `asset move` / `asset rename` — so `e2`'s delete is a new engine operation, not wiring |
 | 2026-08-29 | **`taskflow-review` complete.** Every `file:line` in the set re-read against the tree; the OSR claims re-derived from the pinned SDK headers; the dockview DnD counts re-measured against the SHA-pinned bundle (12/1/3/5/11/3 — exact, and the artifact's SHA matches `tools/dockview-toolchain.json`). Nine findings confirmed and corrected; one product fork returned to the owner. **P0:** `selection-get`'s reply was specified as a replacement while `08 §4` claimed additivity → owner took the additive form, `D1` **REVISED**. **P1 ×5:** the compositor holds no `DpiScale` (`a2`/`e3` guidance inverted); `inspector_feed` does not consume `selection-changed` (`c1` seam wrong); the write-notice kinds are `drop`/`refusal`/`abandoned`, not `bad`/`wait` (`e2`); an un-migrated v1 session file is silently accepted, not quarantined (`c1`'s stated test was vacuous); `GetRootScreenRect` is DIP on every platform while `GetScreenPoint` splits per platform (`a1`). **P1 dependency:** `b1` now needs `a0` `a1` `a2`. **P2 ×3:** README root-cause arithmetic; `a1`'s test home is `editor-shell-test_dpi` and its sizing understated the placement plumbing; Tilemap Painter's heading is label-only. Execution isolation recorded above |
+| 2026-09-01 | **Round 1 closed out.** Both managers reported `completed` with clean teardowns. `a0`'s run independently re-read the pinned CEF distribution and **confirmed the audit table over the source**: `cef_shell.cpp:1249-1250`'s comment claiming `WasResized` re-reads `GetScreenInfo` is wrong against the SDK — live DPI refresh needs `NotifyScreenInfoChanged`, which nothing calls. The table's `NotifyScreenInfoChanged` gap row is therefore right, and the stale-comment fix is a follow-up below. Cost note for future rounds: `a0` lost 3 step-attempts to one failure family (an executor ending its turn with a child still running); no work was lost, and the improver has now unified that rule across the three unfrozen steps |
 | 2026-09-01 | **Round 1 verified and merged; round 2 dispatched.** `a0` → PR #500 (`b563724`) and `c1` → PR #499 (`58419cc`), each **42/42 checks green**, verified from GitHub not from the worker reports. `a0` DoD re-checked independently: exactly **17** `CefRenderHandler` rows, the pinned CEF `149.0.6+g0d0eeb6+chromium-149.0.7827.201` named from `tools/cef-prebuilt.json`, docs-only diff. `c1` DoD re-checked: the both-directions `file`/`entity` filter tests, `selection-get` carrying **both** `ids` and `selections` (D1 REVISED), the **falsifiable** v1 migration half plus the v99 quarantine sibling, unknown-subject `usage.invalid`, `protocolMajor` still 1 and no `editor.ui` topic added. A `/code-review` finding alleging the audit table contradicted `cef_shell.cpp:1250-1251` was checked and found **stale** — `docs/shell.md:1219` already names that contradiction and scopes it out. Round 2: `a1` (run `01a05cf9-3f9f`), `c2` (run `01a05cf9-40d9`) |
 | 2026-09-01 | **`taskflow-execute` round 1 dispatched.** Options resolved: `--scope=all` `--parallel=4` `--review=off` `--merge=on-green` `--engine=auto`→**pipeline** (`implement-task`; the Execution table prescribes it, `pipeline.yml` now declares `runner: manager`, and the prior set landed 10/10 through it) `--submodules=off` (this repo has none) `--on-fail=continue`. Ready work — not the `--parallel` ceiling — bounds the round: groups are conflict domains run in ascending `sequence`, so exactly one task per group is eligible and only `A`/`C` have their earliest sequence unblocked. Dispatched `a0` (run `01a05c81-aed8-70bb-ac8f-e29216284cfc`) and `c1` (run `01a05c81-b1d9-702e-ba37-def67f285752`). `B` `D` `E` `F` are dependency-blocked; `a1`–`a4`, `c2`, `c3` wait on their group's earlier sequence |
 | 2026-08-29 | **`taskflow-tasks` complete.** Seventeen immutable specs written under `tasks/` (one per board row, filenames exactly as the board links them) plus `tasks/README.md`. Sizing converted to numeric imp/cx 1–10 with model tiers (`mid`/`top`; the reviewed board's sonnet→mid, opus→top preserved); `d2`/`e2`/`f1` marked `security_critical`. One owner gate added: `e2` (destructive delete) needs explicit owner approval on the PR before merge. Dependency edges carried into `depends_on` verbatim, including the review's `b1 → a0 a1 a2`. Groups = conflict domains run by ascending sequence (E's four tasks share the four panel-anchor files; C's serialization is the conservative default — the wave note's "`c1`, `c2` free" stands where the executor judges them conflict-safe). **Status: TASKED — ready for `taskflow-execute`.** |
@@ -138,3 +139,38 @@ Registered, deliberately not taken here (see `02` §G):
 - **A GPU picking path**, differentially verified against `e4`'s CPU reference.
 - **Alt-mnemonics** in the web menubar — already deferred and recorded in `menu.ts`.
 - **The chrome visual-regression harness** — `docs/shell.md` hands that to `e16`.
+
+## Raised during execution (2026-09-01)
+
+Found by the runs themselves, outside every task's scope. Specs are immutable, so these are recorded
+here rather than edited in.
+
+**Carry-forward correction for `b1`.** `a0`'s spec cites `cef_browser.h` drag-family line ranges that
+are **off by 8–9 lines** against the pinned distribution (`:889` → `:897`, `:930` → `:939`). It did not
+propagate into the delivered table — `docs/shell.md` § 16 carries the verified numbers. `b1` is the
+drag task and its spec draws on the same source, so its citations must be re-derived from the pinned
+headers, never trusted. The scheduler passes this to `b1`'s worker at dispatch.
+
+**Product defects surfaced by `c1`, deliberately not fixed there.**
+
+- `read_selection_subject` gates on `params.contains("subject")`, so `{"subject": null}` is refused
+  `usage.invalid` while the sibling `mode` param on the same verb accepts it. No test pins either
+  behaviour, and `subject` is now advertised to every generated client.
+- The D3 focus rule is implemented **twice across the process boundary**: the daemon owns it, but the
+  `editor.select` reply omits the resulting focus, so the Shell re-derives it. It breaks the moment any
+  Shell writer passes a non-default `subject` — i.e. **as soon as `c2`'s open vocabulary lands** — with
+  nothing reporting it. The fix is ~3 lines and wire-additive (no schema regeneration).
+- `cef_shell.cpp:1249-1250`'s resize comment is wrong against the pinned SDK (above). One-line fix;
+  `a1` and `a2` both work in that file.
+
+**Pipeline defects at a frozen surface — need the owner, the improver cannot reach them.** Raised
+independently by both round-1 runs; refused 4× for being frozen.
+
+- `land.md` carries **no turn-discipline rule** while its three unfrozen siblings now share one, and it
+  re-runs the same local gate after its rebase — the exact shape that cost `a0` three step-attempts.
+- `land.md` step 8 fast-forwards the **shared checkout** (`git -C "$PROJECT_ROOT" pull --ff-only`),
+  which exits 128 under concurrent runs and contradicts worktree isolation. Best-effort and not in the
+  step's Success Criteria, so it can simply be dropped. The scheduler now tells every manager to skip it.
+- There is **no `worktree-finalize` hook**, so every run's self-improver edits die with its slot. Four
+  captures are held at `.agent-scratch/taskflow-scheduler-ce/improver-edits/`; they overlap on the same
+  three files and must be **grafted, not replayed**.
