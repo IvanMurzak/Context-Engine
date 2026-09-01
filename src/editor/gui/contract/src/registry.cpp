@@ -8,6 +8,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::gui::contract
@@ -66,7 +67,31 @@ bool declares_capability(const Contribution& c, const char* token)
 // the closed nine-member `editor.ui` topic set lives). A package may declare nothing inside it.
 constexpr const char* kReservedNamespace = "editor";
 
-bool is_name_segment(const std::string& segment)
+// Call `pred` on every `delim`-separated segment of `text`; false on the first that fails. Written
+// ONCE and shared by the two walks below (the dotted name grammar and the slashed `path`) because
+// they differ only in delimiter and predicate — and because the `npos ? npos : next - start` length
+// is the one genuinely error-prone line in either, which a second copy would eventually get wrong in
+// only one place. A leading, trailing or doubled delimiter all yield an EMPTY segment, so neither
+// caller needs a special case for those three.
+template <typename Pred>
+bool all_segments(std::string_view text, char delim, Pred pred)
+{
+    for (std::size_t start = 0;;)
+    {
+        const std::size_t next = text.find(delim, start);
+        if (!pred(text.substr(start, next == std::string_view::npos ? next : next - start)))
+        {
+            return false;
+        }
+        if (next == std::string_view::npos)
+        {
+            return true;
+        }
+        start = next + 1;
+    }
+}
+
+bool is_name_segment(std::string_view segment)
 {
     if (segment.empty())
     {
@@ -90,40 +115,21 @@ bool is_name_segment(const std::string& segment)
 
 // Is `name` a well-formed dotted name? A leading dot, a trailing dot and a doubled dot all produce an
 // EMPTY segment, which `is_name_segment` refuses — so the three do not need their own cases.
-bool is_segmented_name(const std::string& name)
+bool is_segmented_name(std::string_view name)
 {
-    if (name.empty())
-    {
-        return false;
-    }
-    std::size_t start = 0;
-    while (true)
-    {
-        const std::size_t dot = name.find('.', start);
-        const std::string segment =
-            name.substr(start, dot == std::string::npos ? std::string::npos : dot - start);
-        if (!is_name_segment(segment))
-        {
-            return false;
-        }
-        if (dot == std::string::npos)
-        {
-            return true;
-        }
-        start = dot + 1;
-    }
+    return !name.empty() && all_segments(name, '.', is_name_segment);
 }
 
 // Is `name` a real SUB-name of `owner` — `<owner>.<something>`, never the bare owner id? Both halves
 // matter, exactly as validatePackageTopic states: the bare package id is a namespace, not a member of
 // it, and accepting it would let one package's topic and its id be the same string.
-bool is_namespaced_under(const std::string& name, const std::string& owner)
+bool is_namespaced_under(std::string_view name, std::string_view owner)
 {
     return name.size() > owner.size() + 1 && name.compare(0, owner.size(), owner) == 0 &&
            name[owner.size()] == '.';
 }
 
-bool is_reserved_name(const std::string& name)
+bool is_reserved_name(std::string_view name)
 {
     return name == kReservedNamespace || is_namespaced_under(name, kReservedNamespace);
 }
@@ -133,7 +139,6 @@ bool is_reserved_name(const std::string& name)
 // `max` on a mode that cannot use it is a statement the registry would otherwise silently discard.
 std::string instances_defect(const InstanceSpec& instances)
 {
-    const std::string mode = instance_mode_token(instances.mode);
     if (instances.mode == InstanceMode::limited)
     {
         if (instances.max <= 0)
@@ -147,7 +152,7 @@ std::string instances_defect(const InstanceSpec& instances)
     if (instances.max != 0)
     {
         return "instances.max is " + std::to_string(instances.max) + " but instances.mode is \"" +
-               mode + "\" — max is meaningful only for \"limited\"";
+               instance_mode_token(instances.mode) + "\" — max is meaningful only for \"limited\"";
     }
     return {};
 }
@@ -167,25 +172,15 @@ std::string path_defect(const std::string& path)
                "\" has a leading or trailing \"/\" (it is display text, not a filesystem path; "
                "empty means top level)";
     }
-    std::size_t start = 0;
-    while (true)
+    // A segment of only blanks is an EMPTY LABEL, which renders as a nameless menu row — the same
+    // defect as `//` with one more space in it, so it is refused by the same rule rather than by a
+    // separate one nobody would think to look for.
+    if (!all_segments(path, '/', [](std::string_view segment)
+                      { return segment.find_first_not_of(" \t") != std::string_view::npos; }))
     {
-        const std::size_t slash = path.find('/', start);
-        const std::string segment =
-            path.substr(start, slash == std::string::npos ? std::string::npos : slash - start);
-        // A segment of only blanks is an EMPTY LABEL, which renders as a nameless menu row — the same
-        // defect as `//` with one more space in it, so it is refused by the same rule rather than by
-        // a separate one nobody would think to look for.
-        if (segment.find_first_not_of(" \t") == std::string::npos)
-        {
-            return "path \"" + path + "\" has an empty segment";
-        }
-        if (slash == std::string::npos)
-        {
-            return {};
-        }
-        start = slash + 1;
+        return "path \"" + path + "\" has an empty segment";
     }
+    return {};
 }
 
 // The v3 namespacing invariants for one declared-name list (`selection.subjects`, `events.publishes`,
@@ -310,21 +305,24 @@ std::string manifest_defect(const Contribution& c)
     {
         return defect;
     }
-    if (const std::string defect =
-            names_defect(c, c.selection.subjects, "selection.subjects", true);
-        !defect.empty())
+    // The three declared-name lists, as a table rather than three near-identical blocks: `owned` is
+    // the D4 asymmetry, and in a table a reader SEES the true/true/false rather than having to
+    // diff three paragraphs to find it. A fourth list is a row, not another paste.
+    struct NameList
     {
-        return defect;
-    }
-    if (const std::string defect = names_defect(c, c.events.publishes, "events.publishes", true);
-        !defect.empty())
+        const std::vector<std::string>& names;
+        const char* member;
+        bool owned;
+    };
+    for (const NameList& list : {NameList{c.selection.subjects, "selection.subjects", true},
+                                 NameList{c.events.publishes, "events.publishes", true},
+                                 NameList{c.events.subscribes, "events.subscribes", false}})
     {
-        return defect;
-    }
-    if (const std::string defect = names_defect(c, c.events.subscribes, "events.subscribes", false);
-        !defect.empty())
-    {
-        return defect;
+        if (const std::string defect = names_defect(c, list.names, list.member, list.owned);
+            !defect.empty())
+        {
+            return defect;
+        }
     }
     for (std::size_t i = 0; i < c.commands.size(); ++i)
     {

@@ -112,6 +112,7 @@ namespace
         bad_entry = "<not an array>";
         return false;
     }
+    out.reserve(out.size() + value.size());
     for (std::size_t i = 0; i < value.size(); ++i)
     {
         const Json& entry = value.at(i);
@@ -185,6 +186,25 @@ namespace
     // An unrecognised token becomes `panel` — the kind with no `target` semantics — rather than being
     // trusted into a target-keyed lookup.
     return gc::ContributionKind::panel;
+}
+
+// The v3 instance mode, DERIVED FROM THE FORWARD TABLE exactly as `read_kind` and `read_dock_zone`
+// are — but REFUSING on a miss where those two fall back, which is the only difference and the whole
+// point of it: an unrecognised kind or zone costs a panel its `target` semantics or its first
+// position, while an unrecognised instance mode would decide HOW MANY LIVE COPIES of it may exist.
+// It lives here, with the file's other named inverses, rather than inline in the parse loop, so the
+// "DERIVED FROM THE FORWARD TABLE" pattern stays greppable as a family of three.
+[[nodiscard]] bool read_instance_mode(const std::string& token, gc::InstanceMode& out)
+{
+    for (const gc::InstanceMode mode : gc::kInstanceModes)
+    {
+        if (token == gc::instance_mode_token(mode))
+        {
+            out = mode;
+            return true;
+        }
+    }
+    return false;
 }
 
 // Is `id` namespaced to `package_id` — either exactly the package id, or `<package-id>.<something>`?
@@ -425,23 +445,13 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
             // default is `singleton`, the restrictive answer, so a manifest stating nothing gets the
             // one mode that cannot surprise anybody.
             const std::string mode_token = read_string(instances, "mode");
-            const gc::InstanceMode* matched = nullptr;
-            for (const gc::InstanceMode& mode : gc::kInstanceModes)
-            {
-                if (mode_token == gc::instance_mode_token(mode))
-                {
-                    matched = &mode;
-                    break;
-                }
-            }
-            if (matched == nullptr)
+            if (!read_instance_mode(mode_token, contribution.instances.mode))
             {
                 error_code = kErrManifestInvalid;
                 message = at + " declares instances.mode '" + mode_token +
                           "'; the vocabulary is closed (singleton | limited | unlimited)";
                 return false;
             }
-            contribution.instances.mode = *matched;
         }
         // Bounded to the i32 the field casts to, for the reason `minWidth` above states — an
         // out-of-range value reads as "unstated" (0), which the registry then refuses on `limited`
@@ -450,25 +460,30 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
             read_int(instances, "max", -2147483648LL, 2147483647LL));
         contribution.path = read_string(source, "path");
 
+        // One refusal shape for the three v3 name lists. Each block used to spell its member name
+        // TWICE — once as the JSON key, once inside the diagnostic — which is a live copy-paste
+        // hazard: reading `publishes` while reporting `events.subscribes` would pass every test
+        // here, since these assert the error CODE and a message fragment, not the pairing. Pairing
+        // them on one line each is what makes a mismatch visible.
         std::string bad_entry;
+        const auto read_names = [&](const Json& src, const char* key, const char* member,
+                                    std::vector<std::string>& out)
+        {
+            if (read_string_array(src, key, out, bad_entry))
+            {
+                return true;
+            }
+            error_code = kErrManifestInvalid;
+            message = at + "'s `" + member + "` is malformed: " + bad_entry;
+            return false;
+        };
         const Json& selection = read_object(source, "selection");
-        if (!read_string_array(selection, "subjects", contribution.selection.subjects, bad_entry))
-        {
-            error_code = kErrManifestInvalid;
-            message = at + "'s `selection.subjects` is malformed: " + bad_entry;
-            return false;
-        }
         const Json& events = read_object(source, "events");
-        if (!read_string_array(events, "publishes", contribution.events.publishes, bad_entry))
+        if (!read_names(selection, "subjects", "selection.subjects",
+                        contribution.selection.subjects) ||
+            !read_names(events, "publishes", "events.publishes", contribution.events.publishes) ||
+            !read_names(events, "subscribes", "events.subscribes", contribution.events.subscribes))
         {
-            error_code = kErrManifestInvalid;
-            message = at + "'s `events.publishes` is malformed: " + bad_entry;
-            return false;
-        }
-        if (!read_string_array(events, "subscribes", contribution.events.subscribes, bad_entry))
-        {
-            error_code = kErrManifestInvalid;
-            message = at + "'s `events.subscribes` is malformed: " + bad_entry;
             return false;
         }
 

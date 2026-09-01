@@ -185,8 +185,15 @@ Json extension_manifest_json(const std::string& package_id)
     // a second copy of a hello panel says nothing a first does not — and `max` is deliberately ABSENT:
     // the registry refuses a `max` stated on any mode but `limited`, so writing 0 "for completeness"
     // would teach a shape that gets a real package rejected.
+    //
+    // The token itself is NAMED, never copied — the same discipline that retired mirror 2
+    // (scaffold.h), and free here because retiring it already put `context_gui_contract` on the CLI's
+    // link closure. `instance_mode_token` is the ONE spelling of this vocabulary, so a literal here
+    // would have re-created the second hand-written copy that retirement was for.
     Json instances = Json::object();
-    instances.set("mode", Json("singleton"));
+    instances.set("mode",
+                  Json(editor::gui::contract::instance_mode_token(
+                      editor::gui::contract::InstanceMode::singleton)));
 
     Json content = Json::object();
     // `iframe` is the ONLY content type a package contribution may declare — `uitree` and `local`
