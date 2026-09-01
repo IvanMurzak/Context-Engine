@@ -10,7 +10,10 @@
 //   * `shutdown` breaks the serve loop cleanly (the thread joins without a kill);
 //   * the R-CLI-017 large-result path END-TO-END: an oversized response is spooled + replaced by a
 //     `largeResult` handle envelope, and resource.read range-fetches reassemble the EXACT original
-//     result over the same channel (plus the unknown/malformed-handle failure paths).
+//     result over the same channel (plus the unknown/malformed-handle failure paths);
+//   * (M9 e2) the editor FILE-WRITE verbs END-TO-END on the REAL filesystem: rename/move, the
+//     occupied-destination refusal, DELETE + the byte-identical restore round trip, the
+//     referenced-asset refusal AND its producible sibling, and the jail/scope refusals.
 
 #include "context/editor/editorkernel/kernel_server.h"
 
@@ -455,6 +458,220 @@ int main()
                 }
             }
             CHECK(!saw_dot_editor);
+        }
+
+        // ---- editor file-move / file-delete / file-restore (M9 e2, D10 WRITE half) ----------------
+        //
+        // END TO END over the SAME wire, against the SAME real on-disk project the read above just
+        // listed — which is what makes this a proof rather than a mock agreeing with itself. Every
+        // refusal here is paired with the operation it performs when the refusing condition is gone.
+        {
+            const auto write_file = [&](const std::string& name, const std::string& text)
+            {
+                std::error_code mkdir_ec;
+                fs::create_directories((project / name).parent_path(), mkdir_ec);
+                std::ofstream out(project / name, std::ios::binary);
+                out << text;
+            };
+            const auto read_file = [&](const std::string& name)
+            {
+                std::ifstream in(project / name, std::ios::binary);
+                std::ostringstream buffer;
+                buffer << in.rdbuf();
+                return buffer.str();
+            };
+            const auto exists = [&](const std::string& name)
+            { return fs::exists(project / name); };
+
+            // --- rename/move: the sidecar travels, identity survives, the source is gone ----------
+            {
+                Json params = Json::object();
+                params.set("from", Json(std::string("textures/wall.tex.json")));
+                params.set("to", Json(std::string("textures/brick.tex.json")));
+                const std::optional<std::string> r =
+                    rw.request(rpc(20, "editor.file-move", std::move(params)));
+                CHECK(r.has_value());
+                const Json resp = Json::parse(*r);
+                CHECK(resp.contains("result"));
+                CHECK(resp.at("result").at("data").at("guid").as_string() ==
+                      "00000000000000000000000000000fff");
+                CHECK(exists("textures/brick.tex.json"));
+                CHECK(exists("textures/brick.tex.json.meta.json"));
+                CHECK(!exists("textures/wall.tex.json"));
+                CHECK(!exists("textures/wall.tex.json.meta.json"));
+            }
+
+            // --- an occupied destination is REFUSED, never overwritten ---------------------------
+            {
+                // DIFFERENT bytes from the source, deliberately: move_asset documents a KNOWN
+                // AMBIGUITY where a meta-less destination holding byte-IDENTICAL content is treated
+                // as its own interrupted move and completes. A fixture that tripped that arm would
+                // "prove" the refusal by never reaching it.
+                write_file("textures/other.tex.json",
+                           R"({"$schema": "ctx:texture", "notes": "a different asset"})");
+                Json params = Json::object();
+                params.set("from", Json(std::string("textures/brick.tex.json")));
+                params.set("to", Json(std::string("textures/other.tex.json")));
+                const std::optional<std::string> r =
+                    rw.request(rpc(21, "editor.file-move", std::move(params)));
+                CHECK(r.has_value());
+                const Json resp = Json::parse(*r);
+                // The daemon's OWN catalog code crosses the wire — this is exactly what the Shell's
+                // gateway passes through to the human, so a generic failure here would make every
+                // refusal unactionable.
+                CHECK(resp.at("error").at("data").at("code").as_string() ==
+                      "asset.move_destination_exists");
+                CHECK(exists("textures/brick.tex.json"));           // untouched
+                CHECK(read_file("textures/other.tex.json") ==
+                      R"({"$schema": "ctx:texture", "notes": "a different asset"})");
+                std::error_code rm_ec;
+                fs::remove(project / "textures/other.tex.json", rm_ec);
+            }
+
+            // --- DELETE + the byte-identical RESTORE round trip (the DoD's undo proof) -----------
+            {
+                const std::string asset_bytes = read_file("textures/brick.tex.json");
+                const std::string meta_bytes = read_file("textures/brick.tex.json.meta.json");
+                CHECK(!asset_bytes.empty());
+                CHECK(!meta_bytes.empty());
+
+                Json del = Json::object();
+                del.set("path", Json(std::string("textures/brick.tex.json")));
+                const std::optional<std::string> d =
+                    rw.request(rpc(22, "editor.file-delete", std::move(del)));
+                CHECK(d.has_value());
+                const Json d_resp = Json::parse(*d);
+                CHECK(d_resp.contains("result"));
+                const Json& d_data = d_resp.at("result").at("data");
+                CHECK(d_data.at("removedAsset").as_bool());
+                CHECK(d_data.at("removedMeta").as_bool());
+                const std::string token = d_data.at("restoreToken").as_string();
+                CHECK(!token.empty());
+                // File AND meta gone from the project...
+                CHECK(!exists("textures/brick.tex.json"));
+                CHECK(!exists("textures/brick.tex.json.meta.json"));
+                // ...and quarantined, under the dot-tree that keeps them out of the asset domain.
+                CHECK(fs::exists(project / ".editor" / "trash" / token / "entry.json"));
+
+                Json restore = Json::object();
+                restore.set("restoreToken", Json(token));
+                const std::optional<std::string> rr =
+                    rw.request(rpc(23, "editor.file-restore", std::move(restore)));
+                CHECK(rr.has_value());
+                const Json rr_resp = Json::parse(*rr);
+                CHECK(rr_resp.contains("result"));
+                CHECK(rr_resp.at("result").at("data").at("path").as_string() ==
+                      "textures/brick.tex.json");
+                CHECK(rr_resp.at("result").at("data").at("restoredMeta").as_bool());
+                // BYTE-IDENTICAL, both halves — compared as bytes, so a restore that re-serialized
+                // the sidecar (losing an unknown member, or its formatting) fails here.
+                CHECK(read_file("textures/brick.tex.json") == asset_bytes);
+                CHECK(read_file("textures/brick.tex.json.meta.json") == meta_bytes);
+                // The quarantine entry is consumed by a landed restore.
+                CHECK(!fs::exists(project / ".editor" / "trash" / token / "entry.json"));
+
+                // A second restore of a consumed token is refused HONESTLY — never a silent "ok"
+                // that would tell the human a file came back when nothing happened.
+                Json again = Json::object();
+                again.set("restoreToken", Json(token));
+                const std::optional<std::string> a2 =
+                    rw.request(rpc(24, "editor.file-restore", std::move(again)));
+                CHECK(a2.has_value());
+                CHECK(Json::parse(*a2).at("error").at("data").at("code").as_string() ==
+                      "asset.restore_missing");
+            }
+
+            // --- a REFERENCED asset refuses, and the SAME asset deletes once unreferenced --------
+            {
+                // A REAL engine kind with a REAL x-ctx-ref field: `ctx:tilemap`'s
+                // `tileSets[].atlas` (kind_schema.cpp). The choice is load-bearing — the referrer
+                // sweep is schema-driven, so a document whose reference field the engine schema set
+                // does not declare is INVISIBLE to it, and a fixture built from an invented field
+                // would exercise the "cannot see it" branch while claiming to test the refusal.
+                const std::string scene_before = read_file("root.scene.json");
+                write_file("referrer.tilemap.json",
+                           std::string(R"({"$schema": "ctx:tilemap", "version": 1, )") +
+                               R"("tileSize": [1.0, 1.0], "tileSets": [{"id": "aaaaaaaaaaaaaaa9", )" +
+                               R"("atlas": {"$ref": "00000000000000000000000000000fff"}, )" +
+                               R"("firstTileId": 0}], "layers": []})");
+
+                Json del = Json::object();
+                del.set("path", Json(std::string("textures/brick.tex.json")));
+                const std::optional<std::string> r =
+                    rw.request(rpc(25, "editor.file-delete", std::move(del)));
+                CHECK(r.has_value());
+                const Json resp = Json::parse(*r);
+                CHECK(resp.contains("error"));
+                CHECK(resp.at("error").at("data").at("code").as_string() ==
+                      "asset.delete_referenced");
+                // A refusal wrote NOTHING — the destructive half of "refuse rather than dangle".
+                CHECK(exists("textures/brick.tex.json"));
+                CHECK(exists("textures/brick.tex.json.meta.json"));
+                // The diagnostic NAMES the referring file, which is the whole reason to refuse
+                // rather than dangle: an unactionable refusal is barely better than a silent one.
+                bool named = false;
+                const Json& rows = resp.at("error").at("data").at("data").at("diagnostics");
+                for (std::size_t i = 0; i < rows.size(); ++i)
+                {
+                    if (rows.at(i).at("otherPath").as_string() == "referrer.tilemap.json")
+                    {
+                        named = true;
+                    }
+                }
+                CHECK(named);
+
+                // THE PRODUCIBLE SIBLING: drop the reference and the SAME delete goes through. This
+                // is what proves the refusal was caused by the REFERENCE and not by the fixture.
+                std::error_code rm_ec;
+                fs::remove(project / "referrer.tilemap.json", rm_ec);
+                Json retry = Json::object();
+                retry.set("path", Json(std::string("textures/brick.tex.json")));
+                const std::optional<std::string> r2 =
+                    rw.request(rpc(26, "editor.file-delete", std::move(retry)));
+                CHECK(r2.has_value());
+                CHECK(Json::parse(*r2).contains("result"));
+                CHECK(!exists("textures/brick.tex.json"));
+                CHECK(read_file("root.scene.json") == scene_before); // no collateral rewrite
+            }
+
+            // --- the boundary refusals: a jail escape and a malformed request ---------------------
+            {
+                Json escaping = Json::object();
+                escaping.set("path",
+                             Json(std::string("../") + project.filename().string() + "/README.md"));
+                const std::optional<std::string> j =
+                    rw.request(rpc(27, "editor.file-delete", std::move(escaping)));
+                CHECK(j.has_value());
+                CHECK(Json::parse(*j).at("error").at("data").at("code").as_string() ==
+                      "path.jail_violation");
+                CHECK(exists("README.md")); // the escaping form deleted nothing
+
+                Json missing = Json::object();
+                const std::optional<std::string> m =
+                    rw.request(rpc(28, "editor.file-delete", std::move(missing)));
+                CHECK(m.has_value());
+                CHECK(Json::parse(*m).at("error").at("data").at("code").as_string() ==
+                      "usage.missing_argument");
+
+                // A sidecar is not an asset: refused by NAME rather than silently stranding the
+                // identity of a live file.
+                Json sidecar = Json::object();
+                sidecar.set("path", Json(std::string("README.md.meta.json")));
+                const std::optional<std::string> sc =
+                    rw.request(rpc(29, "editor.file-delete", std::move(sidecar)));
+                CHECK(sc.has_value());
+                CHECK(Json::parse(*sc).at("error").at("data").at("code").as_string() ==
+                      "asset.delete_invalid");
+
+                // THE PRODUCIBLE SIBLING for all three: the same verb, on a legitimate path, works.
+                Json ok = Json::object();
+                ok.set("path", Json(std::string("README.md")));
+                const std::optional<std::string> o =
+                    rw.request(rpc(30, "editor.file-delete", std::move(ok)));
+                CHECK(o.has_value());
+                CHECK(Json::parse(*o).contains("result"));
+                CHECK(!exists("README.md"));
+            }
         }
 
         // shutdown — breaks the serve loop (the thread joins below without a kill)

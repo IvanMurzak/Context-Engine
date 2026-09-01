@@ -976,6 +976,84 @@ Registry::Registry()
         "(rename/move/delete) is a separate verb family.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // --- M9 e2 (editor-UX D10 WRITE half): the Files panel's authoring surface ------------------
+    //
+    // WHY THESE LIVE IN THE `editor` NAMESPACE RATHER THAN EXTENDING `asset move`/`asset rename`.
+    // The registry already carries that exact split once, and this follows it verbatim: `set` is the
+    // STABLE, one-shot CLI grammar for a composed override write, and `edit` is the OPERATIONAL
+    // daemon verb that actually serves it (scope.cpp says so in those words). `asset move` /
+    // `asset rename` are likewise the stable one-shot grammar for the same engine operation these
+    // verbs drive — still reserved, still untouched here — and reclassifying a STABLE verb as
+    // operational would change its published stability under protocolMajor 1 for no gain. So the
+    // capability lands as new operational verbs beside `editor files`, and the ONE engine operation
+    // (assetdb::AssetDatabase) stays the single implementation both grammars name.
+    //
+    // Every one of them is `file_write`-scoped (bridge/src/scope.cpp + the redteam A5 scope table):
+    // they REWRITE authored files, and a read/query token must be refused before the verb even
+    // resolves. Additive under protocolMajor 1 — new verbs at this anchor, nothing reordered.
+    verbs_.push_back(make_verb(
+        "", "editor", "file-move",
+        "Move or RENAME a project asset, carrying its `<asset>.meta.json` sidecar and preserving its "
+        "GUID identity (L-36 / R-FILE-004): destination file, destination meta, then source removal "
+        "— idempotent and re-runnable under partial apply, and REFUSED rather than overwriting an "
+        "occupied destination (asset.move_destination_exists). Rename is the same operation with a "
+        "destination in the same directory; referencing files are never rewritten (path hints heal "
+        "lazily on tool save, L-34). Served by a live daemon; the Files panel's rename/move authors "
+        "through exactly this.",
+        /*params=*/
+        {{"from", "path", true, "Project-relative source asset path."},
+         {"to", "path", true, "Project-relative destination asset path."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    // The three delete decisions this verb TAKES are recorded here, in the contract, because the
+    // description is what a client (human or agent) reads before invoking a destructive operation:
+    //
+    //   1. REMOVAL ORDER — quarantine copy first, then the asset file, then the identity-bearing
+    //      sidecar LAST. An interrupted delete therefore leaves an ORPHANED SIDECAR, which is
+    //      already a state the engine recognises (scan()'s asset.meta_orphaned, heal_moves()'s
+    //      interrupted-move residue, `context validate --fix`) and which a re-run of the delete
+    //      COMPLETES. The reverse order would leave a meta-LESS asset that the next ensure_metas()
+    //      pass would silently re-key with a fresh GUID — resurrecting it under a new identity.
+    //   2. REFERENCES — refused, never dangled, wherever they can be seen: a one-shot sweep of the
+    //      project's schema-bound documents refuses with asset.delete_referenced naming the
+    //      referring file and pointer. What it cannot see (a document bound to no registered kind
+    //      schema, a non-JSON payload) leaves a dangling reference that the existing
+    //      asset.ref_dangling finding surfaces on the next `context validate` — stated here rather
+    //      than implied.
+    //   3. UNDO RESTORE — quarantine-aside, not a journaled payload: the bytes move to the
+    //      gitignored `.editor/trash/<token>/` and `editor file-restore` moves them back, so the
+    //      restore is byte-identical by construction and binary-safe (no JSON encoding of asset
+    //      bytes, no size cap).
+    verbs_.push_back(make_verb(
+        "", "editor", "file-delete",
+        "DELETE a project asset and its `<asset>.meta.json` sidecar (M9 D10 write half). Destructive "
+        "and reversible: the bytes are quarantined under the gitignored `.editor/trash/<token>/` and "
+        "the reply carries the `restoreToken` that `editor file-restore` brings them back through, "
+        "byte-identically. Removal order is quarantine, asset file, then sidecar (R-FILE-004), so an "
+        "interrupted delete leaves the already-recognised orphaned-sidecar residue and re-running "
+        "COMPLETES it; a re-run against the converged state is a reported no-op, never an error. "
+        "REFUSES with asset.delete_referenced, naming the referring file and pointer, when a "
+        "schema-bound document still references the asset — what that sweep cannot see (unbound "
+        "kinds, non-JSON payloads) is left to the existing asset.ref_dangling finding. Served by a "
+        "live daemon; requires the file_write scope.",
+        /*params=*/
+        {{"path", "path", true, "Project-relative asset path to delete."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "file-restore",
+        "Restore a quarantined asset by the `restoreToken` an `editor file-delete` returned (M9 D10 "
+        "write half) — the inverse operation the session undo journal replays through. Moves the "
+        "SAME bytes back to the path the quarantine entry records, sidecar included, so the restore "
+        "is byte-identical by construction. REFUSES rather than overwriting when a different file "
+        "now occupies that path (asset.restore_destination_exists), and reports asset.restore_missing "
+        "when nothing is filed under the token. Served by a live daemon; requires the file_write "
+        "scope.",
+        /*params=*/
+        {{"restoreToken", "string", true,
+          "The opaque restore handle `editor file-delete` returned for this deletion."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
     // --- M9 e08a: the DAEMON SESSION-STATE surface (D7 tier 1, design 05 §4) ---------------------
     // The semantic human state — selection, cameras, play — promoted out of the GUI panels' private
     // members into the daemon, so every client (a second window, the CLI, a scripted agent) sees and

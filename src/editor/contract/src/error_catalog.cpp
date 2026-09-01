@@ -219,6 +219,32 @@ const std::vector<ErrorCode>& catalog()
          "The move/rename request is malformed (a sidecar, temp-residue, or dot-tree path, or an "
          "empty path).",
          false, kExitUsage, "R-FILE-004"},
+        // --- M9 e2 (D10 write half): the delete/restore engine operation ------------------------
+        // A destructive operation earns its own vocabulary rather than borrowing move's: "the
+        // destination is occupied" and "a document still references this" are different facts with
+        // different remedies, and a human reading a refusal on a delete must not be told about a
+        // move they did not ask for. Additive under protocolMajor 1.
+        {"asset.delete_invalid",
+         "The delete request is malformed (a sidecar, temp-residue, or dot-tree path, or an empty "
+         "path); a sidecar is deleted with its asset, never on its own.",
+         false, kExitUsage, "R-FILE-004"},
+        {"asset.delete_referenced",
+         "A schema-bound document still references this asset; delete refuses rather than leaving "
+         "a dangling reference — the diagnostic names the referring file and pointer.",
+         false, kExitConflict, "R-FILE-004"},
+        {"asset.delete_source_missing", "The asset raced away while the delete was running.", true,
+         kExitNotFound, "R-FILE-004"},
+        {"asset.restore_missing",
+         "No quarantined asset is filed under this restore token; `.editor/trash/` may have been "
+         "cleared, or the restore already completed.",
+         false, kExitNotFound, "R-FILE-004"},
+        {"asset.restore_invalid",
+         "The quarantine entry names a path outside the asset domain; nothing was written.", false,
+         kExitUsage, "R-FILE-004"},
+        {"asset.restore_destination_exists",
+         "A different file (or a sidecar holding a different identity) now occupies the deleted "
+         "asset's path; restore never overwrites.",
+         false, kExitConflict, "R-FILE-004"},
         // --- asset import (M2 wave 4, issue #60: R-ASSET-001, R-SEC-006/008/010, R-FILE-010) ------
         // The importer-framework diagnostics: source decode failures, the isolation jail escape, the
         // run-determinism gate failure, and cache self-verification. Additive-only (protocolMajor 0).

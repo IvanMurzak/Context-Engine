@@ -102,6 +102,8 @@ int main()
         for (const char* method : {"package.add", "build", "install", "set", "new", "edit",
                                    "edit-batch", "migrate", "merge-file", "resolve-conflict", "re-key",
                                    "asset.move", "asset.rename", "tilemap.paint", "tilemap.fill",
+                                   "editor.file-move", "editor.file-delete",
+                                   "editor.file-restore",
                                    "session.new", "session.step",
                                    "session.seed", "session.inject", "session.record", "replay",
                                    "ui.send", "shutdown"})
@@ -173,6 +175,13 @@ int main()
             {"resolve-conflict", Scope::file_write},{"re-key", Scope::file_write},
             {"asset.move", Scope::file_write},      {"asset.rename", Scope::file_write},
             {"tilemap.paint", Scope::file_write},   {"tilemap.fill", Scope::file_write},
+            // M9 e2 (D10 write half): the Files panel's authoring surface REWRITES authored files
+            // (move/rename, the quarantine-backed delete, and its restore), so it is file_write —
+            // deliberately NOT session_control like the e08a editor.* family below, which drives
+            // the live human session rather than data on disk.
+            {"editor.file-move", Scope::file_write},
+            {"editor.file-delete", Scope::file_write},
+            {"editor.file-restore", Scope::file_write},
             // build_install — install / build (code execution)
             {"package.add", Scope::build_install},  {"install", Scope::build_install},
             {"build", Scope::build_install},

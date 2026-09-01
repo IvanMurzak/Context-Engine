@@ -176,6 +176,51 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
 // the shape-specific ADDRESSING keys, the one thing the two shapes genuinely disagree about — the
 // registry's claim that they "share the scope, the CAS contract and the barrier" is true of the
 // CODE only while this stays ONE definition rather than two copies kept in step by eye.
+// M9 e2: turn an assetdb refusal into the R-CLI-008 failure envelope the client sees.
+//
+// The FIRST diagnostic decides the envelope's code because assetdb's operations refuse on ONE
+// reason and only ever emit several diagnostics for the referenced-delete case, where every one of
+// them is an instance of the same code. The rest travel in `error.data.diagnostics` so nothing is
+// lost — a refusal naming three referring files must name all three, or the human cannot act on it.
+[[nodiscard]] Envelope refuse_asset_op(const std::vector<assetdb::AssetDiagnostic>& diagnostics,
+                                       const char* fallback_code, const char* fallback_message)
+{
+    if (diagnostics.empty())
+        return Envelope::failure(fallback_code, fallback_message);
+
+    Json rows = Json::array();
+    for (const assetdb::AssetDiagnostic& d : diagnostics)
+    {
+        Json row = Json::object();
+        row.set("code", Json(d.code));
+        row.set("message", Json(d.message));
+        row.set("path", Json(d.path));
+        if (!d.other_path.empty())
+            row.set("otherPath", Json(d.other_path));
+        if (!d.guid.empty())
+            row.set("guid", Json(d.guid));
+        rows.push_back(std::move(row));
+    }
+    Json data = Json::object();
+    data.set("diagnostics", std::move(rows));
+
+    return Envelope::failure(diagnostics.front().code, diagnostics.front().message)
+        .with_error_data(std::move(data));
+}
+
+// R-SEC-008 on a file-write endpoint: the same lexical pre-check `context set` and the composed
+// `edit` run. `is_inside_jail` is LEXICAL, so it is the legible early refusal rather than the only
+// guard -- the assetdb operations themselves only ever touch paths through the project-rooted
+// NativeFileStore below, which cannot address anything outside it.
+[[nodiscard]] std::optional<Envelope> reject_escaping_path(const std::string& path,
+                                                           const char* subject)
+{
+    if (filesync::is_inside_jail(".", path))
+        return std::nullopt;
+    return Envelope::failure("path.jail_violation", std::string(subject) + " `" + path +
+                                                        "` escapes the project root (R-SEC-008)");
+}
+
 [[nodiscard]] Envelope finish_edit(EditorKernel& kernel, const std::string& file,
                                    const derivation::WriteTicket& ticket, Json data)
 {
@@ -973,6 +1018,115 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         data.set("files", gui::panels::builders::files_to_wire(model));
         data.set("generation", Json(kernel_.generation()));
         return Envelope::success(std::move(data), kernel_.generation());
+    }
+
+    // --- M9 e2: the editor FILE-WRITE surface (D10 write half) ----------------------------------
+    //
+    // The Files panel's rename / move / delete, and the RESTORE its session-undo replays through.
+    // All three follow the `editor.files` shape exactly -- a FRESH assetdb scan over a project-rooted
+    // NativeFileStore, current on-disk truth, no cross-request caching -- and then run the ONE engine
+    // operation (src/editor/assetdb/). The Shell links none of it (D10): it sends a request and
+    // renders the answer.
+    //
+    // WHY THE SCAN COMES FIRST on a WRITE: move/delete both consult the live GUID index to decide
+    // identity and to keep it correct afterwards, and an index built from a stale request would move
+    // the wrong record. It is also what makes each verb self-contained -- no ordering dependency on
+    // whether some earlier read happened to populate anything.
+    //
+    // AFTER a successful write, the raw change is folded back through the kernel's own ingest seam
+    // (`ingest_external(force)` -> `files.changed`) and then settled (`derivation.settled{gen}`):
+    // these operations write through filesync directly, outside the kernel's `edit_file` path, so
+    // WITHOUT this the design 05 §8 propagate chain would simply not fire and every other client's
+    // Files panel would keep rendering a file that is gone. Refusals publish NOTHING -- there is no
+    // change to announce.
+    //
+    // The dispatcher already enforced `file_write` (scope.cpp) before we are reached.
+    if (method == "editor.file-move" || method == "editor.file-delete" ||
+        method == "editor.file-restore")
+    {
+        // NON-const: unlike the `editor.files` read one screen up, these three WRITE through the
+        // store (the assetdb operations own the atomic write order).
+        filesync::NativeFileStore store(kernel_.config().project_root);
+        assetdb::RandomGuidGenerator guids;
+        assetdb::AssetDatabase db(guids);
+        (void)db.scan(store, "");
+
+        if (method == "editor.file-move")
+        {
+            const std::optional<std::string> from = string_param(params, "from");
+            const std::optional<std::string> to = string_param(params, "to");
+            if (!from.has_value() || !to.has_value())
+                return Envelope::failure(
+                    "usage.missing_argument",
+                    "editor file-move requires string 'from' and 'to' project-relative asset paths");
+            if (std::optional<Envelope> refusal = reject_escaping_path(*from, "the source path"))
+                return std::move(*refusal);
+            if (std::optional<Envelope> refusal = reject_escaping_path(*to, "the destination path"))
+                return std::move(*refusal);
+
+            assetdb::MoveResult moved = db.move_asset(store, *from, *to);
+            if (!moved.ok)
+                return refuse_asset_op(moved.diagnostics, "asset.move_invalid",
+                                       "the move was refused");
+
+            (void)kernel_.ingest_external(CrawlMode::force);
+            const std::uint64_t generation = kernel_.settle();
+            Json data = Json::object();
+            data.set("from", Json(*from));
+            data.set("to", Json(*to));
+            data.set("guid", Json(moved.guid));
+            data.set("generation", Json(generation));
+            return Envelope::success(std::move(data), generation);
+        }
+
+        if (method == "editor.file-delete")
+        {
+            const std::optional<std::string> path = string_param(params, "path");
+            if (!path.has_value())
+                return Envelope::failure(
+                    "usage.missing_argument",
+                    "editor file-delete requires a string 'path' project-relative asset path");
+            if (std::optional<Envelope> refusal = reject_escaping_path(*path, "the asset path"))
+                return std::move(*refusal);
+
+            assetdb::DeleteResult deleted =
+                db.delete_asset(store, "", *path, schema::engine_schemas());
+            if (!deleted.ok)
+                return refuse_asset_op(deleted.diagnostics, "asset.delete_invalid",
+                                       "the delete was refused");
+
+            (void)kernel_.ingest_external(CrawlMode::force);
+            const std::uint64_t generation = kernel_.settle();
+            Json data = Json::object();
+            data.set("path", Json(*path));
+            data.set("guid", Json(deleted.guid));
+            data.set("restoreToken", Json(deleted.restore_token));
+            data.set("removedAsset", Json(deleted.removed_asset));
+            data.set("removedMeta", Json(deleted.removed_meta));
+            data.set("generation", Json(generation));
+            return Envelope::success(std::move(data), generation);
+        }
+
+        const std::optional<std::string> token = string_param(params, "restoreToken");
+        if (!token.has_value() || token->empty())
+            return Envelope::failure("usage.missing_argument",
+                                     "editor file-restore requires the string 'restoreToken' an "
+                                     "editor file-delete returned");
+
+        assetdb::RestoreResult restored = db.restore_asset(store, *token);
+        if (!restored.ok)
+            return refuse_asset_op(restored.diagnostics, "asset.restore_missing",
+                                   "the restore was refused");
+
+        (void)kernel_.ingest_external(CrawlMode::force);
+        const std::uint64_t generation = kernel_.settle();
+        Json data = Json::object();
+        data.set("path", Json(restored.path));
+        data.set("guid", Json(restored.guid));
+        data.set("restoredAsset", Json(restored.restored_asset));
+        data.set("restoredMeta", Json(restored.restored_meta));
+        data.set("generation", Json(generation));
+        return Envelope::success(std::move(data), generation);
     }
 
     // --- M9 e08a: the DAEMON SESSION-STATE verbs (D7 tier 1, design 05 §4) ----------------------

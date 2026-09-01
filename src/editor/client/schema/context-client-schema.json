@@ -893,6 +893,70 @@
       ]
     },
     {
+      "method": "editor.file-move",
+      "ns": "",
+      "noun": "editor",
+      "verb": "file-move",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "from",
+        "to"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.file-delete",
+      "ns": "",
+      "noun": "editor",
+      "verb": "file-delete",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "path"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.file-restore",
+      "ns": "",
+      "noun": "editor",
+      "verb": "file-restore",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "restoreToken"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
       "method": "editor.select",
       "ns": "",
       "noun": "editor",
@@ -1826,6 +1890,48 @@
       "message": "The move/rename request is malformed (a sidecar, temp-residue, or dot-tree path, or an empty path).",
       "retriable": false,
       "exitCode": 2,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.delete_invalid",
+      "message": "The delete request is malformed (a sidecar, temp-residue, or dot-tree path, or an empty path); a sidecar is deleted with its asset, never on its own.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.delete_referenced",
+      "message": "A schema-bound document still references this asset; delete refuses rather than leaving a dangling reference — the diagnostic names the referring file and pointer.",
+      "retriable": false,
+      "exitCode": 4,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.delete_source_missing",
+      "message": "The asset raced away while the delete was running.",
+      "retriable": true,
+      "exitCode": 3,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.restore_missing",
+      "message": "No quarantined asset is filed under this restore token; `.editor/trash/` may have been cleared, or the restore already completed.",
+      "retriable": false,
+      "exitCode": 3,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.restore_invalid",
+      "message": "The quarantine entry names a path outside the asset domain; nothing was written.",
+      "retriable": false,
+      "exitCode": 2,
+      "origin": "R-FILE-004"
+    },
+    {
+      "code": "asset.restore_destination_exists",
+      "message": "A different file (or a sidecar holding a different identity) now occupies the deleted asset's path; restore never overwrites.",
+      "retriable": false,
+      "exitCode": 4,
       "origin": "R-FILE-004"
     },
     {
