@@ -170,8 +170,9 @@ void EditorWindow::sync_browser_size()
     browser_->resize(logical, backend_->dpi());
     // A resize can MOVE the client origin as well (a maximize does both), and a DPI change moves it
     // in DIP terms even when the physical rect is unchanged — so the origin rides along here rather
-    // than waiting for the next move event or placement poll.
-    sync_browser_origin();
+    // than waiting for the next move event or placement poll. MARKED, not pushed: a modal resize
+    // drag delivers one `resize` per frame into a single drain, and the push is worth doing once.
+    origin_dirty_ = true;
     browser_size_synced_ = true;
 }
 
@@ -205,9 +206,12 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
     case ShellEventKind::moved:
         placement_dirty_ = true;
         // a1: the window moved, so every view->screen mapping the browser answers is now stale.
-        // Pushed on the EVENT rather than only on the 250 ms placement poll: a context menu opened
-        // straight after a drag would otherwise be placed where the window used to be.
-        sync_browser_origin();
+        // Marked on the EVENT rather than only on the 250 ms placement poll: a context menu opened
+        // straight after a drag would otherwise be placed where the window used to be. The push
+        // itself is coalesced to once per pump (`origin_dirty_`), which costs no freshness — the
+        // single read happens LATER than the last of the reads it replaces, and still before the
+        // browser pump that is the only reader.
+        origin_dirty_ = true;
         break;
     case ShellEventKind::paint_requested:
         compositor_.mark_external_damage();
@@ -288,6 +292,11 @@ void EditorWindow::poll_placement(std::uint64_t now_us)
         // that reports no `moved` event at all still lands here within one poll interval — and the
         // maximized case is exactly the one `placement()` alone cannot answer, which is why the
         // origin is re-read from the backend rather than derived from `current`.
+        //
+        // Pushed INLINE rather than through `origin_dirty_`: this runs AFTER the browser pump, so a
+        // deferred flag would not be consumed until the next iteration, and there is nothing to
+        // coalesce here anyway — the poll interval plus this `!=` gate already admit at most one
+        // push per pump.
         sync_browser_origin();
     }
 }
@@ -324,6 +333,17 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
     if (!window_alive)
     {
         alive_ = false;
+    }
+
+    // a1: the ONE origin push for this iteration, collapsing however many `moved`/`resize`/
+    // `dpi_changed` events the drain above carried (a whole caption drag arrives as one batch —
+    // see `origin_dirty_`). Here rather than inside the arms because `client_origin()` reads the
+    // LIVE position, so the last read wins anyway; and before the browser pump below, which is the
+    // only thing that reads the value back out.
+    if (origin_dirty_)
+    {
+        origin_dirty_ = false;
+        sync_browser_origin();
     }
 
     // Drive the browser AFTER the OS events: input dispatched this iteration is what a paint should

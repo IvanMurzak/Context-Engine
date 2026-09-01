@@ -472,10 +472,22 @@ Three things about it are easy to get wrong, so all three live in one place:
   wrong for as long as the window is maximized, and on macOS it is deliberately kept in Cocoa points
   with a bottom-left origin.
 
-The origin is pushed on the window's **`moved` event** and re-read on the **placement poll** as a
-backstop (a WM-driven move, a maximize, or a backend that reports geometry by polling rather than by
-event), never on every pump: the value changes only when the window does, and `set_client_origin`
+The origin is marked stale on the window's **`moved` event** (and by `sync_browser_size`, since a
+maximize moves the client as well as resizing it) and re-read on the **placement poll** as a backstop
+(a WM-driven move, a maximize, or a backend that reports geometry by polling rather than by event),
+never on every pump: the value changes only when the window does, and `set_client_origin`
 deliberately does NOT drive `WasResized()` — a window that moved has not resized.
+
+The event path **marks** rather than pushes, and `pump_once` performs the single push after the drain
+and before the browser pump. `client_origin()` reads the LIVE OS position at drain time, so every
+push within one drain would carry the same value, and the only reader — CEF pulling the mapping
+through `GetScreenPoint` — runs after the drain. A Win32 caption drag is a modal `DefWindowProc` loop
+that blocks the shell thread, so a whole gesture's `WM_MOVE`s queue up and drain in ONE pump: the
+per-event form spent a `ClientToScreen` round-trip per drag frame for a single observable result.
+Coalescing costs no freshness — the one read happens *later* than the last read it replaces. The
+placement poll still pushes inline, because it runs *after* the browser pump (a deferred flag would
+not be consumed until the next iteration) and its interval plus change gate already admit at most one
+push per pump.
 
 macOS is an honest zero here and unchanged in behaviour: the browser there is still created with no
 NSView owner, so there is no OSR view positioned against that window to map, and the flip convention
@@ -595,7 +607,7 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-x11-window` | e12a: a REAL X11 window through the real `make_window_backend`, the real X11-SHM blitter, live panels, a server-driven repaint (`XClearArea` → `Expose`) and resize (`ConfigureNotify`), the placement readback and the session flush; e12a-x11-legs (#408): a pointer pair + a key INJECTED THROUGH THE X SERVER and decoded by the real `translate_x11_event`, down to one press / one release and the round-tripped `VK_TAB`; **editor-window-chrome g1**: a caption gesture in the a2 shape — hover, press, the drag that leaves the strip, release — suppressed end to end through the X server with the implicit capture released on the release, the dock forwarded again afterwards, and a control press forwarded INSIDE its physical rect (§ 15, Linux). SKIPs (77) with no display; the Linux `editor-cef-smoke` job runs it DIRECTLY with `--require-x11 --require-display` (§ 10) |
 | `editor-shell-cocoa-window` | e12c-3 (#442): a REAL `NSWindow`, the real `CALayer.contents` blitter, live panels, a granted resize, a marked pointer pair + key round-tripped IN-PROCESS through `-[NSApplication postEvent:atStart:]` (the three Cocoa fidelity limits § 11); **editor-window-chrome c1 / d3 / f1**: the hybrid style mask re-read LIVE, the measured positive inset, a caption press consumed whole by `performWindowDragWithEvent:` and a double-click by `zoom:` (which really zooms), the release still arbitrated, no leaked capture, a non-caption press forwarded; the `NSMenu` bar built from `menu.publish` and activated programmatically (`cocoa_menu_perform`, disabled items refused); a factory-created second window carrying the same mask + inset. SKIPs with no GUI session; the macOS `editor-cef-smoke` job runs it DIRECTLY with `--require-cocoa --require-display` |
 | `editor-shell-test_compositor` | The extrapolated layer UV (incl. the full-window identity vs e03), the premultiplied blend + clipping, damage-driven skip, LAYER ORDER and the popup's scissor rect, a hidden popup dropping its layer, the resize protocol, Outdated/Lost keeping the damage, Suboptimal presenting first, a refused surface, both present paths, a malformed producer frame |
-| `editor-shell-test_shell` | The attach guard, the owner loop end to end (DIP browser sizing, input round-trip, viewport vs browser, focus dropping a live drag, idle skip, popup), placement persistence + restore, window drop, shutdown flush; **a1**: the client origin seeded before the first paint and updated on the `moved` event under the REAL 250 ms poll interval (so the push is attributable to the event, not to the poll), the modelled frameless inset proving it is the CLIENT origin and not the window rect, the placement-poll BACKSTOP for a move with no event, and the negative half — an idle pump pushes nothing |
+| `editor-shell-test_shell` | The attach guard, the owner loop end to end (DIP browser sizing, input round-trip, viewport vs browser, focus dropping a live drag, idle skip, popup), placement persistence + restore, window drop, shutdown flush; **a1**: the client origin seeded before the first paint and updated on the `moved` event under the REAL 250 ms poll interval (so the push is attributable to the event, not to the poll), the modelled frameless inset proving it is the CLIENT origin and not the window rect, the placement-poll BACKSTOP for a move with no event, the COALESCING (four moves drained in one pump push ONCE, carrying the last position — the per-event form scored five), and the negative half — an idle pump pushes nothing |
 | `editor-shell-smoke-session0` | **The blocking CI requirement**: the whole shell loop over software-OSR frames with the composited present asserted PER-PIXEL — see § 9 |
 | `editor-shell-boundary` | The D10 link-closure audit actually ran and covered a real forbidden target |
 | `editor-shell-test_panel_host` | The panel-agnostic surface over SYNTHETIC panels: roster projection (hosted vs listed-but-unhosted), render payload, command dispatch + the stale-command refusal, the four gesture verbs and the refusal of a fifth, the D6 round-trip and all three degrade paths, every `panel.*` binding, and hostile params on every method |

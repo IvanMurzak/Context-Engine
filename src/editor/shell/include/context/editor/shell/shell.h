@@ -159,6 +159,9 @@ private:
     // geometry contract `sync_browser_size` does not carry. Deliberately separate: a move is not a
     // resize, and folding it into `sync_browser_size` would fire CEF's `WasResized()` (a re-layout
     // + repaint) on every step of a window drag.
+    //
+    // COALESCED, never called straight from the event arms: they set `origin_dirty_` and `pump_once`
+    // pushes at most once per iteration (see the flag).
     void sync_browser_origin();
     void poll_placement(std::uint64_t now_us);
 
@@ -181,6 +184,18 @@ private:
     std::uint64_t last_placement_poll_us_ = 0;
     std::string diagnostic_;
     bool placement_dirty_ = false;
+    // a1: "the client origin the browser holds is stale", set by the event arms that can move it
+    // (`moved`, and `sync_browser_size` for the resize/DPI/boot paths) and consumed ONCE per pump.
+    //
+    // The gate belongs in the mechanism rather than in the count of call sites: `client_origin()`
+    // reads the LIVE OS position at drain time, so every call within one drain returns the same
+    // value, and nothing observes the intermediate pushes — CEF pulls the mapping through
+    // `GetScreenPoint` during `browser_->pump()`, after the drain. A Win32 caption drag is a modal
+    // `DefWindowProc` loop that blocks this thread (`win32_window.cpp` § set_chrome_regions), so its
+    // whole gesture's `WM_MOVE`s queue into `pending_` and drain in ONE batch — hundreds of
+    // identical `ClientToScreen` round-trips where one suffices. Mirrors `placement_dirty_` beside
+    // it and the generation gate in `pump_once`.
+    bool origin_dirty_ = false;
     bool focused_ = false;
     bool alive_ = true;
     bool browser_size_synced_ = false;

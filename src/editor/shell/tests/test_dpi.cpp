@@ -158,7 +158,8 @@ void test_osr_screen_point_converts_view_dip_to_the_platform_convention()
     // Windows/Linux: screen DEVICE pixels, and the client sits at a NON-ZERO screen origin (without
     // one the missing offset cannot fail).
     const PointI client_device{300, 150};
-    const PointI screen = osr_screen_point(view, client_device, one_five, false);
+    const PointI screen =
+        osr_screen_point(view, client_device, one_five, /*screen_coords_are_dip*/ false);
     CHECK(screen == (PointI{360, 180})); // 300 + 40*1.5, 150 + 20*1.5
 
     // The three ways this has been or could be wrong, each distinguishable HERE and at no other
@@ -169,7 +170,8 @@ void test_osr_screen_point_converts_view_dip_to_the_platform_convention()
 
     // macOS: screen DIP, so the view offset is added UNSCALED to an origin already in DIP.
     const PointI client_dip{200, 100}; // the same window, in that platform's units
-    const PointI screen_mac = osr_screen_point(view, client_dip, one_five, true);
+    const PointI screen_mac =
+        osr_screen_point(view, client_dip, one_five, /*screen_coords_are_dip*/ true);
     CHECK(screen_mac == (PointI{240, 120}));
     // Giving macOS the device-pixel treatment is the mistake this pair exists to prevent.
     CHECK(screen_mac != (PointI{260, 130}));
@@ -212,8 +214,10 @@ void test_osr_root_screen_rect_is_dip_on_every_platform_convention()
 
     // ONE physical window, described in each platform's own convention: 800x500 DIP whose client
     // starts 300x150 device pixels (== 200x100 DIP) from the screen origin.
-    const ScreenRect from_device = osr_root_screen_rect(PointI{300, 150}, logical, one_five, false);
-    const ScreenRect from_dip = osr_root_screen_rect(PointI{200, 100}, logical, one_five, true);
+    const ScreenRect from_device =
+        osr_root_screen_rect(PointI{300, 150}, logical, one_five, /*screen_coords_are_dip*/ false);
+    const ScreenRect from_dip =
+        osr_root_screen_rect(PointI{200, 100}, logical, one_five, /*screen_coords_are_dip*/ true);
 
     // The SAME window must produce the SAME rect — that identity is the no-split rule stated in a
     // form a scaled implementation cannot also satisfy.

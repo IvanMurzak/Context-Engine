@@ -50,7 +50,9 @@ struct Harness
         EditorWindowConfig config;
         config.compositor.import_options.force_software = true;
         // 0 (the default) polls every pump so most tests need no clock advance; a case about the
-        // poll INTERVAL itself (the a1 chrome-fact boot seed) passes the real one.
+        // poll INTERVAL itself (the a1 chrome-fact boot seed, and the two a1 client-origin cases
+        // that must attribute their pushes to the event path rather than the poll) passes the real
+        // one.
         config.placement_poll_us = placement_poll_us;
         window = std::make_unique<EditorWindow>(std::move(backend_owned), std::move(browser_owned),
                                                 config);
@@ -186,6 +188,40 @@ void test_pump_pushes_the_client_origin_and_a_move_updates_it()
     harness.backend->post(dpi);
     CHECK(harness.window->pump_once(4000));
     CHECK(harness.browser->client_origin_pushes() == 3);
+}
+
+// a1: the push is COALESCED to one per pump. A Win32 caption drag is a modal `DefWindowProc` loop
+// that blocks the shell thread, so the whole gesture's `WM_MOVE`s queue up and drain in a SINGLE
+// pump — pushing per event would spend one `ClientToScreen` round-trip per drag frame (hundreds of
+// them) and every one would return the same live position, since the origin is read at drain time
+// rather than taken from the event.
+void test_a_batch_of_moves_in_one_pump_pushes_the_origin_once()
+{
+    Harness harness(render::Extent2D{800, 600}, 250'000);
+    harness.backend->set_client_inset(PointI{12, 0});
+    CHECK(harness.window->pump_once(1000));
+    CHECK(harness.browser->client_origin_pushes() == 1);
+
+    // Four moves, one pump — a drag gesture's worth of events arriving together.
+    const std::int32_t drag_xs[] = {200, 400, 600, 800};
+    for (const std::int32_t x : drag_xs)
+    {
+        ShellEvent moved;
+        moved.kind = ShellEventKind::moved;
+        moved.position = PointI{x, 500};
+        harness.backend->post(moved);
+    }
+    CHECK(harness.window->pump_once(2000));
+
+    // ONE push for the four moves. The per-event version scored 5 here, which is what makes this
+    // assertion a real pin on the coalescing rather than a restatement of the counts above.
+    CHECK(harness.browser->client_origin_pushes() == 2);
+
+    // And it carries the LAST position, not the first: the single read happens after the whole
+    // batch drained, so the coalesced value is strictly FRESHER than any per-event push it
+    // replaces — this is why the collapse costs no correctness.
+    CHECK(harness.browser->last_client_origin() == (PointI{812, 500}));
+    CHECK(harness.browser->last_client_origin() != (PointI{212, 500}));
 }
 
 void test_a_placement_change_with_no_move_event_still_repositions_the_browser()
@@ -683,6 +719,7 @@ int main()
     test_attach_to_a_project_with_no_daemon_is_reported_not_fatal();
     test_pump_syncs_the_browser_size_in_dip_on_the_first_iteration();
     test_pump_pushes_the_client_origin_and_a_move_updates_it();
+    test_a_batch_of_moves_in_one_pump_pushes_the_origin_once();
     test_a_placement_change_with_no_move_event_still_repositions_the_browser();
     test_input_round_trip_reaches_the_browser();
     test_a_viewport_region_takes_input_away_from_the_browser();

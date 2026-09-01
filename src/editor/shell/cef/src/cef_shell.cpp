@@ -1310,7 +1310,9 @@ public:
     void set_client_origin(PointI origin) override
     {
         // No WasResized()/notify: the browser has not resized, and CEF re-reads the screen mapping
-        // on demand. This is what makes pushing on every window-move step cheap (browser.h).
+        // on demand. This is what makes a push per window MOVE cheap (browser.h) — the owner loop
+        // coalesces a drag's worth of moves into one of these per pump (`EditorWindow`'s
+        // `origin_dirty_`), and what arrives here is a plain member store.
         client_->set_client_origin(origin);
     }
 
