@@ -1,0 +1,125 @@
+.github/workflows/ci.yml
+  s_782aa603d2bdb2::t_95a2c7e818db21 1930-1932
+  s_782aa603d2bdb2::t_b2714dec4a1de8 1941-1943
+  s_782aa603d2bdb2::t_6a2b5a94ecd7a1 2061-2066
+src/editor/shell/include/context/editor/shell/dpi.h
+  s_782aa603d2bdb2::t_0fd70f23c85f77 171-200
+src/editor/shell/tests/test_dpi.cpp
+  s_782aa603d2bdb2::t_edf07a3a1a2153 357-404,407
+src/editor/shell/include/context/editor/shell/browser.h
+  s_782aa603d2bdb2::t_7927043c75dcfb 20
+  s_782aa603d2bdb2::t_36975a9fb7c64e 293-294
+  s_782aa603d2bdb2::t_ad65d8b9e64afd 318-333
+  s_782aa603d2bdb2::t_8de38ddbf4c466 378-379
+  s_782aa603d2bdb2::t_d64fc5460fc23b 141-160
+  s_782aa603d2bdb2::t_98485756a2c7c0 348-355
+  s_782aa603d2bdb2::t_483e53c4ae2055 74-108
+src/editor/shell/src/win32_window.cpp
+  s_782aa603d2bdb2::t_909df98018b735 425-436,438,440,442-446
+  s_782aa603d2bdb2::t_ec50d917d8cefc 723-739
+  s_782aa603d2bdb2::t_4b8e1475b94ef2 437,439,441,447-451,453
+  s_782aa603d2bdb2::t_a498c36c2b9ec8 383,385
+  s_782aa603d2bdb2::t_7f8e7229671c7f 374-382,384,386-397
+src/editor/shell/src/cocoa_window.mm
+  s_782aa603d2bdb2::t_01fdace8a5aa3e 543-580
+docs/shell.md
+  s_782aa603d2bdb2::t_12c3a06e478e04 1399,1403-1411
+  s_782aa603d2bdb2::t_287e7fb4cbc1da 1376-1377
+  s_782aa603d2bdb2::t_a9e4c3b82b72ea 1424-1449
+  s_782aa603d2bdb2::t_023589b45f13c1 1323
+  s_782aa603d2bdb2::t_e5d8e81c9b423b 1228-1249
+  s_782aa603d2bdb2::t_2c63fd2b81007b 1350-1354
+  s_782aa603d2bdb2::t_c82df0d269e61f 1333-1339,1364-1365,1367-1371,1374,1381
+  s_782aa603d2bdb2::t_fe9483277d0357 693,695-697,699-708
+  s_782aa603d2bdb2::t_2f6e1d531b1286 683-685
+  s_782aa603d2bdb2::t_1d6f8af8c8ca18 1217
+  s_782aa603d2bdb2::t_5a4bba52e4fbe8 1343-1344
+  s_782aa603d2bdb2::t_cff3e40f4915cf 719-720
+src/editor/shell/src/osr_drag.cpp
+  s_782aa603d2bdb2::t_2cc54bc67794ce 1-29,77-306
+  s_782aa603d2bdb2::t_7ab033327cb599 30-76
+src/editor/shell/tests/test_osr_drag.cpp
+  s_782aa603d2bdb2::t_72bc3af4e0f893 1-349
+src/editor/shell/src/x11_window.cpp
+  s_782aa603d2bdb2::t_5e7ce0f0733905 34-36
+  s_782aa603d2bdb2::t_f28fbc20aa5746 497-505
+  s_782aa603d2bdb2::t_23fe43f75817b3 513-572
+  s_782aa603d2bdb2::t_c740a365c6c3e2 347-353
+  s_782aa603d2bdb2::t_167302199a9325 319-321
+src/editor/shell/include/context/editor/shell/shell.h
+  s_782aa603d2bdb2::t_94dd1abe60b67d 207-213
+  s_782aa603d2bdb2::t_032c96f0cbc9db 121-129
+  s_782aa603d2bdb2::t_dc3d38ee29a326 165-184,186-195
+src/editor/shell/cef/src/cef_shell_osrdrag_smoke.cpp
+  s_782aa603d2bdb2::t_64829f4ccb4f96 1-467,473-493,498-499,501-572
+  s_782aa603d2bdb2::t_3f435b3148ddd8 494-497,500
+  s_782aa603d2bdb2::t_6b7943faeb1e1d 468-472
+src/editor/shell/include/context/editor/shell/osr_drag.h
+  s_782aa603d2bdb2::t_86aeb55ba64815 127-154
+  s_782aa603d2bdb2::t_f3c41d819473fb 1-126,155-316
+src/editor/shell/src/browser.cpp
+  s_782aa603d2bdb2::t_6fdf68448583fc 97-129
+src/editor/shell/src/window.cpp
+  s_782aa603d2bdb2::t_b13de31c028fec 131
+src/editor/shell/tests/test_shell.cpp
+  s_782aa603d2bdb2::t_4b83a41eecca8c 505-506,508
+  s_782aa603d2bdb2::t_d316503ad92478 431-504,507,509-648
+  s_782aa603d2bdb2::t_7f1a408781dd46 998-1003
+src/editor/shell/CMakeLists.txt
+  s_782aa603d2bdb2::t_bb720d770fba0c 51
+  s_782aa603d2bdb2::t_2428d76688c434 274-276
+  s_782aa603d2bdb2::t_8c462a3355fe1c 791
+src/editor/shell/tests/test_window_registry.cpp
+  s_782aa603d2bdb2::t_0da1ece0073f90 87-93
+  s_782aa603d2bdb2::t_12db5948ba52ff 107-108,114-115
+src/editor/shell/include/context/editor/shell/window.h
+  s_782aa603d2bdb2::t_198475bb09b8c4 302
+  s_782aa603d2bdb2::t_abdfe75fb731a7 40
+  s_782aa603d2bdb2::t_58048028882191 195-209,211
+  s_782aa603d2bdb2::t_a08d93568314bc 210
+  s_782aa603d2bdb2::t_e3a0bd052bcda8 261,263
+  s_782aa603d2bdb2::t_261c0af5af18a8 316
+  s_782aa603d2bdb2::t_a58247edcca823 315
+  s_782aa603d2bdb2::t_d77009497c834d 256-260,262,264-265
+  s_782aa603d2bdb2::t_df502ba89359e1 300-301,303
+src/editor/shell/cef/src/cef_shell.cpp
+  s_782aa603d2bdb2::t_334cfdcdd2a9f8 1191-1195
+  s_782aa603d2bdb2::t_4a78f40a7fc772 979-984
+  s_782aa603d2bdb2::t_f2faa092ae2246 1129-1135,1138-1153
+  s_782aa603d2bdb2::t_bb29ae3ba8b19b 1526-1581
+  s_782aa603d2bdb2::t_0ed99eced7f201 83-118
+  s_782aa603d2bdb2::t_ded6f9ef669778 956-978,985-1011
+src/editor/shell/README.md
+  s_782aa603d2bdb2::t_3c6fe98aff50c3 41
+  s_782aa603d2bdb2::t_3aa3b141c2d45b 31-32
+src/editor/shell/src/shell.cpp
+  s_782aa603d2bdb2::t_fbe890d17882fd 579
+  s_782aa603d2bdb2::t_9eb111f0648573 539-543
+  s_782aa603d2bdb2::t_c5541e3eb4f616 226-316
+  s_782aa603d2bdb2::t_a931cc7cb94438 362-366,371-384
+  s_782aa603d2bdb2::t_20ab0342a8a630 414-425,435-437
+  s_782aa603d2bdb2::t_55ac9e5ca305cd 562
+  s_782aa603d2bdb2::t_1395c2a9eaa625 102-125
+  s_782aa603d2bdb2::t_99f6135a9505b6 126-129
+src/editor/shell/src/dpi.cpp
+  s_782aa603d2bdb2::t_c6444fe58418c8 114-123
+src/editor/shell/cef/CMakeLists.txt
+  s_782aa603d2bdb2::t_b410528d48ed9f 429
+  s_782aa603d2bdb2::t_cad70674b79b78 367-390
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "207c6ab95d02ca73136471c9f37a2c6de545ad9c",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

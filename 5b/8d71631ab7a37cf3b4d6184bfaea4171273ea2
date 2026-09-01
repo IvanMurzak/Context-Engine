@@ -1,0 +1,21 @@
+docs/shell.md
+  s_782aa603d2bdb2::t_1262bec3eea625 1499
+  s_782aa603d2bdb2::t_148ae3b66e71d9 1462-1463
+  s_782aa603d2bdb2::t_d416c6d545cce1 111,116-117,122,136,364,747,969,1130,1454,1457,1461,1496,1498,1500,1555,1557
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "5b8d71631ab7a37cf3b4d6184bfaea4171273ea2",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
