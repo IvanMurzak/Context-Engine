@@ -1,0 +1,19 @@
+.taskflow/2026-08-29-editor-ux-packages-events/ROADMAP.md
+  s_782aa603d2bdb2::t_743090b21aecef 51,57,125
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "51ce95d94e39cfee56c15133ec128a6824910e40",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
