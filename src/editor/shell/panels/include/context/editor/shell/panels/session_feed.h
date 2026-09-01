@@ -258,6 +258,15 @@ private:
     // The ONE place a play command becomes a PlayCommandResult (all four transports share it).
     [[nodiscard]] playbar::PlayCommandResult drive_play(const char* method, contract::Json params);
 
+    // The ONE place an `editor.select` write happens (request_selection / request_file_selection
+    // both delegate here) — `subject == nullptr` is the entity default (no wire `subject`, the
+    // daemon's own default); a non-null `subject` is sent explicitly and is what a non-empty CHANGE
+    // mirrors into `selection_focus_` (c1/D3). The two PUBLIC entry points still exist separately
+    // because they satisfy two differently-typed gateway interfaces (see request_file_selection's
+    // comment) — only the write BODY was duplicated, and only that is collapsed here.
+    [[nodiscard]] std::optional<std::vector<std::string>>
+    write_selection_request(const std::vector<std::string>& ids, const char* subject);
+
     // The `files::SelectionGateway` adapter `file_selection_gateway()` hands out — see that method's
     // comment for why a nested forwarding type exists instead of a second `request_selection`
     // override. It is a plain view over the owning feed, so it dies with it.
