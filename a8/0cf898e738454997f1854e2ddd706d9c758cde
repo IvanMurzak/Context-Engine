@@ -1,0 +1,23 @@
+src/editor/webui/kit/styles/kit.css
+  s_782aa603d2bdb2::t_f2ad8aadeb75db 94-101,110-111
+  s_782aa603d2bdb2::t_bae76b6d089a08 131,135-137
+src/editor/webui/core/src/test/kit.test.ts
+  s_782aa603d2bdb2::t_8f967b405b37f5 422-447,451-453,456-464
+  s_782aa603d2bdb2::t_d5fdf08f4a530b 448-450,454-455
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a80cf898e738454997f1854e2ddd706d9c758cde",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
