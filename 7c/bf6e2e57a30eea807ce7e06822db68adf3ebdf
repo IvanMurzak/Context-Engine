@@ -1,0 +1,34 @@
+src/editor/webui/core/src/packagefacts.ts
+  s_782aa603d2bdb2::t_8ae5c1da63449f 50,52
+  s_782aa603d2bdb2::t_2d0e8476a09b10 34,53-61,63
+src/editor/bridge/src/event_stream.cpp
+  s_782aa603d2bdb2::t_5e9c425bc1e08b 140-145,151,156,159,170,182,185,188-189,192,495-496
+src/editor/gui/contract/include/context/editor/gui/contract/registry.h
+  s_782aa603d2bdb2::t_54300afb926690 17,41-54
+src/editor/gui/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_b9bf25db8238d3 259-264
+src/editor/shell/include/context/editor/shell/package_sessions.h
+  s_782aa603d2bdb2::t_c41627393b22ed 425-447
+src/editor/shell/src/package_facts.cpp
+  s_782aa603d2bdb2::t_bd6504f21717b3 6,72-94,131-134,136-140,145,153,181,190-191
+src/editor/shell/src/package_sessions.cpp
+  s_782aa603d2bdb2::t_cdc7806c78436b 131-157,518-520,525-526,576,624-626
+src/editor/shell/tests/test_package_facts.cpp
+  s_782aa603d2bdb2::t_b382d1f580ee7b 412-413
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "7cbf6e2e57a30eea807ce7e06822db68adf3ebdf",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
