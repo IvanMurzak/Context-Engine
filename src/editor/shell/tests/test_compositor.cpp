@@ -939,6 +939,56 @@ void test_a_malformed_producer_frame_is_refused()
     CHECK(!compositor.render_frame());
 }
 
+// A REFUSED popup frame must not move the geometry `popup_dest_rect()` is built from. The rect is
+// half DIP input and half TEXTURE extent (a2), so recording a refused frame's extent would have the
+// accessor — documented in compositor.h as describing the texture each path is holding — report a
+// menu whose pixels were never stored, and would decouple the CPU path's destination SIZE (read
+// from that pair) from its source pointer and stride (read from `cpu_popup_`). Only
+// `capture_cpu_frame`'s leading `valid = false` kept that from being an out-of-bounds source bound.
+void test_a_refused_popup_frame_leaves_the_last_good_geometry_in_place()
+{
+    WindowCompositor compositor(software_config());
+    compositor.attach_cpu(std::make_unique<present::MemoryBlitter>(), render::Extent2D{120, 90});
+    compositor.on_resize(render::Extent2D{120, 90}, DpiScale{144});
+
+    std::vector<std::uint8_t> view_storage;
+    compositor.on_browser_frame(make_view_frame(view_storage, render::Extent2D{120, 90},
+                                                shelltest::rect(0, 0, 120, 90), 0, 0, 0, 255));
+
+    // A GOOD popup first: 20x10 DIP at (10, 5) painted as a 30x15 physical texture -> (15, 8) 30x15.
+    compositor.on_popup_state(true, shelltest::rect(10, 5, 20, 10));
+    std::vector<std::uint8_t> popup_storage;
+    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{30, 15},
+                                         shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
+    popup.layer = BrowserLayer::popup;
+    compositor.on_browser_frame(popup);
+    CHECK(compositor.render_frame());
+    CHECK(compositor.stats().popup_draws == 1);
+    const render::Rect2D good = shelltest::rect(15, 8, 30, 15);
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), good));
+
+    // ...then one claiming a BIGGER allocation than its buffer holds. Deliberately a different
+    // extent from the good frame on BOTH axes: recording it would make the assertion below read
+    // 60x30, so this cannot pass by accident.
+    std::vector<std::uint8_t> truncated(16, 0u);
+    BrowserFrame refused;
+    refused.layer = BrowserLayer::popup;
+    refused.frame.pixels = truncated.data();
+    refused.frame.byte_size = truncated.size();
+    refused.frame.bytes_per_row = 240;
+    refused.frame.coded_size = render::Extent2D{60, 30};
+    refused.frame.visible_rect = shelltest::rect(0, 0, 60, 30);
+    compositor.on_browser_frame(refused);
+
+    // It REACHED the popup branch — otherwise the assertion below would hold for the wrong reason
+    // (a frame refused one layer earlier never had a chance to overwrite anything).
+    CHECK(compositor.stats().popup_frames == 2);
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), good));
+    // ...and no popup is composited from a frame whose pixels were never stored.
+    CHECK(compositor.render_frame());
+    CHECK(compositor.stats().popup_draws == 1);
+}
+
 void test_detach_is_safe_and_idempotent()
 {
     rendertest::FakeDevice device;
@@ -989,6 +1039,7 @@ int main()
     test_cpu_path_composites_the_popup_rather_than_skipping_it();
     test_cpu_path_without_a_blitter_is_reported_not_silent();
     test_a_malformed_producer_frame_is_refused();
+    test_a_refused_popup_frame_leaves_the_last_good_geometry_in_place();
     test_detach_is_safe_and_idempotent();
     SHELL_TEST_MAIN_END();
 }

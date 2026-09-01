@@ -293,8 +293,6 @@ void WindowCompositor::on_browser_frame(const BrowserFrame& frame)
     if (frame.layer == BrowserLayer::popup)
     {
         ++stats_.popup_frames;
-        popup_visible_rect_ = frame.frame.visible_rect;
-        popup_coded_size_ = frame.frame.coded_size;
         if (path_ == PresentPath::gpu_swapchain && device_ != nullptr)
         {
             have_popup_frame_ = popup_importer_.update(*device_, frame.frame);
@@ -303,6 +301,17 @@ void WindowCompositor::on_browser_frame(const BrowserFrame& frame)
         {
             capture_cpu_frame(cpu_popup_, frame.frame);
             have_popup_frame_ = cpu_popup_.valid;
+        }
+        // The frame GEOMETRY is recorded only once the frame was ACCEPTED. A refused frame (a
+        // truncated producer buffer — see capture_cpu_frame / the import driver's bounds rule)
+        // leaves no pixels behind, so recording its rect would leave `popup_dest_rect()` — half of
+        // which is this pair — describing a menu that was never stored, and would decouple the CPU
+        // path's destination SIZE (read from here) from its source pointer (read from cpu_popup_).
+        // Keeping the last GOOD frame's geometry matches what both paths still hold.
+        if (have_popup_frame_)
+        {
+            popup_visible_rect_ = frame.frame.visible_rect;
+            popup_coded_size_ = frame.frame.coded_size;
         }
         damage_.popup = true;
         return;
@@ -383,7 +392,8 @@ render::Rect2D WindowCompositor::popup_dest_rect() const
     // buffer by device_scale_factor); only the ORIGIN is converted from the DIP rect. Reading it
     // from `popup_visible_rect_`/`popup_coded_size_` rather than from either path's private copy is
     // what makes the GPU and CPU paths composite the popup at the SAME place by construction —
-    // `on_browser_frame` sets that pair before it splits on the path.
+    // `on_browser_frame` sets that pair from whichever frame each path ACCEPTED, so it describes the
+    // texture that path is actually holding.
     const render::Rect2D source = visible_within(popup_visible_rect_, popup_coded_size_);
     return osr_popup_dest_rect(popup_rect_, source.size, dpi_);
 }
