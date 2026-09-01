@@ -14,6 +14,7 @@
 
 #include "context/editor/editorkernel/kernel_server.h"
 
+#include "context/editor/assetdb/meta.h" // M9 e1: the editor.files fixture's meta sidecars
 #include "context/editor/contract/envelope.h"
 #include "context/editor/contract/handshake.h" // kProtocolMajor (the frozen major the daemon accepts)
 #include "context/editor/contract/json.h"
@@ -40,6 +41,7 @@
 #include <vector>
 
 namespace fs = std::filesystem;
+namespace assetdb = context::editor::assetdb;
 using context::editor::contract::Json;
 using context::editor::derivation::canonical_parse;
 using context::editor::editorkernel::EditorKernel;
@@ -376,6 +378,83 @@ int main()
             const Json jailed_resp = Json::parse(*jailed);
             CHECK(jailed_resp.at("result").at("data").at("rawHash").as_string() == "0");
             CHECK(!jailed_resp.at("result").at("data").at("inspector").at("present").as_bool());
+        }
+
+        // ---- editor.files (M9 e1, D10 read half): the project file-tree read ------------------------
+        // Served over a FRESH assetdb::AssetDatabase scan of the REAL on-disk project_root (the
+        // MemoryFileStore above backs the derivation pipeline, not this read) — real files under the
+        // project root, exactly like the scene-tree/inspect fixture above.
+        {
+            const auto write_file = [&](const char* name, const std::string& text)
+            {
+                std::error_code mkdir_ec;
+                fs::create_directories((project / name).parent_path(), mkdir_ec);
+                std::ofstream out(project / name, std::ios::binary);
+                out << text;
+            };
+            write_file("textures/wall.tex.json", R"({"$schema": "ctx:texture"})");
+            // A live <asset>.meta.json sidecar (assetdb::serialize_meta — the real writer, not a
+            // hand-rolled JSON string that could drift from the schema) so the guid/kind population
+            // is exercised over the REAL format.
+            assetdb::AssetMeta meta;
+            meta.guid = "00000000000000000000000000000fff";
+            meta.kind = "ctx:texture";
+            write_file("textures/wall.tex.json.meta.json", assetdb::serialize_meta(meta));
+            write_file("README.md", "hello"); // a plain file with no meta sidecar yet
+            write_file(".editor/index", "internal"); // tool-internal — must never surface as a row
+
+            const std::optional<std::string> f = rw.request(rpc(10, "editor.files", Json::object()));
+            CHECK(f.has_value());
+            const Json f_resp = Json::parse(*f);
+            CHECK(f_resp.contains("result"));
+            const Json& files_model = f_resp.at("result").at("data").at("files");
+            CHECK(files_model.at("ok").as_bool());
+            // 4 files land here: wall.tex.json + README.md from THIS block, plus root.scene.json /
+            // child.scene.json the scene-tree fixture above already wrote under the SAME project
+            // root — editor.files lists the WHOLE project, not one subtree. (The `.meta.json`
+            // sidecar and the `.editor/` dot-tree files are filtered — asserted below.)
+            CHECK(files_model.at("fileCount").as_int() == 4);
+
+            const Json& roots = files_model.at("roots");
+            const Json* textures_dir = nullptr;
+            const Json* readme = nullptr;
+            for (std::size_t i = 0; i < roots.size(); ++i)
+            {
+                const Json& entry = roots.at(i);
+                if (entry.at("identity").as_string() == "textures")
+                {
+                    textures_dir = &entry;
+                }
+                else if (entry.at("identity").as_string() == "README.md")
+                {
+                    readme = &entry;
+                }
+            }
+            CHECK(textures_dir != nullptr);
+            CHECK(textures_dir->at("kind").as_string() == "directory");
+            CHECK(textures_dir->at("guid").as_string().empty()); // a directory carries no identity
+            const Json& tex_children = textures_dir->at("children");
+            CHECK(tex_children.size() == 1u); // the meta sidecar itself is NOT a row
+            const Json& tex = tex_children.at(std::size_t{0});
+            CHECK(tex.at("identity").as_string() == "textures/wall.tex.json");
+            CHECK(tex.at("kind").as_string() == "file");
+            CHECK(tex.at("guid").as_string() == "00000000000000000000000000000fff");
+            CHECK(tex.at("assetKind").as_string() == "ctx:texture");
+
+            CHECK(readme != nullptr);
+            CHECK(readme->at("kind").as_string() == "file");
+            CHECK(readme->at("guid").as_string().empty()); // no meta sidecar yet — unknown, not a defect
+
+            // The tool-internal dot-tree file never became a row anywhere in the tree.
+            bool saw_dot_editor = false;
+            for (std::size_t i = 0; i < roots.size(); ++i)
+            {
+                if (roots.at(i).at("identity").as_string() == ".editor")
+                {
+                    saw_dot_editor = true;
+                }
+            }
+            CHECK(!saw_dot_editor);
         }
 
         // shutdown — breaks the serve loop (the thread joins below without a kill)

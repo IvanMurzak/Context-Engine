@@ -19,6 +19,7 @@
 
 #include "context/editor/contract/json.h"
 
+#include "context/editor/gui/panels/files/files_model.h"
 #include "context/editor/gui/panels/inspector/inspector_model.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 
@@ -39,5 +40,12 @@ namespace wire_json = context::editor::contract;
 // field's canonical serialization. A model with `has_entity == false` serializes as
 // {"present": false} alone. Deterministic.
 [[nodiscard]] wire_json::Json inspector_to_wire(const inspector::InspectorModel& model);
+
+// {"ok", "fileCount", "roots": [{"identity", "displayName", "kind": "file"|"directory", "guid",
+//  "assetKind", "children": [...]}]}. `guid`/`assetKind` are "" for a directory or a file with no
+// live meta sidecar (M9 e1, D10 read half). No hash: unlike a composed entity, a project-relative
+// path is its own stable identity — no L-37-style re-resolution is needed. Deterministic (see
+// files_model.h on the node-order guarantee).
+[[nodiscard]] wire_json::Json files_to_wire(const files::FilesModel& model);
 
 } // namespace context::editor::gui::panels::builders

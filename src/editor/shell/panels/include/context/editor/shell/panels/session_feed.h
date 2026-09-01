@@ -1,7 +1,8 @@
 // The LIVE DAEMON SESSION feed (M9 e08b, design 05 §4 / D7 tier 1) — the one place the Shell's
 // panels meet e08a's daemon session state, in BOTH directions:
 //
-//   * WRITER — it implements the panels' two boundary-clean seams (scenetree::SelectionGateway and
+//   * WRITER — it implements the panels' boundary-clean seams (scenetree::SelectionGateway,
+//     files::SelectionGateway since M9 e1 — via a nested adapter, see file_selection_gateway() — and
 //     playbar::PlayControlGateway) over the REAL wire (`editor.select`, `editor.play|pause|stop|step`)
 //     through the Shell's ordinary client connection (D10: the editor is a client like any other).
 //   * SUBSCRIBER — it consumes the `session` topic's facts (`selection-changed`, `play-state`) and
@@ -31,17 +32,26 @@
 // A stale id would suppress a DIFFERENT client's facts and apply our own — both failure modes silent.
 // So the id is derived FROM the client at the seam, and clearing the pointer clears the id with it.
 //
-// § THE SUBJECT FILTER (c1/D1) — LOAD-BEARING, AND ITS ABSENCE FAILS SILENTLY. Since selection is
-// typed per SUBJECT KIND and selections of different subjects coexist, this feed is no longer the
-// consumer of "the selection" — it is the consumer of the ENTITY selection. It is also the ONLY
-// consumer of `selection-changed` in the Shell (the Inspector is driven transitively, through
-// `SceneTreePanel::add_selection_listener`), so this one comparison is what keeps a `file` selection
-// out of `SceneTreePanel::apply_selection`, which would read its ids as L-35 entity id-paths.
+// § THE SUBJECT FILTER (c1/D1, widened by M9 e1) — LOAD-BEARING, AND ITS ABSENCE FAILS SILENTLY.
+// Since selection is typed per SUBJECT KIND and selections of different subjects coexist, this feed
+// dispatches by subject to the ONE panel that owns it: `entity` to the Scene tree, `file` to the
+// Files panel (e1). It is also the ONLY consumer of `selection-changed` in the Shell for EITHER
+// subject (the Inspector is driven transitively, through `SceneTreePanel::add_selection_listener`),
+// so this dispatch is what keeps a `file` selection out of `SceneTreePanel::apply_selection` (which
+// would read its ids as L-35 entity id-paths) and an `entity` selection out of the Files panel
+// (which would read ITS ids as project paths).
 //
-// The failure mode without it is the reason the filter is tested BOTH WAYS: a file selection applied
-// to the scene tree resolves no rows, so the tree simply renders nothing selected — indistinguishable
-// from a correct empty result. A test asserting only "a file fact does not move the tree" would pass
-// with the whole feed disconnected, so a sibling asserts an ENTITY fact DOES move it.
+// The failure mode without it is the reason the filter is tested BOTH WAYS for EACH subject: a file
+// selection applied to the scene tree resolves no rows, so the tree simply renders nothing selected
+// — indistinguishable from a correct empty result, and the same is true in reverse for the Files
+// panel. A test asserting only "a file fact does not move the tree" would pass with the whole feed
+// disconnected, so a sibling asserts an ENTITY fact DOES move it (and, symmetrically, that a FILE
+// fact DOES move the Files panel while leaving the entity selection exactly where it was — the D1
+// coexistence claim, proved rather than assumed).
+//
+// A subject that is NEITHER `entity` NOR `file` (the open vocabulary — `asset`, or a package's
+// `<pkg>.<kind>`) has no consumer in THIS Shell build and is counted as `foreign_subject_facts()`,
+// exactly as `file` was before this panel existed.
 //
 // A fact with NO `subject` member reads as `entity`: absence is the documented default of the wire
 // parameter, so an older daemon (or a hand-written client) means exactly what it always meant.
@@ -55,6 +65,7 @@
 #pragma once
 
 #include "context/editor/contract/json.h"
+#include "context/editor/gui/panels/files/files_panel.h" // M9 e1: the SECOND selection subject
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
 #include "context/editor/gui/playbar/playbar_model.h"
 #include "context/editor/shell/panel_host.h"
@@ -77,6 +88,7 @@ namespace context::editor::shell::panels
 {
 
 namespace scenetree = gui::panels::scenetree;
+namespace files = gui::panels::files;
 namespace playbar = gui::playbar;
 
 // The e08a topic every session fact rides. Declared here (and re-exported by builtin_panels.h for
@@ -94,8 +106,8 @@ inline constexpr const char* kCameraChangedEvent = "camera-changed";
 // panel focus, so the CLI and agents can see the same answer this Shell renders.
 inline constexpr const char* kSelectionFocusEvent = "selection-focus";
 
-// The DEFAULT selection subject (c1/D1) — and the only one this Shell's Scene tree can render, since
-// its ids are L-35 entity id-paths.
+// The DEFAULT selection subject (c1/D1) — and the one this Shell's Scene tree renders, since its ids
+// are L-35 entity id-paths.
 //
 // ⚠ SPELLED HERE RATHER THAN INCLUDED. The daemon owns the vocabulary in
 // `editorkernel/editor_session_state.h`, which this library must NOT reach (D10: the Shell links no
@@ -104,6 +116,9 @@ inline constexpr const char* kSelectionFocusEvent = "selection-focus";
 // tokens already follow: the cross-process `editor-session-panels-t2` drill against a real daemon is
 // what proves the two spellings agree.
 inline constexpr const char* kSelectionSubjectEntity = "entity";
+// The SECOND selection subject this Shell renders (M9 e1) — the Files panel's ids are project-
+// relative paths. Same mirroring discipline as kSelectionSubjectEntity above.
+inline constexpr const char* kSelectionSubjectFile = "file";
 
 class SessionFeed final : public scenetree::SelectionGateway, public playbar::PlayControlGateway
 {
@@ -132,12 +147,19 @@ public:
     // down.
     void bind_scene_tree(scenetree::SceneTreePanel* panel, std::string panel_id);
 
+    // The SAME seam for the Files panel's `file`-subject selection (M9 e1). `nullptr` when the Files
+    // panel did not bind — a `file` fact then applies to nothing, exactly like an `entity` fact with
+    // no Scene tree bound: NOT counted in `foreign_subject_facts()` (that counter is for a subject
+    // outside this Shell's vocabulary entirely, never a recognized one with a temporarily-absent
+    // consumer).
+    void bind_files(files::FilesPanel* panel, std::string panel_id);
+
     // --- the subscriber half ----------------------------------------------------------------------
 
     // Consume one subscription event. Returns true when a panel's rendered surface actually changed.
     // A non-`session` topic, an echo of our own write, and an unrecognised fact all return false —
-    // and so does a `selection-changed` fact for a subject this Shell's Scene tree cannot render
-    // (see § THE SUBJECT FILTER below).
+    // and so does a `selection-changed` fact for a subject NEITHER the Scene tree NOR the Files
+    // panel render (see § THE SUBJECT FILTER below).
     bool apply_event(const std::string& topic, const contract::Json& payload);
 
     // --- the c1/D3 focus half ---------------------------------------------------------------------
@@ -163,20 +185,38 @@ public:
     using FocusListener = std::function<void(const std::string& subject)>;
     void add_focus_listener(FocusListener listener);
 
-    // How many `selection-changed` facts were dropped because they addressed a subject this Shell
-    // does not render. A counter rather than a silent skip: the failure this filter exists to prevent
-    // is INVISIBLE (a file selection fed to the scene tree as entity id-paths simply shows nothing
-    // selected, which is indistinguishable from a correct empty result), so the drop needs an
-    // observable of its own for a test to key on.
+    // How many `selection-changed` facts were dropped because they addressed a subject NEITHER
+    // panel this Shell renders can take (e.g. `asset`, or a package's own `<pkg>.<kind>`) — NOT a
+    // recognized subject whose panel simply did not bind (see bind_scene_tree / bind_files). A
+    // counter rather than a silent skip: the failure this filter exists to prevent is INVISIBLE (a
+    // selection fed to the wrong panel as its own id vocabulary simply shows nothing selected, which
+    // is indistinguishable from a correct empty result), so the drop needs an observable of its own
+    // for a test to key on.
     [[nodiscard]] std::size_t foreign_subject_facts() const noexcept
     {
         return foreign_subject_facts_;
     }
 
-    // --- the writer half (the two panel seams) ----------------------------------------------------
+    // --- the writer half (the three panel seams) --------------------------------------------------
 
     [[nodiscard]] std::optional<std::vector<std::string>>
     request_selection(const std::vector<std::string>& ids) override;
+
+    // The Files panel's SAME kind of write, over the SAME `editor.select` verb (M9 e1) — but a
+    // DIFFERENT type from `scenetree::SelectionGateway`, deliberately: `files::SelectionGateway`
+    // declares a pure virtual with the identical name+signature, so ONE class cannot answer both
+    // differently (a single override would satisfy both vtable slots with the SAME body, unable to
+    // tell which subject the caller meant). `file_selection_gateway()` below hands out a tiny nested
+    // adapter that forwards here instead.
+    [[nodiscard]] std::optional<std::vector<std::string>>
+    request_file_selection(const std::vector<std::string>& ids);
+
+    // The seam to BIND on a `files::FilesPanel` (its constructor takes a `files::SelectionGateway*`).
+    // Non-owning, like every gateway here: `this` must outlive whatever holds the pointer.
+    [[nodiscard]] files::SelectionGateway& file_selection_gateway() noexcept
+    {
+        return file_gateway_;
+    }
 
     [[nodiscard]] playbar::PlayCommandResult play() override;
     [[nodiscard]] playbar::PlayCommandResult pause() override;
@@ -218,6 +258,33 @@ private:
     // The ONE place a play command becomes a PlayCommandResult (all four transports share it).
     [[nodiscard]] playbar::PlayCommandResult drive_play(const char* method, contract::Json params);
 
+    // The ONE place an `editor.select` write happens (request_selection / request_file_selection
+    // both delegate here) — `subject == nullptr` is the entity default (no wire `subject`, the
+    // daemon's own default); a non-null `subject` is sent explicitly and is what a non-empty CHANGE
+    // mirrors into `selection_focus_` (c1/D3). The two PUBLIC entry points still exist separately
+    // because they satisfy two differently-typed gateway interfaces (see request_file_selection's
+    // comment) — only the write BODY was duplicated, and only that is collapsed here.
+    [[nodiscard]] std::optional<std::vector<std::string>>
+    write_selection_request(const std::vector<std::string>& ids, const char* subject);
+
+    // The `files::SelectionGateway` adapter `file_selection_gateway()` hands out — see that method's
+    // comment for why a nested forwarding type exists instead of a second `request_selection`
+    // override. It is a plain view over the owning feed, so it dies with it.
+    class FileSelectionAdapter final : public files::SelectionGateway
+    {
+    public:
+        explicit FileSelectionAdapter(SessionFeed& owner) noexcept : owner_(&owner) {}
+
+        [[nodiscard]] std::optional<std::vector<std::string>>
+        request_selection(const std::vector<std::string>& ids) override
+        {
+            return owner_->request_file_selection(ids);
+        }
+
+    private:
+        SessionFeed* owner_;
+    };
+
     PanelHost& host_;
     std::string playbar_panel_id_;
     playbar::PlaybarModel playbar_;
@@ -227,6 +294,10 @@ private:
 
     scenetree::SceneTreePanel* scene_tree_ = nullptr;
     std::string scene_tree_panel_id_;
+
+    FileSelectionAdapter file_gateway_{*this};
+    files::FilesPanel* files_ = nullptr;
+    std::string files_panel_id_;
 
     std::string selection_focus_ = kSelectionSubjectEntity;
     std::vector<FocusListener> focus_listeners_;

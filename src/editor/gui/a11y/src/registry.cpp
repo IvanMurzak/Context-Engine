@@ -12,6 +12,7 @@
 #include "context/editor/gui/contract/extension.h"
 
 #include "context/editor/gui/help/help_panel.h"
+#include "context/editor/gui/panels/files/files_panel.h"
 #include "context/editor/gui/panels/inspector/inspector_panel.h"
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_panel.h"
@@ -54,6 +55,10 @@ std::vector<std::pair<std::string, PanelFactory>> panel_factories()
     // M5-F2 — the scene-tree observer panel (gui/panels/scenetree/).
     factories.emplace_back(panels::scenetree::SceneTreePanel::kContributionId,
                            []() { return panels::scenetree::SceneTreePanel{}.build_panel(); });
+
+    // M9 e1 — the Files observer panel (gui/panels/files/), D10 read half.
+    factories.emplace_back(panels::files::FilesPanel::kContributionId,
+                           []() { return panels::files::FilesPanel{}.build_panel(); });
 
     // M5-F3 — the inspector panel (gui/panels/inspector/).
     factories.emplace_back(panels::inspector::InspectorPanel::kContributionId,

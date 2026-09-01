@@ -85,6 +85,42 @@ Json scene_tree_to_wire(const scenetree::SceneTreeModel& model)
     return out;
 }
 
+namespace
+{
+
+[[nodiscard]] Json file_node_to_wire(const files::FileNode& node)
+{
+    Json out = Json::object();
+    out.set("identity", Json(node.identity));
+    out.set("displayName", Json(node.display_name));
+    out.set("kind", Json(node.kind == files::FileNodeKind::file ? "file" : "directory"));
+    out.set("guid", Json(node.guid));
+    out.set("assetKind", Json(node.asset_kind));
+    Json children = Json::array();
+    for (const files::FileNode& child : node.children)
+    {
+        children.push_back(file_node_to_wire(child));
+    }
+    out.set("children", std::move(children));
+    return out;
+}
+
+} // namespace
+
+Json files_to_wire(const files::FilesModel& model)
+{
+    Json out = Json::object();
+    out.set("ok", Json(model.ok));
+    out.set("fileCount", Json(static_cast<std::uint64_t>(model.file_count)));
+    Json roots = Json::array();
+    for (const files::FileNode& root : model.roots)
+    {
+        roots.push_back(file_node_to_wire(root));
+    }
+    out.set("roots", std::move(roots));
+    return out;
+}
+
 Json inspector_to_wire(const inspector::InspectorModel& model)
 {
     Json out = Json::object();

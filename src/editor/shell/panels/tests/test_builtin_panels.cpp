@@ -15,13 +15,17 @@
 #include "context/editor/shell/panels/builtin_panels.h"
 
 #include "context/editor/gui/contract/builtin_roster.h"
+#include "context/editor/gui/panels/files/files_model.h" // M9 e1: FilesModel/FileNode for the wiring test
+#include "context/editor/gui/panels/files/files_panel.h" // M9 e1: FilesPanel::selection()
 #include "context/editor/gui/panels/problems/problems_panel.h"
 #include "context/editor/shell/editor_state.h" // e09c: the store the undo seams publish into
 #include "context/editor/shell/ipc_bridge.h"
 #include "context/editor/shell/panel_host.h"
+#include "context/editor/shell/panels/files_feed.h"     // M9 e1: complete FilesFeed type (see below)
 #include "context/editor/shell/panels/inspector_feed.h" // complete feed types: builtin_panels.h only
 #include "context/editor/shell/panels/problems_feed.h"  // forward-declares them, and this file calls
 #include "context/editor/shell/panels/scenetree_feed.h" // methods on the bag's members.
+#include "context/editor/shell/panels/session_feed.h"   // M9 e1: complete SessionFeed (foreign_subject_facts())
 #include "context/editor/shell/panels/undo_feed.h"      // e09c: the bag's session undo host
 #include "context/editor/shell/panels/wire_override_gateway.h" // e09b-2: the bag's write gateway
 #include "context/editor/shell/write_notice.h" // e09b-3: the LOUD relay the bag's sinks feed
@@ -43,6 +47,7 @@ namespace shell = context::editor::shell;
 namespace panels = context::editor::shell::panels;
 namespace gc = context::editor::gui::contract;
 namespace scenetree = context::editor::gui::panels::scenetree;
+namespace files = context::editor::gui::panels::files; // M9 e1: the wiring test below
 namespace client = context::editor::client;
 using Json = context::editor::contract::Json;
 
@@ -157,14 +162,16 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // FIVE panels, from four different libraries (uitree / problems / the e05d3 pair / the e09c
-    // session journal) — the panel-agnosticism claim exercised across every hosted shape.
-    // (AMENDED by editor-window-chrome e1: the docked `builtin.playbar` retired, 6 -> 5.)
-    CHECK(panels::hostable_panel_ids().size() == 5);
+    // SIX panels, from five different libraries (uitree / problems / the e05d3 pair / the M9 e1
+    // Files panel / the e09c session journal) — the panel-agnosticism claim exercised across every
+    // hosted shape. (AMENDED by editor-window-chrome e1: the docked `builtin.playbar` retired,
+    // 6 -> 5; AMENDED again by editor-UX e1: the Files panel joined hostable from day one, 5 -> 6.)
+    CHECK(panels::hostable_panel_ids().size() == 6);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
     CHECK(host.hosts("builtin.scene-tree"));
     CHECK(host.hosts("builtin.inspector"));
+    CHECK(host.hosts("builtin.files"));
     // e09c: rostered since e05b and UNHOSTED until now — which is exactly why the journal's
     // to_json/load_json had no caller. Hosting it is what gives `session.undo` / `session.redo` a
     // reachable path (R-CLI-001).
@@ -181,6 +188,7 @@ void binds_every_hostable_panel_and_nothing_else()
     CHECK(bound.problems != nullptr);
     CHECK(bound.scenetree != nullptr);
     CHECK(bound.inspector != nullptr);
+    CHECK(bound.files != nullptr); // M9 e1
     CHECK(bound.session != nullptr);
     // e09b-2: the Inspector's wire write gateway came back too — it is what the panel's raw gateway
     // pointer points at, so a bag missing it would leave the panel pointing at freed memory.
@@ -206,11 +214,15 @@ void binds_every_hostable_panel_and_nothing_else()
     const Json* problems_entry =
         find_panel(listing, context::editor::gui::panels::problems::ProblemsPanel::kContributionId);
     CHECK(problems_entry != nullptr && problems_entry->at("hosted").as_bool());
+    const Json* files_entry = find_panel(listing, "builtin.files");
+    CHECK(files_entry != nullptr && files_entry->at("hosted").as_bool());
     // The observers expose no gestures and persist nothing. REPORTED, not stubbed.
     CHECK(problems_entry != nullptr && !problems_entry->at("gestures").as_bool());
     CHECK(problems_entry != nullptr && !problems_entry->at("persists").as_bool());
     CHECK(scenetree_entry != nullptr && !scenetree_entry->at("gestures").as_bool());
     CHECK(inspector_entry != nullptr && !inspector_entry->at("persists").as_bool());
+    CHECK(files_entry != nullptr && !files_entry->at("gestures").as_bool());
+    CHECK(files_entry != nullptr && !files_entry->at("persists").as_bool());
 
     // M9 e09b-2 — THE `gestures:false -> true` FLIP, at the ONE place it is decided. The Inspector is
     // the only built-in that WRITES, so it is the only one that can end a gesture with a commit; the
@@ -634,6 +646,53 @@ void a_daemon_selection_schedules_the_inspector_fetch()
     // change a selection it does not own (and the composition root leaves it honestly read-only).
     CHECK(!bound.scenetree->panel().select("inst1/ent1"));
     CHECK(!bound.inspector->pending().has_value());
+}
+
+// M9 e1 — THE FILES PANEL'S HALF OF THE SAME LOOP, through the SAME real `install_builtin_panels`
+// wiring, proving `SessionFeed::bind_files` is actually CALLED there (not just unit-tested on an
+// isolated `SessionFeed` — see test_session_feed.cpp for that half). Without this call a
+// `selection-changed{subject:"file"}` fact from ANOTHER client hits `apply_event`'s
+// `files_ == nullptr` guard and is silently dropped: the Files panel would never learn of a file
+// another window/CLI/agent selected, breaking the D7 "one truth, every client" claim for exactly
+// this one subject while the entity subject (proven above) kept working — the failure mode that
+// stays invisible until a second window is opened, per session_feed.h § THE SUBJECT FILTER.
+void a_daemon_file_selection_reaches_the_files_panel()
+{
+    shell::PanelHost host;
+    const panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.files != nullptr);
+    CHECK(bound.session != nullptr);
+    if (bound.files == nullptr || bound.session == nullptr)
+    {
+        return;
+    }
+
+    files::FilesModel model;
+    model.file_count = 1;
+    files::FileNode node;
+    node.identity = "README.md";
+    node.kind = files::FileNodeKind::file;
+    model.roots.push_back(node);
+    bound.files->panel().set_model(model);
+
+    CHECK(bound.files->panel().selection().identity.empty());
+
+    // The daemon's `selection-changed{subject:"file"}` fact, from a FOREIGN client (origin 7, like
+    // `selection_fact` above) so echo suppression passes it through.
+    Json fact = Json::object();
+    fact.set("event", Json(std::string("selection-changed")));
+    fact.set("origin", Json(std::uint64_t{7}));
+    fact.set("subject", Json(std::string("file")));
+    Json ids = Json::array();
+    ids.push_back(Json(std::string("README.md")));
+    fact.set("ids", std::move(ids));
+
+    CHECK(panels::apply_session_event(*bound.session, panels::kSessionTopic, fact));
+    CHECK(bound.files->panel().selection().identity == "README.md");
+
+    // And it is NOT counted as a foreign/dropped subject: `file` is a recognized vocabulary with a
+    // bound consumer now, exactly like `entity`.
+    CHECK(bound.session->foreign_subject_facts() == 0);
 }
 
 // M9 x9 (CE #449) — THE L-30 GUARD ON THE PATH THAT NEVER TOUCHES `InspectorFeed::apply_event`.
@@ -1063,6 +1122,7 @@ int main()
     a_daemon_event_reaches_the_rendered_panel();
     a_shell_local_problem_reaches_the_rendered_panel();
     a_daemon_selection_schedules_the_inspector_fetch();
+    a_daemon_file_selection_reaches_the_files_panel();
     a_settle_driven_tree_refetch_does_not_rebase_a_staged_gesture();
     a_foreign_selection_move_does_not_rebase_a_staged_gesture();
     a_foreign_selection_clear_does_not_discard_a_staged_gesture();

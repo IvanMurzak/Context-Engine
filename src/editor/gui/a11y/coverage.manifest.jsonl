@@ -12,6 +12,7 @@
 {"id": "placeholder", "title": "Context Editor", "owner": "M5-F0b", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.scene-tree", "title": "Scene Tree", "owner": "M5-F2", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.inspector", "title": "Inspector", "owner": "M5-F3", "requires": ["semantic-scan", "keyboard-nav"]}
+{"id": "builtin.files", "title": "Files", "owner": "editor-UX-e1", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.viewport", "title": "Viewport", "owner": "M5-F1", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.problems", "title": "Problems", "owner": "M5-EXIT-#168", "requires": ["semantic-scan", "keyboard-nav"]}
 {"id": "builtin.tilemap-painter", "title": "Tilemap Painter", "owner": "M8.5-a18", "requires": ["semantic-scan", "keyboard-nav"]}

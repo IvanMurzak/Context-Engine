@@ -69,13 +69,15 @@ struct MetaOnDisk
     bool asset_exists = false;
 };
 
-// Read every parseable sidecar under `root`; malformed ones surface asset.meta_invalid.
-[[nodiscard]] std::vector<MetaOnDisk> read_metas(const filesync::FileStore& fs,
-                                                 std::string_view root,
-                                                 std::vector<AssetDiagnostic>& diagnostics)
+// Read every parseable sidecar named in `paths`; malformed ones surface asset.meta_invalid. Takes
+// an already-fetched listing so a caller that also needs the raw listing itself (the `editor.files`
+// daemon read) can share ONE `fs.list()` walk instead of paying for a second.
+[[nodiscard]] std::vector<MetaOnDisk> read_metas_over(const filesync::FileStore& fs,
+                                                      const std::vector<std::string>& paths,
+                                                      std::vector<AssetDiagnostic>& diagnostics)
 {
     std::vector<MetaOnDisk> out;
-    for (const std::string& path : fs.list(root))
+    for (const std::string& path : paths)
     {
         if (!is_meta_path(path))
             continue;
@@ -110,6 +112,14 @@ struct MetaOnDisk
         out.push_back(std::move(entry));
     }
     return out;
+}
+
+// Read every parseable sidecar under `root`; malformed ones surface asset.meta_invalid.
+[[nodiscard]] std::vector<MetaOnDisk> read_metas(const filesync::FileStore& fs,
+                                                 std::string_view root,
+                                                 std::vector<AssetDiagnostic>& diagnostics)
+{
+    return read_metas_over(fs, fs.list(root), diagnostics);
 }
 
 // The meta-less asset candidates under `root`.
@@ -197,13 +207,19 @@ void AssetDatabase::drop_path(std::string_view asset_path)
 
 ScanResult AssetDatabase::scan(const filesync::FileStore& fs, std::string_view root)
 {
+    return scan(fs, fs.list(root));
+}
+
+ScanResult AssetDatabase::scan(const filesync::FileStore& fs,
+                               const std::vector<std::string>& listed_paths)
+{
     by_guid_.clear();
     path_to_guid_.clear();
 
     ScanResult result;
-    // fs.list() is sorted, so first-seen == lexicographically-first: duplicate resolution is
-    // deterministic across runs and platforms.
-    for (MetaOnDisk& entry : read_metas(fs, root, result.diagnostics))
+    // listed_paths is expected sorted (fs.list()'s contract), so first-seen == lexicographically-
+    // first: duplicate resolution is deterministic across runs and platforms.
+    for (MetaOnDisk& entry : read_metas_over(fs, listed_paths, result.diagnostics))
     {
         if (!entry.asset_exists)
         {

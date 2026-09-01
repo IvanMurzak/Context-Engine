@@ -163,6 +163,9 @@ int main()
             // M9 e05d3 editor-panel reads: composed-world projections the Shell hydrates from —
             // no write planned, no session touched.
             {"editor.scene-tree", Scope::read_query}, {"editor.inspect", Scope::read_query},
+            // M9 e1 (D10 read half): the project file-tree read the Files panel hydrates from —
+            // same reasoning, a project-wide listing plans no write and touches no session.
+            {"editor.files", Scope::read_query},
             // file_write — authored-file mutations
             {"new", Scope::file_write},             {"set", Scope::file_write},
             {"edit", Scope::file_write},            {"edit-batch", Scope::file_write},

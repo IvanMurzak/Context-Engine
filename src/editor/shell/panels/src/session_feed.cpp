@@ -103,6 +103,12 @@ void SessionFeed::bind_scene_tree(scenetree::SceneTreePanel* panel, std::string 
     scene_tree_panel_id_ = std::move(panel_id);
 }
 
+void SessionFeed::bind_files(files::FilesPanel* panel, std::string panel_id)
+{
+    files_ = panel;
+    files_panel_id_ = std::move(panel_id);
+}
+
 void SessionFeed::add_focus_listener(FocusListener listener)
 {
     if (listener)
@@ -136,26 +142,45 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
     const std::string event = read_string(payload, "event");
     if (event == kSelectionChangedEvent)
     {
-        // THE SUBJECT FILTER (session_feed.h § THE SUBJECT FILTER). The Scene tree renders ENTITIES;
-        // feeding it a `file` selection would hand `apply_selection` project paths to resolve as L-35
-        // entity id-paths, and the result — a tree with nothing selected — is indistinguishable from
-        // a correct empty result. Counted, not silently skipped, so the drop is observable.
-        if (read_subject(payload) != kSelectionSubjectEntity)
+        // THE SUBJECT FILTER (session_feed.h § THE SUBJECT FILTER), DISPATCHING BY SUBJECT rather
+        // than filtering a single one. The Scene tree renders ENTITIES and the Files panel renders
+        // PATHS; feeding either the OTHER's ids would hand `apply_selection` a vocabulary it cannot
+        // resolve, and the result — a panel with nothing selected — is indistinguishable from a
+        // correct empty result. A subject outside BOTH vocabularies is counted, not silently
+        // skipped, so the drop is observable; a recognized subject with no bound consumer (its
+        // provider was refused) is an ordinary unhosted state and is NOT counted (mirrors every
+        // other `panel == nullptr` guard in this feed).
+        const std::string subject = read_subject(payload);
+        if (subject == kSelectionSubjectEntity)
         {
-            ++foreign_subject_facts_;
-            return false;
+            if (scene_tree_ == nullptr)
+            {
+                return false;
+            }
+            if (!scene_tree_->apply_selection(read_ids(payload)))
+            {
+                return false;
+            }
+            ++facts_applied_;
+            host_.touch(scene_tree_panel_id_);
+            return true;
         }
-        if (scene_tree_ == nullptr)
+        if (subject == kSelectionSubjectFile)
         {
-            return false;
+            if (files_ == nullptr)
+            {
+                return false;
+            }
+            if (!files_->apply_selection(read_ids(payload)))
+            {
+                return false;
+            }
+            ++facts_applied_;
+            host_.touch(files_panel_id_);
+            return true;
         }
-        if (!scene_tree_->apply_selection(read_ids(payload)))
-        {
-            return false;
-        }
-        ++facts_applied_;
-        host_.touch(scene_tree_panel_id_);
-        return true;
+        ++foreign_subject_facts_;
+        return false;
     }
 
     if (event == kSelectionFocusEvent)
@@ -209,8 +234,14 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
     return false;
 }
 
+// The shared `editor.select` write body for BOTH panel seams (session_feed.h's rationale for why
+// two public entry points exist still applies — this collapses only the write BODY the diff had
+// duplicated). `subject == nullptr` is the entity default: no wire `subject` is sent (the daemon's
+// own default, alongside its `mode: replace` default — the only mode a single-select panel can
+// express — both left the daemon's to choose rather than pinned here). A non-null `subject` is sent
+// explicitly, exactly as a file (or future non-default) write must.
 std::optional<std::vector<std::string>>
-SessionFeed::request_selection(const std::vector<std::string>& ids)
+SessionFeed::write_selection_request(const std::vector<std::string>& ids, const char* subject)
 {
     if (client_ == nullptr)
     {
@@ -225,23 +256,28 @@ SessionFeed::request_selection(const std::vector<std::string>& ids)
         wire.push_back(contract::Json(id));
     }
     params.set("ids", std::move(wire));
-    // `mode` is deliberately omitted: the daemon defaults to `replace`, which is the only mode a
-    // single-select panel can express. Sending it explicitly would pin a default that is the
-    // daemon's to choose.
+    if (subject != nullptr)
+    {
+        params.set("subject", contract::Json(std::string(subject)));
+    }
 
     std::string error;
     const std::optional<contract::Json> reply =
         client_->call("editor.select", std::move(params), error);
     if (!reply.has_value())
     {
-        std::fprintf(stderr, "context_editor: `editor.select` was refused (%s: %s)\n",
-                     client_->last_error_code().c_str(), error.c_str());
+        const std::string tag =
+            subject != nullptr ? (std::string(" (") + subject + ")") : std::string();
+        std::fprintf(stderr, "context_editor: `editor.select`%s was refused (%s: %s)\n",
+                     tag.c_str(), client_->last_error_code().c_str(), error.c_str());
         return std::nullopt;
     }
-    // The reply's `ids` is THE DAEMON'S post-write selection — including on a `changed:false` no-op,
-    // where it is exactly what is already selected. It is the panel's only path to seeing its own
-    // selection, because the `selection-changed` fact this write publishes carries OUR origin and is
-    // dropped by apply_event below (session_feed.h's echo-suppression note).
+    // The reply's `ids` is THE ACTED SUBJECT's post-write selection (kernel_server.cpp's
+    // `editor.select` handler: `selection_ids_json(session_, subject)`) — including on a
+    // `changed:false` no-op, where it is exactly what is already selected. It is the panel's only
+    // path to seeing its own selection, because the `selection-changed` fact this write publishes
+    // carries OUR origin and is dropped by apply_event above (session_feed.h's echo-suppression
+    // note).
     const contract::Json& data = envelope_data(*reply);
 
     // ⚠ c1/D3 — THE FOCUS MIRROR, and it rides the SAME echo-suppression note. The daemon focuses
@@ -251,8 +287,9 @@ SessionFeed::request_selection(const std::vector<std::string>& ids)
     // back to that subject (`subject == selection_focus_` returns false), so the Inspector goes on
     // rendering an entity nobody is working on. That is the exact failure D3 exists to prevent.
     //
-    // `entity` is not a guess: this writer sends no `subject`, so the daemon applied the default.
-    // A future writer that names one must mirror THAT subject here.
+    // `subject == nullptr` is not a guess: that writer sent no `subject`, so the daemon applied the
+    // `entity` default. A future writer that names one mirrors THAT subject instead, as `file`
+    // already does.
     //
     // Listeners are deliberately NOT notified — this window's own write already re-points the
     // Inspector through the Scene tree's selection listener, and firing them would re-enter the
@@ -260,9 +297,24 @@ SessionFeed::request_selection(const std::vector<std::string>& ids)
     std::vector<std::string> applied = read_ids(data);
     if (read_bool(data, "changed") && !applied.empty())
     {
-        selection_focus_ = kSelectionSubjectEntity;
+        selection_focus_ = subject != nullptr ? subject : kSelectionSubjectEntity;
     }
     return applied;
+}
+
+std::optional<std::vector<std::string>>
+SessionFeed::request_selection(const std::vector<std::string>& ids)
+{
+    return write_selection_request(ids, nullptr);
+}
+
+std::optional<std::vector<std::string>>
+SessionFeed::request_file_selection(const std::vector<std::string>& ids)
+{
+    // The daemon's default subject is `entity`; `file` MUST be sent explicitly, or this would
+    // silently move the wrong selection (see write_selection_request's comments for the shared
+    // rationale this and request_selection both rely on).
+    return write_selection_request(ids, kSelectionSubjectFile);
 }
 
 playbar::PlayCommandResult SessionFeed::drive_play(const char* method, contract::Json params)

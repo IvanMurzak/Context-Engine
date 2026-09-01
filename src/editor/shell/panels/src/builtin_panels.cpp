@@ -8,6 +8,7 @@
 #include "context/editor/gui/uitree/builtin.h"
 #include "context/editor/serializer/canonical.h" // the ONE value identity the observe seam reports (R-FILE-001)
 #include "context/editor/shell/editor_state.h"   // EditorState / EditorStateStore (e09c)
+#include "context/editor/shell/panels/files_feed.h"    // M9 e1: FilesFeed complete type (D10 read half)
 #include "context/editor/shell/panels/inspector_feed.h"
 #include "context/editor/shell/panels/problems_feed.h" // ProblemsFeed complete type (see builtin_panels.h)
 #include "context/editor/shell/panels/scenetree_feed.h"
@@ -98,6 +99,12 @@ bool report_local_problem(BuiltinPanels& panels, const std::string& code, const 
 
 bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
                            const contract::Json& payload, std::uint64_t generation)
+{
+    return feed.apply_event(topic, payload, generation);
+}
+
+bool apply_files_event(FilesFeed& feed, const std::string& topic, const contract::Json& payload,
+                       std::uint64_t generation)
 {
     return feed.apply_event(topic, payload, generation);
 }
@@ -354,6 +361,16 @@ void bind_selection_focus(SessionFeed& session, InspectorFeed& inspector, SceneT
         });
 }
 
+void bind_files_focus(SessionFeed& session, FilesFeed& files_feed)
+{
+    // Raw capture, safe by the SAME construction bind_selection_focus's does: in a real bag both
+    // live (and die) together, and a focus fact can only arrive from `apply_event`, which the owner
+    // loop stops calling before teardown.
+    FilesFeed* files_ptr = &files_feed;
+    session.add_focus_listener([files_ptr](const std::string& subject)
+                               { files_ptr->panel().set_focused(subject == kSelectionSubjectFile); });
+}
+
 void bind_write_client(BuiltinPanels& panels, client::Client* client)
 {
     // A bag whose gateway was never created (impossible from install_builtin_panels, possible from a
@@ -541,6 +558,19 @@ bool publish_undo_state(BuiltinPanels& panels, EditorStateStore& store, std::uin
 
 void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path)
 {
+    // Files (M9 e1): fetch when due — NO scene_path gate, unlike the tree/inspector below, since
+    // `editor.files` lists the WHOLE project rather than one scene. The claim precedes the call
+    // (header: a failure waits for the next settle rather than hammering).
+    if (panels.files != nullptr && panels.files->fetch_due())
+    {
+        panels.files->mark_fetched();
+        if (const std::optional<contract::Json> reply =
+                pump_read(client, "editor.files", contract::Json::object(), "files"))
+        {
+            (void)panels.files->apply_result(*reply);
+        }
+    }
+
     // Scene tree: fetch when due AND a scene is named. The claim precedes the call (header: a
     // failure waits for the next settle rather than hammering).
     if (panels.scenetree != nullptr && !scene_path.empty() && panels.scenetree->fetch_due())
@@ -592,6 +622,10 @@ const std::vector<std::string>& hostable_panel_ids()
         gui::panels::problems::ProblemsPanel::kContributionId,
         gui::panels::scenetree::SceneTreePanel::kContributionId,
         gui::panels::inspector::InspectorPanel::kContributionId,
+        // M9 e1, D10 read half: hostable from day one — its kernel-typed builder was born in
+        // gui/panels/builders/ (the e05d3 split's precedent applied up front), so this panel never
+        // had a "listed but unhosted" phase the way scene-tree/inspector did pre-e05d3.
+        gui::panels::files::FilesPanel::kContributionId,
         // `builtin.playbar` (hostable e08b..e09) is RETIRED — editor-window-chrome e1 (D2): the d1
         // titlebar strip is the Play Bar's only home, driving the SAME SessionFeed/PlaybarModel
         // transport over `session.control`, so the dock surface came off the roster and out of this
@@ -748,6 +782,41 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         if (out.inspector != nullptr)
         {
             bind_selection_focus(*out.session, *out.inspector, out.scenetree.get());
+        }
+    }
+
+    // --- Files (M9 e1, D10 read half) ------------------------------------------------------------
+    // Hostable from day one — its kernel-typed builder (assetdb-backed) was born daemon-side in
+    // gui/panels/builders/, so unlike scene-tree/inspector it never had a "listed but unhosted"
+    // phase. Its selection writes through `session`'s `files::SelectionGateway` adapter — the SAME
+    // `editor.select` verb the Scene tree writes through, subject "file" instead of the default.
+    {
+        auto files_feed = std::make_unique<FilesFeed>(
+            host, gui::panels::files::FilesPanel::kContributionId, &out.session->file_selection_gateway());
+        if (host.provide(gui::panels::files::FilesPanel::kContributionId, files_feed->make_provider()))
+        {
+            ++out.bound;
+            out.files = std::move(files_feed);
+        }
+        // A refused binding DROPS the feed (the ProblemsFeed rule): a feed nothing routes to would
+        // pump daemon reads into a model no renderer can ever see.
+
+        // Point the session feed at the panel whose rendered `file`-subject selection it drives —
+        // the SAME seam `bind_scene_tree` wires for the Scene tree above. Without this, a
+        // `selection-changed{subject:"file"}` fact from ANOTHER client (a second window, the CLI, a
+        // scripted agent) would hit `apply_event`'s `files_ == nullptr` guard and be silently
+        // dropped: the Files panel would never learn of a file another client selected, breaking the
+        // D7 "one truth, every client" claim this whole feed exists to uphold. Wired AFTER the move
+        // for the same reason `bind_scene_tree` is — the pointer must be into the feed that will
+        // actually live in the bag.
+        if (out.files != nullptr)
+        {
+            out.session->bind_files(&out.files->panel(), gui::panels::files::FilesPanel::kContributionId);
+
+            // c1/D3: the Files panel renders whether IT currently has focus (bind_files_focus,
+            // unlike the Inspector's re-pointing, only flips a boolean the panel already owns — see
+            // that seam's own comment).
+            bind_files_focus(*out.session, *out.files);
         }
     }
 

@@ -958,6 +958,24 @@ Registry::Registry()
           "The L-35 id-path to the composed entity, slash-separated ([instanceId, ..., entityId])."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // M9 e1 (editor-UX D10 read half): the project FILE TREE as a boundary-clean panel model — the
+    // Files panel's read surface, following `editor scene-tree` / `editor inspect` exactly: the
+    // kernel-typed model builder (assetdb-backed) runs daemon-side (gui/panels/builders/), the model
+    // arrives at the Shell as data, and the D10 shell-boundary FORBIDDEN list never moves (the Shell
+    // cannot link context_assetdb). Read-only (read_query — a project-wide listing, no session
+    // touched); takes no params (the whole project tree, unlike the per-scene composed reads above).
+    verbs_.push_back(make_verb(
+        "", "editor", "files",
+        "Read the project's FILE TREE as the boundary-clean panel model the Files panel hydrates "
+        "from (M9 D10 read half): path, GUID, and asset kind per candidate file, nested by "
+        "directory — built daemon-side over the asset database's live GUID index "
+        "(src/editor/assetdb/) so the Shell links no EditorKernel internal. A file with no "
+        "`<asset>.meta.json` sidecar yet reports an empty guid/kind (unknown = not enforced, the "
+        "same seam contract `asset move`/`asset rename` share); sidecars and tool-internal "
+        "(dot-segment) paths are never rows. Served by a live daemon; read-only — the write half "
+        "(rename/move/delete) is a separate verb family.",
+        /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
     // --- M9 e08a: the DAEMON SESSION-STATE surface (D7 tier 1, design 05 §4) ---------------------
     // The semantic human state — selection, cameras, play — promoted out of the GUI panels' private
     // members into the daemon, so every client (a second window, the CLI, a scripted agent) sees and

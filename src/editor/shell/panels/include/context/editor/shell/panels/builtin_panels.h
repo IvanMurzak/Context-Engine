@@ -13,7 +13,7 @@
 // violations by splitting the kernel-typed builders out (gui/panels/builders/, linked daemon-side);
 // this file is the seam that now hosts both.
 //
-// WHAT "HOSTABLE TODAY" MEANS. Five of the rostered panels are hostable in this build
+// WHAT "HOSTABLE TODAY" MEANS. Six of the rostered panels are hostable in this build
 // (`hostable_panel_ids()` is the ONE enumeration — this list is prose about it, and
 // `editor-shell-test_builtin_panels` asserts the two agree):
 //
@@ -23,6 +23,10 @@
 //                             split its kernel-typed builder out (gui/panels/builders/).
 //   * `builtin.inspector`   — `context_gui_panel_inspector` -> uitree + serializer. Clean since
 //                             e05d3 (builders split out + the boundary-clean gateway seam).
+//   * `builtin.files`       — `context_gui_panel_files` -> uitree + bridge (M9 e1, D10 read half).
+//                             Clean from day one: its kernel-typed builder (assetdb-backed) was
+//                             born in gui/panels/builders/, the e05d3 split's precedent applied
+//                             up front rather than retrofitted.
 //   * `builtin.session.undo`— `context_gui_undo` -> the inspector panel + uitree + serializer. Clean
 //                             since e09c: every one of those was ALREADY on this target's closure.
 //
@@ -93,6 +97,10 @@ class ProblemsFeed;
 // library's own panel headers. Callers holding only the bag drive them through the free seams below.
 class SceneTreeFeed;
 class InspectorFeed;
+// The M9 e1 live feed, forward-declared for the SAME reason: files_feed.h reaches files_panel.h ->
+// bridge/event_stream.h (the typeid chain). Callers holding only the bag drive it through the free
+// seams below.
+class FilesFeed;
 // The e08b daemon-session feed, forward-declared for the SAME reason (it includes both panel headers
 // and reaches the typeid chain through scene_tree_panel.h). Callers holding only the bag drive it
 // through the free seams below.
@@ -160,6 +168,11 @@ bool report_local_problem(BuiltinPanels& panels, const std::string& code, const 
 // the panel's rendered surface changed. Defined in builtin_panels.cpp.
 bool apply_scenetree_event(SceneTreeFeed& feed, const std::string& topic,
                            const contract::Json& payload, std::uint64_t generation);
+
+// The same seam for the M9 e1 Files feed — rides the SAME `derivation` stream. Returns true when the
+// panel's rendered surface changed. Defined in builtin_panels.cpp.
+bool apply_files_event(FilesFeed& feed, const std::string& topic, const contract::Json& payload,
+                       std::uint64_t generation);
 
 // The same seam for the e09e-2 INSPECTOR FAN-OUT — design 05 §8's tail, where a landed write reaches
 // every subscribed client. Forward one event off the SAME `derivation` stream the Scene tree and
@@ -354,6 +367,15 @@ void bind_session_client(SessionFeed& feed, client::Client* client);
 // can drive the real thing over its own feeds instead of re-implementing the policy beside it.
 void bind_selection_focus(SessionFeed& session, InspectorFeed& inspector, SceneTreeFeed* scenetree);
 
+// Wire the c1/D3 `selection-focus` CONSUMER for the Files panel (M9 e1) — simpler than the
+// Inspector's, because the Files panel already holds its OWN selection (D1 coexistence) and only
+// needs to know WHETHER it currently has focus, not WHAT to show. Every focus move calls
+// `files_feed.panel().set_focused(subject == "file")` — the panel renders the boolean in its status
+// line ("the panel renders focus state", the DoD line this seam exists to satisfy). Takes the FEED
+// (forward-declared, like `SceneTreeFeed*` above) rather than the panel directly, so this header
+// still never includes files_panel.h's typeid chain; `files_feed` must outlive the binding.
+void bind_files_focus(SessionFeed& session, FilesFeed& files_feed);
+
 // The SAME seam for the M9 e09b-2 WRITE path: point the Inspector's wire override-write gateway at
 // the daemon link's CURRENT client — `nullptr` to clear it. A no-op when no gateway is in the bag.
 //
@@ -459,6 +481,12 @@ struct BuiltinPanels
     std::unique_ptr<SceneTreeFeed> scenetree;
     std::unique_ptr<InspectorFeed> inspector;
 
+    // The M9 e1 Files feed. Its selection is written through `session`'s
+    // `files::SelectionGateway` adapter (session_feed.h), so — the SAME reason `session` precedes
+    // `scenetree`/`inspector` above — it must be destroyed BEFORE `session` is, which member
+    // declaration order (destruction is reverse order) gives by placing it AFTER `session` here.
+    std::unique_ptr<FilesFeed> files;
+
     // How many providers actually bound. Checked by the caller: a silently dropped binding presents
     // later as a panel that mysteriously reports `hosted: false`.
     std::size_t bound = 0;
@@ -491,6 +519,10 @@ struct BuiltinPanels
 //     PRODUCES that settle, so every client write drives this path (inspector_feed.h § THE PUBLISHER
 //     HALF) — and the tree refetch the same settle triggers can re-arm the Inspector's fetch through
 //     the selection listener, which the feed defers under the same L-30 rule (§ request).
+//   * Files (M9 e1): when a fetch is due (first hydration, or a `derivation.settled` arrived — the
+//     same signal the Scene tree rides), issue `editor.files` (no params: it lists the WHOLE
+//     project, not one scene, so there is no `scene_path` gate here) and hand the reply to the
+//     feed.
 //
 // FAILURE POSTURE: a fetch is CLAIMED before its RPC, so a failed call (daemon gone, refused) is
 // reported to stderr and NOT retried until the next settle / selection change — an editor hammering

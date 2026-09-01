@@ -63,6 +63,7 @@ export type RpcMethod =
     | "snapshot"
     | "editor.scene-tree"
     | "editor.inspect"
+    | "editor.files"
     | "editor.select"
     | "editor.selection-get"
     | "editor.selection-focus-get"
@@ -466,6 +467,16 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         params: ["path", "idPath"],
         flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
     },
+    "editor.files": {
+        method: "editor.files",
+        ns: "",
+        noun: "editor",
+        verb: "files",
+        stability: "operational",
+        deprecated: false,
+        params: [],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
     "editor.select": {
         method: "editor.select",
         ns: "",
@@ -619,7 +630,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
 };
 
 /** Every RPC method name, in registry order. */
-export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "editor.select", "editor.selection-get", "editor.selection-focus-get", "editor.camera-set", "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
+export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "editor.files", "editor.select", "editor.selection-get", "editor.selection-focus-get", "editor.camera-set", "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
 
 /** Every subscribable event topic. */
 export type EventTopic =

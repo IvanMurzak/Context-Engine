@@ -125,6 +125,19 @@ std::vector<Contribution> build_roster()
                                       .min_height = 200,
                                       .capabilities = Caps{kCapabilityReadQuery}}));
 
+    // M9 e1 — the Files observer panel (gui/panels/files/), D10 read half. Publishes
+    // `subject: "file"` selections through the c1 typed-selection surface; read-only (the write
+    // half — rename/move/delete — is task e2, which will add file_write).
+    roster.push_back(to_contribution({.id = "builtin.files",
+                                      .title = "Files",
+                                      .icon = "folder",
+                                      .zone = DockZone::left,
+                                      .mode = InstanceMode::singleton,
+                                      .path = "Project",
+                                      .min_width = 240,
+                                      .min_height = 200,
+                                      .capabilities = Caps{kCapabilityReadQuery}}));
+
     // M5-F3 — the inspector panel (gui/panels/inspector/). Authors composed overrides through the
     // ONE L-30 write path, so it declares the file_write grant explicitly (never ambient).
     roster.push_back(
