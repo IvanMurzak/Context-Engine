@@ -159,6 +159,13 @@ const COLORS: ObjectSpec = {
         canvas: { kind: "color" },
         panel: { kind: "color" },
         panel2: { kind: "color" },
+        // The PRESSED surface step (M9 a3, 07 §2: "one further step [than hover], or the
+        // accent-tinted step; must be visibly distinct from hover"). e06a shipped only two surface
+        // steps, which is enough for the base/hover pair but leaves no THIRD step for `:active` — the
+        // state model's own rule is "if a state needs a step the theme does not publish, add a theme
+        // token, never a calc() over an existing one" (a `calc()` over `panel2` would be a raw-value
+        // bypass wearing a token's clothes, exactly what `webui-kit-tokens-only` exists to catch).
+        panel3: { kind: "color" },
         ink: { kind: "color" },
         muted: { kind: "color" },
         muted2: { kind: "color" },

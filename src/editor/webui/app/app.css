@@ -680,6 +680,37 @@ html .dockview-theme-dark {
     --dv-paneview-active-outline-color: var(--ctx-colors-accent, var(--editor-fg));
 }
 
+/* --- tab-strip hover (M9 a3, 07 §4) ------------------------------------------------------------- *
+ *
+ * dockview-core 7.0.2 ships NO hover rule for `.dv-tab` at all (verified against the pinned
+ * `dockview.css`) — its background is decided purely by the ancestor group/tab-active matrix above,
+ * and none of the THREE variables this rule sets is ever declared directly ON `.dv-tab` by the
+ * vendored stylesheet (only READ there, via the consuming `background-color: var(...)` rules). So,
+ * unlike the block above, this rule needs no specificity fight and no dependence on injection order:
+ * declaring the variables scoped to `:hover`, on the very element that reads them, wins outright the
+ * moment the cascade reaches `.dv-tab` itself. The `html .dockview-theme-dark` prefix is kept anyway,
+ * for locality with the pattern above rather than because it is load-bearing here.
+ *
+ * The currently-active tab of the currently-FOCUSED group is deliberately EXCLUDED
+ * (`--dv-activegroup-visiblepanel-tab-background-color` is untouched): it is already the
+ * pressed/selected step, and hovering it needs no further highlight — mirroring the kit's own
+ * hover-vs-pressed distinction (07 §2: "visibly distinct from hover, not merely darker by a hair").
+ * Every OTHER tab — an inactive tab in the focused group, or either tab in an unfocused group — steps
+ * to `colors.panel2` on hover, the SAME surface step the kit widgets use, so the strip visually agrees
+ * with the rest of the chrome. Confirmed on the RENDERED result in `theme_dom.test.ts` (reading the
+ * selector alone would not catch the specificity trap the block above exists to document — the reason
+ * this whole section starts by recording that this rule does not have that trap). */
+html .dockview-theme-dark .dv-tab {
+    transition: background-color var(--ctx-motion-duration-fast, 120ms)
+        var(--ctx-motion-easing-standard, ease-in-out);
+}
+
+html .dockview-theme-dark .dv-tab:hover {
+    --dv-activegroup-hiddenpanel-tab-background-color: var(--ctx-colors-panel2, var(--editor-bg));
+    --dv-inactivegroup-visiblepanel-tab-background-color: var(--ctx-colors-panel2, var(--editor-bg));
+    --dv-inactivegroup-hiddenpanel-tab-background-color: var(--ctx-colors-panel2, var(--editor-bg));
+}
+
 /* --- Pulse of Work: the ONE signature flourish (M9 e06b; design 06 §2, mockups/TOKENS.md §5) --- *
  *
  * OWNER PICK O1 (resolved 2026-07-19): the glow's COLOUR AND RHYTHM mirror the Play button's real

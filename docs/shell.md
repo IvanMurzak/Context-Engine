@@ -1197,6 +1197,7 @@ cmake --build --preset dev --target context_editor    # from src/
 | Boot | The page is **rendered inside** the window. stdout reports `present path = gpu-swapchain` (or `cpu-blit` on a GPU-less box — also a pass, see the next row). |
 | No usable adapter | Boot with the GPU disabled (or on a box with no adapter): the UI still appears, presented through GDI, and stdout reports `present path = cpu-blit`. |
 | Mouse | Hover highlights follow the cursor; a click activates the element under it; the cursor leaving the window clears the hover. |
+| Dockview tab-strip hover (a3, 07 §4) | Hovering an inactive tab, or either tab of an unfocused group, steps its background to the theme's `colors.panel2` — the same surface step the kit's buttons/rows use; the active tab of the FOCUSED group is unchanged (already the pressed/selected step). `theme_dom.test.ts` pins that the served rule targets the right three `--dv-*` variables and that setting them really does drive dockview's own background-color rule to `colors.panel2` on a live element; genuine `:hover` cannot be triggered from the `webui-ts-unit` harness (no CDP access from in-page script), so this row is the pixel confirmation. |
 | Wheel | The page scrolls, and in the direction the wheel turned. |
 | Keyboard | Typing into a text field inserts the characters, including a non-ASCII one; Tab moves DOM focus. |
 | Drag | Press inside the window, drag past the window edge and release: the gesture stays with where it started and ends on the release. |
