@@ -979,8 +979,9 @@ int main()
             CHECK(ro.connect(3000));
             CHECK(ro.request(rpc(1, "attach", attach_params("read"))).has_value());
             for (const char* method :
-                 {"editor.select", "editor.selection-get", "editor.camera-set",
-                  "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step"})
+                 {"editor.select", "editor.selection-get", "editor.selection-focus-get",
+                  "editor.camera-set", "editor.cameras-get", "editor.play", "editor.pause",
+                  "editor.stop", "editor.step"})
             {
                 const std::optional<std::string> denied =
                     ro.request(rpc(2, method, Json::object()));
@@ -1150,6 +1151,98 @@ int main()
                 req_demux(a, 12, rpc(12, "editor.select", std::move(bad_sel)), a_events);
             CHECK(bad_mode.has_value());
             CHECK(bad_mode->at("error").at("data").at("code").as_string() == "usage.invalid");
+
+            // --- c1: TYPED selection over the wire (D1/D2/D3) -----------------------------------
+            // The entity selection is {root/child, root/other} at this point. Selecting a FILE must
+            // leave it alone (D1: subjects coexist), and the reply must stay ADDITIVE — `ids` is a
+            // member live readers already depend on (attach_command.cpp's observer), and a member
+            // that disappeared would read as ABSENT rather than as an error.
+            Json file_sel = Json::object();
+            Json file_ids = Json::array();
+            file_ids.push_back(Json(std::string("src/a.scene.json")));
+            file_sel.set("ids", std::move(file_ids));
+            file_sel.set("subject", Json(std::string("file")));
+            const std::optional<Json> file_resp =
+                req_demux(a, 13, rpc(13, "editor.select", file_sel), a_events);
+            CHECK(file_resp.has_value());
+            CHECK(file_resp->at("result").at("data").at("changed").as_bool());
+            CHECK(file_resp->at("result").at("data").at("subject").as_string() == "file");
+            CHECK(file_resp->at("result").at("data").at("ids").size() == 1);
+
+            // B reads the whole typed view back: BOTH members, and the entity selection intact.
+            const std::optional<Json> typed =
+                req_demux(b, 7, rpc(7, "editor.selection-get", Json::object()), b_events);
+            CHECK(typed.has_value());
+            const Json& typed_data = typed->at("result").at("data");
+            CHECK(typed_data.at("ids").size() == 2); // still the ENTITY selection, untouched
+            CHECK(typed_data.at("ids").at(0).as_string() == "root/child");
+            const Json& typed_sels = typed_data.at("selections");
+            CHECK(typed_sels.is_array());
+            CHECK(typed_sels.size() == 2); // entity AND file, sorted — an array of objects with keys
+            CHECK(typed_sels.at(0).at("subject").as_string() == "entity");
+            CHECK(typed_sels.at(0).at("ids").size() == 2);
+            CHECK(typed_sels.at(1).at("subject").as_string() == "file");
+            CHECK(typed_sels.at(1).at("ids").at(0).as_string() == "src/a.scene.json");
+
+            // `--subject` NARROWS what both members report; it never changes the reply's shape.
+            Json narrow = Json::object();
+            narrow.set("subject", Json(std::string("file")));
+            const std::optional<Json> narrowed =
+                req_demux(b, 8, rpc(8, "editor.selection-get", std::move(narrow)), b_events);
+            CHECK(narrowed.has_value());
+            const Json& narrow_data = narrowed->at("result").at("data");
+            CHECK(narrow_data.at("ids").size() == 1);
+            CHECK(narrow_data.at("ids").at(0).as_string() == "src/a.scene.json");
+            CHECK(narrow_data.at("selections").size() == 1);
+            CHECK(narrow_data.at("selections").at(0).at("subject").as_string() == "file");
+
+            // The fact carries its SUBJECT — which is the ONLY thing a consumer can filter on, and
+            // the Shell's scene tree depends on it to refuse a file selection.
+            const std::optional<Json> b_file_fact = find_fact(b_events, "selection-changed");
+            CHECK(b_file_fact.has_value());
+            CHECK(b_file_fact->at("subject").as_string() == "file");
+            CHECK(b_file_fact->at("origin").as_int() == a_id);
+
+            // D3: the focus moved to the last NON-EMPTY change, as its own fact and its own read.
+            const std::optional<Json> b_focus_fact = find_fact(b_events, "selection-focus");
+            CHECK(b_focus_fact.has_value());
+            CHECK(b_focus_fact->at("subject").as_string() == "file");
+            CHECK(b_focus_fact->at("origin").as_int() == a_id);
+            const std::optional<Json> focus_read =
+                req_demux(b, 9, rpc(9, "editor.selection-focus-get", Json::object()), b_events);
+            CHECK(focus_read.has_value());
+            CHECK(focus_read->at("result").at("data").at("subject").as_string() == "file");
+
+            // An UNKNOWN subject is REFUSED, never coerced — on the write AND on the read. Coercing
+            // it to `entity` would move (or report) a different selection than the caller named.
+            Json bad_subject = Json::object();
+            bad_subject.set("ids", Json::array());
+            bad_subject.set("subject", Json(std::string("mypkg.tile")));
+            const std::optional<Json> refused_write =
+                req_demux(a, 14, rpc(14, "editor.select", std::move(bad_subject)), a_events);
+            CHECK(refused_write.has_value());
+            CHECK(refused_write->at("error").at("data").at("code").as_string() == "usage.invalid");
+            Json bad_read = Json::object();
+            bad_read.set("subject", Json(std::string("")));
+            const std::optional<Json> refused_read =
+                req_demux(a, 15, rpc(15, "editor.selection-get", std::move(bad_read)), a_events);
+            CHECK(refused_read.has_value());
+            CHECK(refused_read->at("error").at("data").at("code").as_string() == "usage.invalid");
+            // ...and the refusal changed NOTHING: the file selection is exactly as it was.
+            const std::optional<Json> after_refusal =
+                req_demux(a, 16, rpc(16, "editor.selection-get", Json::object()), a_events);
+            CHECK(after_refusal.has_value());
+            CHECK(after_refusal->at("result").at("data").at("selections").size() == 2);
+
+            // A per-subject no-op still publishes NOTHING — the dedup rule holds per subject.
+            const std::size_t before_noop = session_facts(b_events).size();
+            const std::optional<Json> file_again =
+                req_demux(a, 17, rpc(17, "editor.select", file_sel), a_events);
+            CHECK(file_again.has_value());
+            CHECK(!file_again->at("result").at("data").at("changed").as_bool());
+            CHECK(req_demux(b, 10, rpc(10, "editor.selection-get", Json::object()), b_events)
+                      .has_value());
+            CHECK(session_facts(b_events).size() == before_noop);
 
             // --- ids are NEVER REUSED within a daemon lifetime ----------------------------------
             // The second half of the echo-suppression trust argument (docs/editor-session-state.md):

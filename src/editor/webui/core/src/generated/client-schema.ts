@@ -65,6 +65,7 @@ export type RpcMethod =
     | "editor.inspect"
     | "editor.select"
     | "editor.selection-get"
+    | "editor.selection-focus-get"
     | "editor.camera-set"
     | "editor.cameras-get"
     | "editor.play"
@@ -472,7 +473,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         verb: "select",
         stability: "operational",
         deprecated: false,
-        params: ["ids", "mode"],
+        params: ["ids", "mode", "subject"],
         flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
     },
     "editor.selection-get": {
@@ -480,6 +481,16 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
         ns: "",
         noun: "editor",
         verb: "selection-get",
+        stability: "operational",
+        deprecated: false,
+        params: ["subject"],
+        flags: ["json", "project", "if-match", "after-generation", "dry-run", "idempotency-key", "after-hash", "atomic-plan"],
+    },
+    "editor.selection-focus-get": {
+        method: "editor.selection-focus-get",
+        ns: "",
+        noun: "editor",
+        verb: "selection-focus-get",
         stability: "operational",
         deprecated: false,
         params: [],
@@ -608,7 +619,7 @@ export const RPC_METHODS: { readonly [M in RpcMethod]: RpcMethodDescriptor } = {
 };
 
 /** Every RPC method name, in registry order. */
-export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "editor.select", "editor.selection-get", "editor.camera-set", "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
+export const RPC_METHOD_NAMES: readonly RpcMethod[] = ["describe", "new", "set", "migrate", "package.add", "resource.read", "asset.move", "asset.rename", "merge-file", "resolve-conflict", "re-key", "validate", "session.new", "session.step", "session.seed", "session.inject", "session.hash", "session.record", "replay", "determinism.diff", "install", "profile.gc", "profile.session", "ui.dump", "ui.query", "ui.send", "ui.assert", "tilemap.paint", "tilemap.fill", "build", "doctor", "edit", "edit-batch", "query", "snapshot", "editor.scene-tree", "editor.inspect", "editor.select", "editor.selection-get", "editor.selection-focus-get", "editor.camera-set", "editor.cameras-get", "editor.play", "editor.pause", "editor.stop", "editor.step", "subscribe", "unsubscribe", "ack", "reconcile", "shutdown", "debug.attach"];
 
 /** Every subscribable event topic. */
 export type EventTopic =
@@ -665,9 +676,10 @@ export const EVENT_TOPICS: { readonly [T in EventTopic]: EventTopicDescriptor } 
         name: "session",
         description: "Session lifecycle + restart-class reload announcements, and the editor session-state facts (selection / cameras / play) every client shares (M9 D7).",
         payloadFields: [
-            { name: "event", type: "string", description: "The event: started | reloaded | stopped (lifecycle), or selection-changed | camera-changed | play-state (editor session state)." },
+            { name: "event", type: "string", description: "The event: started | reloaded | stopped (lifecycle), or selection-changed | selection-focus | camera-changed | play-state (editor session state)." },
             { name: "origin", type: "generation", description: "Echo suppression: the id of the CLIENT whose call produced this fact (the value `attach` returned as clientId); 0 = the daemon itself." },
-            { name: "ids", type: "json", description: "selection-changed: the L-35 id-paths now selected (the whole selection, not a delta)." },
+            { name: "ids", type: "json", description: "selection-changed: the ids now selected FOR THAT SUBJECT (the whole selection, not a delta; L-35 id-paths for `entity`)." },
+            { name: "subject", type: "string", description: "selection-changed: WHICH selection moved \u2014 entity | file | asset (or a package-declared <pkg>.<kind>); absent reads as entity. selection-focus: which live selection the human is now working on. EVERY consumer must filter on this: a `file` fact applied as entity id-paths resolves nothing and renders as an empty selection, silently." },
             { name: "mode", type: "string", description: "selection-changed: how the change was applied \u2014 replace | add | toggle | remove." },
             { name: "viewportId", type: "string", description: "camera-changed: the viewport whose camera changed." },
             { name: "state", type: "string", description: "play-state: the L-51 provenance state after the transition \u2014 edit | playing | paused." },

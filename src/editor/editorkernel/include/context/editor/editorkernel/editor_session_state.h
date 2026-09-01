@@ -59,6 +59,32 @@ enum class SelectionMode
 [[nodiscard]] std::optional<SelectionMode> parse_selection_mode(const std::string& token);
 [[nodiscard]] const char* selection_mode_token(SelectionMode mode);
 
+// --- selection SUBJECTS (c1 / D1 / D2) -----------------------------------------------------------
+//
+// Selection is TYPED: what the human has selected is always "these ids OF THIS KIND". Selections of
+// different subjects COEXIST — selecting a file does not clear the entity selection (the Unreal
+// model, D1) — and `selection-focus` (D3) is the arbiter of which live selection the human is
+// actually working on.
+//
+// These three kinds are CONTRACT-OWNED. The vocabulary is deliberately OPEN: a package declares
+// `<pkg>.<kind>` in its manifest's `selection.subjects[]` (c2's surface), which is why the state
+// stores a subject as a plain string rather than an enum. What this header owns is the DEFAULT
+// (`entity`, which is what makes the whole change additive under protocolMajor 1) and the
+// contract-owned set the wire accepts until c2 lands its declaration surface.
+inline constexpr const char* kSelectionSubjectEntity = "entity";
+inline constexpr const char* kSelectionSubjectFile = "file";
+inline constexpr const char* kSelectionSubjectAsset = "asset";
+
+// Is `subject` one of the three contract-owned kinds? The wire REFUSES anything else rather than
+// coercing it to `entity` — the same reasoning `parse_selection_mode` carries: a silent fallback
+// would mutate a different selection than the caller asked for, and unlike a bad mode token that
+// mistake is invisible (the caller's own subject stays untouched while another one moves).
+//
+// ⚠ The PERSISTED file deliberately does NOT apply this check (see `apply_json`): a session file can
+// legitimately outlive the package that declared its subject, and refusing the document would
+// quarantine the cameras too.
+[[nodiscard]] bool is_contract_selection_subject(const std::string& subject);
+
 // The L-51 edit/play provenance state. Token-for-token identical to
 // gui::playbar::PlayState / state_token() — the indicator the playbar renders is fed from the
 // `play-state` topic event carrying exactly these tokens (the e08a DoD's "L-51 indicator is fed").
@@ -78,6 +104,16 @@ struct CameraState
 {
     contract::Json transform;
     contract::Json projection;
+};
+
+// The outcome of ONE typed `editor select`. `changed` is the no-op verdict the caller publishes
+// `selection-changed` on; `focus_changed` is the separate D3 verdict for `selection-focus`. They are
+// reported apart because they are two facts on the wire, and a caller that conflated them would
+// either publish a focus fact nobody moved or swallow one that moved.
+struct SelectionOutcome
+{
+    bool changed = false;       // the subject's selection actually differs now
+    bool focus_changed = false; // ...and the focus moved to this subject (D3)
 };
 
 // The outcome of a play-control transition (see the header note on the playbar mapping).
@@ -117,10 +153,43 @@ struct SessionRestoreReport
 class EditorSessionState
 {
 public:
-    // --- selection (L-35 id-path keys, the same strings the panels already use) -----------------
-    [[nodiscard]] const std::vector<std::string>& selection() const noexcept { return selection_; }
-    // Apply `ids` under `mode`. Returns true when the resulting selection actually differs.
+    // --- selection, TYPED per subject (c1 / D1) --------------------------------------------------
+    // One subject's ids (L-35 id-path keys for `entity`, the same strings the panels already use;
+    // project-relative paths for `file`, and so on — the SUBJECT names the vocabulary). A subject
+    // with nothing selected answers an empty vector, whether or not it was ever selected.
+    [[nodiscard]] const std::vector<std::string>&
+    selection(const std::string& subject = kSelectionSubjectEntity) const;
+    // Every LIVE selection, keyed by subject. Empty selections are pruned rather than kept as empty
+    // entries, so "is this subject in the map" and "does this subject have a selection" are the same
+    // question — which is what lets the persisted `selections` array and the `selection-get` reply
+    // share one encoder without either inventing a rule the other does not apply.
+    [[nodiscard]] const std::map<std::string, std::vector<std::string>>& selections() const noexcept
+    {
+        return selections_;
+    }
+
+    // Apply `ids` to `subject` under `mode`, then apply the D3 focus rule. Selections of different
+    // subjects are INDEPENDENT: this never touches another subject's ids.
+    //
+    // THE FOCUS RULE, in one place: a change that leaves `subject` with a NON-EMPTY selection focuses
+    // it. A change that leaves it EMPTY does not move the focus — there is nothing there to work on,
+    // and handing the focus to some other subject would be a claim nobody made. A no-op (`changed ==
+    // false`) moves nothing at all, which is what keeps "re-selecting the same ids publishes nothing"
+    // true for BOTH facts.
+    SelectionOutcome apply_selection(const std::string& subject,
+                                     const std::vector<std::string>& ids, SelectionMode mode);
+    // The pre-c1 spelling, kept because `entity` is the default subject and every existing caller
+    // means exactly that. Returns the `changed` half.
     bool apply_selection(const std::vector<std::string>& ids, SelectionMode mode);
+
+    // --- selection focus (D3) -------------------------------------------------------------------
+    // WHICH live selection the human is actually working on. A tier-1 fact deliberately: deciding it
+    // from tier-2 panel focus would make the answer invisible to the CLI, to agents, and to a second
+    // window — which is exactly the question tier 1 exists to answer. Boot default: `entity`.
+    [[nodiscard]] const std::string& selection_focus() const noexcept { return selection_focus_; }
+    // Move the focus explicitly. Returns true when it actually moved; an empty subject is refused
+    // (there is no such thing as focusing nothing — clearing a selection leaves the focus alone).
+    bool set_selection_focus(const std::string& subject);
 
     // --- cameras (per viewport) ----------------------------------------------------------------
     [[nodiscard]] const std::map<std::string, CameraState>& cameras() const noexcept
@@ -145,18 +214,31 @@ public:
     PlayOutcome step(std::uint64_t ticks);
 
     // --- the persisted projection ---------------------------------------------------------------
-    // The `.editor/session.json` document: {version, selection:{ids[]}, cameras:[{viewportId,…}]}.
-    // Cameras are an ARRAY of objects carrying their key, never a map-keyed object — the same
-    // encoding discipline the authored-data conventions mandate (L-33), so the file stays diffable
-    // and stable-ordered. Play state is deliberately absent (see the header note).
+    // The `.editor/session.json` document — VERSION 2 since c1:
+    //   {version: 2,
+    //    selections: [{subject, ids[]}, …],
+    //    selectionFocus: {subject},
+    //    cameras: [{viewportId, …}]}
+    // `selections` and `cameras` are both ARRAYS of objects carrying their key, never map-keyed —
+    // the same encoding discipline the authored-data conventions mandate (L-33), so the file stays
+    // diffable and stable-ordered. Play state is deliberately absent (see the header note).
     [[nodiscard]] contract::Json to_json() const;
     // Apply a persisted document. Returns false when the document is structurally wrong (wrong
     // types / not an object) — the caller then treats the file as CORRUPT. A document missing an
     // optional section is not an error (forward/backward tolerance on an additive file).
+    //
+    // THE v1 -> v2 MIGRATION LIVES HERE, and it is what stops a SILENT LOSS rather than a
+    // quarantine: a v1 document (`selection: {ids}`) passes the version check untouched and every
+    // member is read under a `contains` guard, so without this branch the loader would look for
+    // `selections`, find nothing, and drop the human's selection with no diagnostic at all. The
+    // branch maps `selection: {ids}` -> `selections: [{subject: "entity", ids}]`, losslessly.
+    // Everything else is unchanged: a FUTURE version, a non-number version, and a malformed document
+    // keep the quarantine-plus-defaults-plus-loud path exactly as it was.
     bool apply_json(const contract::Json& doc);
 
 private:
-    std::vector<std::string> selection_;
+    std::map<std::string, std::vector<std::string>> selections_;
+    std::string selection_focus_ = kSelectionSubjectEntity;
     std::map<std::string, CameraState> cameras_;
     EditorPlayState play_ = EditorPlayState::edit;
     std::uint64_t sim_tick_ = 0;
@@ -166,7 +248,20 @@ private:
 // by the `session` topic facts, the `editor.*-get` replies, and `.editor/session.json` (to_json()
 // below). The wire and the file are documented to carry the SAME shape; a second copy of these six
 // lines is exactly how that stops being true.
-[[nodiscard]] contract::Json selection_ids_json(const EditorSessionState& state);
+[[nodiscard]] contract::Json selection_ids_json(const EditorSessionState& state,
+                                                const std::string& subject =
+                                                    kSelectionSubjectEntity);
+// The TYPED view (c1 / D1 REVISED): an ARRAY OF OBJECTS CARRYING THEIR KEY — `[{subject, ids}, …]` —
+// never a map-keyed object, the same convention the camera array already follows. Only LIVE (non-
+// empty) selections appear; subjects are stable-ordered (std::map). This is ADDITIVE to
+// `selection_ids_json` above rather than a replacement: `editor.selection-get` answers BOTH, because
+// a reader of today's `ids` (attach_command.cpp's observer among them) reads a removed member as
+// ABSENT rather than as an error, so replacing it would have broken every such reader silently.
+[[nodiscard]] contract::Json selections_json(const EditorSessionState& state);
+// The same view NARROWED to one subject — a filter of the array above, never a different shape, so
+// `--subject` changes what the reply reports and never how it is encoded.
+[[nodiscard]] contract::Json selections_json(const EditorSessionState& state,
+                                             const std::string& subject);
 // Cameras are an ARRAY of objects carrying their key (`{viewportId, transform, projection}`), never
 // a map-keyed object — the L-33 encoding discipline, so the file stays diffable and stable-ordered.
 [[nodiscard]] contract::Json cameras_json(const EditorSessionState& state);

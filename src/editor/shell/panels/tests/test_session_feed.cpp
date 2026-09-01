@@ -17,6 +17,8 @@
 
 #include "context/editor/client/client.h"
 #include "context/editor/shell/panels/builtin_panels.h" // the bind_session_client seam (lifetime)
+#include "context/editor/shell/panels/inspector_feed.h"  // c1/D3: the FOCUS consumer
+#include "context/editor/shell/panels/scenetree_feed.h"  // ...and the feed the entity arm re-reads
 
 #include "context/editor/gui/contract/extension.h" // the synthetic roster (e1 — see the provider block)
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
@@ -41,7 +43,12 @@ using context::editor::shell::kSessionControlVerbStop;
 using context::editor::shell::panels::SessionFeed;
 using context::editor::shell::panels::kCameraChangedEvent;
 using context::editor::shell::panels::kPlayStateEvent;
+using context::editor::shell::panels::bind_selection_focus;
+using context::editor::shell::panels::InspectorFeed;
 using context::editor::shell::panels::kSelectionChangedEvent;
+using context::editor::shell::panels::kSelectionFocusEvent;
+using context::editor::shell::panels::kSelectionSubjectEntity;
+using context::editor::shell::panels::SceneTreeFeed;
 using context::editor::shell::panels::kSessionTopicName;
 using context::editor::shell::panels::session_control;
 using context::editor::shell::panels::session_control_generation;
@@ -70,6 +77,55 @@ namespace
     fact.set("ids", std::move(wire));
     fact.set("mode", Json(std::string("replace")));
     return fact;
+}
+
+// The same fact TYPED (c1/D1): `subject` names which selection moved. A daemon always sends it; the
+// helper above deliberately does NOT, because an absent member must keep reading as `entity`.
+[[nodiscard]] Json subject_selection_fact(std::uint64_t origin, const char* subject,
+                                          const std::vector<std::string>& ids)
+{
+    Json fact = selection_fact(origin, ids);
+    fact.set("subject", Json(std::string(subject)));
+    return fact;
+}
+
+// A `selection-focus` fact (c1/D3), exactly as kernel_server.cpp publishes it.
+[[nodiscard]] Json focus_fact(std::uint64_t origin, const char* subject)
+{
+    Json fact = Json::object();
+    fact.set("event", Json(std::string(kSelectionFocusEvent)));
+    fact.set("origin", Json(origin));
+    fact.set("subject", Json(std::string(subject)));
+    return fact;
+}
+
+// One `editor.inspect` reply for `identity`, as the daemon answers it — enough for the Inspector to
+// hold a rendered entity, which is what the focus consumer must be able to take away.
+[[nodiscard]] Json inspect_reply(const char* identity)
+{
+    Json model = Json::object();
+    model.set("present", Json(true));
+    model.set("rootScene", Json(std::string("root.scene.json")));
+    model.set("identity", Json(std::string(identity)));
+    Json id_path = Json::array();
+    id_path.push_back(Json(std::string(identity)));
+    model.set("idPath", std::move(id_path));
+    Json fields = Json::array();
+    Json field = Json::object();
+    field.set("pointer", Json(std::string("/name")));
+    field.set("label", Json(std::string("name")));
+    field.set("kind", Json(std::string("text")));
+    field.set("value", Json(std::string("\"Player\"")));
+    field.set("editable", Json(true));
+    fields.push_back(std::move(field));
+    model.set("fields", std::move(fields));
+    Json data = Json::object();
+    data.set("inspector", std::move(model));
+    data.set("rawHash", Json(std::string("4242")));
+    Json envelope = Json::object();
+    envelope.set("ok", Json(true));
+    envelope.set("data", std::move(data));
+    return envelope;
 }
 
 [[nodiscard]] Json play_fact(std::uint64_t origin, const char* state, std::uint64_t sim_tick)
@@ -200,6 +256,98 @@ int main()
         CHECK(!feed.apply_event(kSessionTopicName, camera));
         CHECK(!feed.apply_event("derivation", selection_fact(kOtherClientId, {"e1"})));
         CHECK(feed.facts_applied() == 2);
+    }
+
+    // --- c1/D1: THE SUBJECT FILTER, BOTH DIRECTIONS ----------------------------------------------
+    // Selection is typed now, and this feed consumes the ENTITY selection. Without the filter a
+    // `file` fact would reach `SceneTreePanel::apply_selection` as L-35 entity id-paths and resolve
+    // nothing — a tree showing no selection, indistinguishable from a correct empty result. So the
+    // negative is paired with a positive: ONE DIRECTION ALONE PROVES NOTHING (a disconnected feed
+    // would pass the negative on its own).
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+        scenetree::SceneTreePanel tree(&feed);
+        tree.set_model(two_node_model());
+        feed.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
+        feed.bind_client(nullptr, kShellId);
+
+        // NEGATIVE — a `file` selection does NOT move the scene tree, and is counted as dropped.
+        CHECK(!feed.apply_event(kSessionTopicName,
+                                subject_selection_fact(kOtherClientId, "file", {"src/a.json"})));
+        CHECK(tree.selection().identity.empty());
+        CHECK(feed.foreign_subject_facts() == 1);
+        CHECK(feed.facts_applied() == 0);
+
+        // POSITIVE — the sibling that gives the negative its meaning: an `entity` fact DOES move it.
+        CHECK(feed.apply_event(kSessionTopicName,
+                               subject_selection_fact(kOtherClientId, "entity", {"e2"})));
+        CHECK(tree.selection().identity == "e2");
+        CHECK(feed.facts_applied() == 1);
+
+        // A fact with NO `subject` member reads as `entity` — the wire parameter's documented
+        // default, so an older daemon still means what it always meant.
+        CHECK(feed.apply_event(kSessionTopicName, selection_fact(kOtherClientId, {"e1"})));
+        CHECK(tree.selection().identity == "e1");
+
+        // ...and a foreign-subject fact does not DISTURB the entity selection either — it is dropped
+        // before `apply_selection` is reached, not applied and then undone.
+        CHECK(!feed.apply_event(kSessionTopicName,
+                                subject_selection_fact(kOtherClientId, "file", {})));
+        CHECK(tree.selection().identity == "e1");
+        CHECK(feed.foreign_subject_facts() == 2);
+
+        // A malformed `subject` is not coerced into the one subject we DO apply: it matches nothing.
+        Json malformed = selection_fact(kOtherClientId, {"e2"});
+        malformed.set("subject", Json(std::uint64_t{7}));
+        CHECK(!feed.apply_event(kSessionTopicName, malformed));
+        CHECK(tree.selection().identity == "e1");
+    }
+
+    // --- c1/D3: the Inspector renders the FOCUSED subject (the PRODUCTION wiring) -----------------
+    // `bind_selection_focus` is the seam `install_builtin_panels` calls, driven here over real feeds
+    // rather than re-implemented beside it.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+        SceneTreeFeed tree(host, scenetree::SceneTreePanel::kContributionId, &feed);
+        InspectorFeed inspector(host, "builtin.inspector");
+        tree.panel().set_model(two_node_model());
+        feed.bind_scene_tree(&tree.panel(), scenetree::SceneTreePanel::kContributionId);
+        bind_selection_focus(feed, inspector, &tree);
+        feed.bind_client(nullptr, kShellId);
+
+        CHECK(feed.selection_focus() == kSelectionSubjectEntity); // the daemon's boot default
+
+        // The human is on an entity, and the Inspector renders it.
+        CHECK(feed.apply_event(kSessionTopicName,
+                               subject_selection_fact(kOtherClientId, "entity", {"e2"})));
+        CHECK(inspector.apply_result(inspect_reply("e2")));
+        CHECK(inspector.panel().has_selection());
+        inspector.mark_fetched(); // whatever the selection listener armed has been served
+
+        // FOCUS MOVES TO `file`: the Inspector cannot inspect a file, so it stops claiming to show
+        // what the human is working on and renders its no-selection placeholder.
+        CHECK(feed.apply_event(kSessionTopicName, focus_fact(kOtherClientId, "file")));
+        CHECK(feed.selection_focus() == "file");
+        CHECK(!inspector.panel().has_selection());
+
+        // A restated focus fact moves nothing and notifies nobody (no churn on the panel).
+        CHECK(!feed.apply_event(kSessionTopicName, focus_fact(kOtherClientId, "file")));
+
+        // FOCUS RETURNS to `entity`: the Inspector is re-pointed at the entity selection the Scene
+        // tree still holds — the daemon never re-published it, so the consumer has to do this.
+        CHECK(feed.apply_event(kSessionTopicName, focus_fact(kOtherClientId, "entity")));
+        CHECK(feed.selection_focus() == kSelectionSubjectEntity);
+        CHECK(inspector.pending().has_value());
+        CHECK(*inspector.pending() == "e2");
+
+        // A focus fact with no readable subject is not a focus claim: nothing moves.
+        Json bare = Json::object();
+        bare.set("event", Json(std::string(kSelectionFocusEvent)));
+        bare.set("origin", Json(kOtherClientId));
+        CHECK(!feed.apply_event(kSessionTopicName, bare));
+        CHECK(feed.selection_focus() == kSelectionSubjectEntity);
     }
 
     // --- an UNATTACHED feed (client id 0) is a plain subscriber, not an echo swallower ------------

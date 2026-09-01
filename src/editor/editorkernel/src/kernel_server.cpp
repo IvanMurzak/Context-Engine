@@ -425,9 +425,34 @@ Json session_fact(const char* event, std::uint64_t origin)
 }
 
 // The wire shapes of selection / cameras come from editor_session_state.h
-// (`selection_ids_json` / `cameras_json`) rather than being rebuilt here: the `session` facts, these
-// `editor.*-get` replies, and `.editor/session.json` are documented to carry the SAME shape, so they
-// share the one encoder instead of a comment promising two copies agree.
+// (`selection_ids_json` / `selections_json` / `cameras_json`) rather than being rebuilt here: the
+// `session` facts, these `editor.*-get` replies, and `.editor/session.json` are documented to carry
+// the SAME shape, so they share the one encoder instead of a comment promising two copies agree.
+
+// The optional `subject` param of the typed selection verbs (c1 / D1 / D2). Absent => `entity`,
+// which is what makes the whole typed-selection change additive under protocolMajor 1.
+//
+// An unknown subject is REFUSED, never coerced — the `parse_selection_mode` reasoning, and sharper
+// here: coercing `fiel` to `entity` would silently move a DIFFERENT selection than the caller named,
+// and the caller's own subject would stay untouched with nothing reporting an error. Package-declared
+// `<pkg>.<kind>` subjects are c2's declaration surface; until that lands the contract-owned three are
+// the whole accepted vocabulary, and an undeclared kind is refused rather than blocking on c2.
+std::optional<Envelope> read_selection_subject(const Json& params, const char* verb,
+                                               std::string& subject)
+{
+    subject = kSelectionSubjectEntity;
+    if (!params.contains("subject"))
+        return std::nullopt;
+    const Json& raw = params.at("subject");
+    if (!raw.is_string() || !is_contract_selection_subject(raw.as_string()))
+        return Envelope::failure(
+            "usage.invalid",
+            std::string(verb) + " 'subject' must be one of " + kSelectionSubjectEntity + " | " +
+                kSelectionSubjectFile + " | " + kSelectionSubjectAsset +
+                " (a package-declared <pkg>.<kind> subject needs its manifest declaration first)");
+    subject = raw.as_string();
+    return std::nullopt;
+}
 
 // Strict unsigned parse for `editor step --ticks` (the CLI projection delivers a flag as a string).
 // Deliberately strict: "-1" wrapping to ~2^64 would step the session ~forever, and a trailing-garbage
@@ -945,26 +970,65 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
             mode = *parsed;
         }
 
-        const bool changed = session_.apply_selection(ids, mode);
-        if (changed)
+        std::string subject;
+        if (std::optional<Envelope> refused =
+                read_selection_subject(params, "editor select", subject))
+            return *refused;
+
+        const SelectionOutcome outcome = session_.apply_selection(subject, ids, mode);
+        if (outcome.changed)
         {
             Json ev = session_fact("selection-changed", session.client_id);
-            ev.set("ids", selection_ids_json(session_));
+            ev.set("subject", Json(subject));
+            ev.set("ids", selection_ids_json(session_, subject));
             ev.set("mode", Json(std::string(selection_mode_token(mode))));
+            kernel_.events().publish("session", std::move(ev));
+        }
+        // D3, a SECOND fact rather than a member of the first: focus answers a different question
+        // ("which live selection is the human working on") and moves on its own schedule — a
+        // selection that empties out changes without moving it.
+        if (outcome.focus_changed)
+        {
+            Json ev = session_fact("selection-focus", session.client_id);
+            ev.set("subject", Json(session_.selection_focus()));
             kernel_.events().publish("session", std::move(ev));
         }
 
         Json data = Json::object();
-        data.set("ids", selection_ids_json(session_));
+        // `ids` is the ACTED subject's post-write selection — for the default `entity` subject that
+        // is byte-for-byte what this reply carried before c1, and it is the only path a writing panel
+        // has to seeing its own selection (its own fact carries its origin and is dropped).
+        data.set("subject", Json(subject));
+        data.set("ids", selection_ids_json(session_, subject));
         data.set("mode", Json(std::string(selection_mode_token(mode))));
-        data.set("changed", Json(changed));
+        data.set("changed", Json(outcome.changed));
         return Envelope::success(std::move(data));
     }
 
     if (method == "editor.selection-get")
     {
+        // ADDITIVE (D1 REVISED): `ids` STAYS and still carries the entity selection by default, so
+        // every existing reader — attach_command.cpp's observer among them — keeps working; the typed
+        // view arrives as the NEW `selections` array. `--subject` narrows WHAT both report, never the
+        // reply's shape. The redundancy between `ids` and `selections[subject=="entity"]` is the
+        // accepted cost of not breaking readers silently, and lasts until a major moves.
+        const bool narrowed = params.contains("subject");
+        std::string subject;
+        if (std::optional<Envelope> refused =
+                read_selection_subject(params, "editor selection-get", subject))
+            return *refused;
+
         Json data = Json::object();
-        data.set("ids", selection_ids_json(session_));
+        data.set("ids", selection_ids_json(session_, subject));
+        data.set("selections",
+                 narrowed ? selections_json(session_, subject) : selections_json(session_));
+        return Envelope::success(std::move(data));
+    }
+
+    if (method == "editor.selection-focus-get")
+    {
+        Json data = Json::object();
+        data.set("subject", Json(session_.selection_focus()));
         return Envelope::success(std::move(data));
     }
 

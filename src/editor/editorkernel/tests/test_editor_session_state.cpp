@@ -38,8 +38,15 @@ using context::editor::editorkernel::persist_session_state;
 using context::editor::editorkernel::play_state_token;
 using context::editor::editorkernel::PlayOutcome;
 using context::editor::editorkernel::restore_session_state;
+using context::editor::editorkernel::is_contract_selection_subject;
+using context::editor::editorkernel::kSelectionSubjectAsset;
+using context::editor::editorkernel::kSelectionSubjectEntity;
+using context::editor::editorkernel::kSelectionSubjectFile;
 using context::editor::editorkernel::SelectionMode;
 using context::editor::editorkernel::selection_mode_token;
+using context::editor::editorkernel::SelectionOutcome;
+using context::editor::editorkernel::selection_ids_json;
+using context::editor::editorkernel::selections_json;
 using context::editor::editorkernel::session_state_path;
 using context::editor::editorkernel::SessionRestoreOutcome;
 using context::editor::editorkernel::SessionRestoreReport;
@@ -136,6 +143,111 @@ void test_selection_mode_tokens_round_trip()
     CHECK(!parse_selection_mode("").has_value());
     CHECK(!parse_selection_mode("Replace").has_value());
     CHECK(!parse_selection_mode("clear").has_value());
+}
+
+// --- typed selection (c1 / D1 / D3) ---------------------------------------------------------------
+
+// D1: selections of different subjects COEXIST — selecting a file does not clear the entity
+// selection — and D3's focus follows the last change that left something selected.
+void test_typed_selections_coexist_and_focus_follows()
+{
+    EditorSessionState state;
+    CHECK(state.selection_focus() == kSelectionSubjectEntity); // the boot default
+
+    // The FIRST entity selection changes the selection but NOT the focus: `entity` was already
+    // focused, so there is no focus fact to publish. (A focus that "changed" to where it already was
+    // would be an echo, which is exactly what the changed-verdicts exist to prevent.)
+    const SelectionOutcome first =
+        state.apply_selection(kSelectionSubjectEntity, ids({"e1", "e2"}), SelectionMode::replace);
+    CHECK(first.changed);
+    CHECK(!first.focus_changed);
+
+    // A FILE selection lands beside it: the entity selection is untouched, and the focus moves.
+    const SelectionOutcome file =
+        state.apply_selection(kSelectionSubjectFile, ids({"src/a.scene.json"}), SelectionMode::replace);
+    CHECK(file.changed);
+    CHECK(file.focus_changed);
+    CHECK(state.selection_focus() == kSelectionSubjectFile);
+    CHECK(state.selection(kSelectionSubjectEntity) == ids({"e1", "e2"})); // COEXISTENCE
+    CHECK(state.selection(kSelectionSubjectFile) == ids({"src/a.scene.json"}));
+    CHECK(state.selection() == ids({"e1", "e2"})); // the default subject is still `entity`
+    CHECK(state.selections().size() == 2);
+
+    // Per-subject no-op dedup: re-selecting the same file ids changes nothing AND moves no focus —
+    // which is what keeps "re-selecting the same ids publishes nothing" true for BOTH facts.
+    state.set_selection_focus(kSelectionSubjectEntity);
+    const SelectionOutcome again =
+        state.apply_selection(kSelectionSubjectFile, ids({"src/a.scene.json"}), SelectionMode::replace);
+    CHECK(!again.changed);
+    CHECK(!again.focus_changed);
+    CHECK(state.selection_focus() == kSelectionSubjectEntity); // unmoved by a no-op
+
+    // The four modes are per-subject too: adding to `file` leaves `entity` alone.
+    const SelectionOutcome added =
+        state.apply_selection(kSelectionSubjectFile, ids({"src/b.scene.json"}), SelectionMode::add);
+    CHECK(added.changed);
+    CHECK(added.focus_changed); // non-empty => focus follows
+    CHECK(state.selection(kSelectionSubjectFile) ==
+          ids({"src/a.scene.json", "src/b.scene.json"}));
+    CHECK(state.selection(kSelectionSubjectEntity) == ids({"e1", "e2"}));
+
+    // CLEARING a subject is a real change that moves NO focus: there is nothing there to work on, and
+    // handing the focus to another subject would be a claim nobody made. The entry is PRUNED, so
+    // "in the map" and "has a selection" stay the same question.
+    const SelectionOutcome cleared =
+        state.apply_selection(kSelectionSubjectFile, {}, SelectionMode::replace);
+    CHECK(cleared.changed);
+    CHECK(!cleared.focus_changed);
+    CHECK(state.selection_focus() == kSelectionSubjectFile); // still where it was
+    CHECK(state.selection(kSelectionSubjectFile).empty());
+    CHECK(state.selections().size() == 1);
+    CHECK(state.selections().count(kSelectionSubjectFile) == 0);
+
+    // A subject nobody has ever selected answers an empty selection rather than being an error.
+    CHECK(state.selection(kSelectionSubjectAsset).empty());
+}
+
+void test_selection_subject_vocabulary_is_refused_not_coerced()
+{
+    // The three CONTRACT-OWNED kinds.
+    CHECK(is_contract_selection_subject(kSelectionSubjectEntity));
+    CHECK(is_contract_selection_subject(kSelectionSubjectFile));
+    CHECK(is_contract_selection_subject(kSelectionSubjectAsset));
+    // Everything else is REFUSED by the wire rather than coerced to `entity` — a silent fallback
+    // would move a DIFFERENT selection than the caller named, invisibly.
+    CHECK(!is_contract_selection_subject(""));
+    CHECK(!is_contract_selection_subject("Entity")); // token case is part of the token
+    CHECK(!is_contract_selection_subject("files"));
+    // A package kind is c2's declaration surface; until it is declared it is not accepted here.
+    CHECK(!is_contract_selection_subject("mypkg.tile"));
+}
+
+// The reply/file encoders: an ARRAY OF OBJECTS CARRYING THEIR KEY (L-33), never map-keyed, and
+// `--subject` narrows the SAME array rather than producing a second shape.
+void test_selection_json_projections()
+{
+    EditorSessionState state;
+    state.apply_selection(kSelectionSubjectEntity, ids({"e1"}), SelectionMode::replace);
+    state.apply_selection(kSelectionSubjectFile, ids({"a.json"}), SelectionMode::replace);
+
+    const Json all = selections_json(state);
+    CHECK(all.is_array());
+    CHECK(all.size() == 2);
+    CHECK(all.at(0).at("subject").as_string() == kSelectionSubjectEntity); // std::map => sorted
+    CHECK(all.at(0).at("ids").at(0).as_string() == "e1");
+    CHECK(all.at(1).at("subject").as_string() == kSelectionSubjectFile);
+
+    const Json narrowed = selections_json(state, kSelectionSubjectFile);
+    CHECK(narrowed.is_array());
+    CHECK(narrowed.size() == 1);
+    CHECK(narrowed.at(0).at("subject").as_string() == kSelectionSubjectFile);
+    // A subject with nothing selected narrows to an EMPTY array, not to an entry with no ids.
+    CHECK(selections_json(state, kSelectionSubjectAsset).size() == 0);
+
+    // `ids` defaults to the entity selection — byte-for-byte what it carried before c1.
+    CHECK(selection_ids_json(state).size() == 1);
+    CHECK(selection_ids_json(state).at(0).as_string() == "e1");
+    CHECK(selection_ids_json(state, kSelectionSubjectFile).at(0).as_string() == "a.json");
 }
 
 // --- cameras --------------------------------------------------------------------------------------
@@ -299,6 +411,77 @@ void test_missing_file_is_a_clean_fresh_boot()
     fs::remove_all(project, ec);
 }
 
+// --- `.editor/session.json` v1 -> v2 (08 §3) ------------------------------------------------------
+
+// THE FALSIFIABLE HALF. A v1 document's selection SURVIVES into `selections` — which reddens the
+// moment the migration branch is deleted, because the loader would then look for `selections`, find
+// nothing, and drop the selection in silence.
+//
+// ⚠ "a v1 file is not quarantined" is deliberately NOT the assertion: the quarantine path only ever
+// fires FORWARD (a future version), so a v1 file never would have been quarantined and that test
+// would pass with the migration entirely removed.
+void test_v1_document_migrates_its_selection()
+{
+    const fs::path project = make_temp_project("migrate-v1");
+    write_session_file(project,
+                       "{\"version\": 1, \"selection\": {\"ids\": [\"root/child\", \"root/other\"]},"
+                       " \"cameras\": [{\"viewportId\": \"main\"}]}");
+
+    EditorSessionState state;
+    const SessionRestoreReport report = restore_session_state(project, state);
+    CHECK(report.outcome == SessionRestoreOutcome::restored); // applied, not quarantined
+    CHECK(report.quarantined_path.empty());
+
+    // The v1 `selection: {ids}` WAS the entity selection, so the mapping is lossless.
+    CHECK(state.selection(kSelectionSubjectEntity) == ids({"root/child", "root/other"}));
+    CHECK(state.selections().size() == 1);
+    CHECK(state.selection_focus() == kSelectionSubjectEntity); // v1 had one selection: not a guess
+    CHECK(state.cameras().size() == 1);                        // the rest of the document is intact
+
+    // ...and the next clean shutdown writes the file forward in the v2 shape.
+    std::string error;
+    CHECK(persist_session_state(project, state, error));
+    const std::string text = read_text(session_state_path(project));
+    CHECK(text.find("\"version\": 2") != std::string::npos);
+    CHECK(text.find("\"selections\": [") != std::string::npos);
+    CHECK(text.find("\"selection\": {") == std::string::npos); // the v1 member is gone, not doubled
+
+    std::error_code ec;
+    fs::remove_all(project, ec);
+}
+
+// A v2 document ROUND-TRIPS: two coexisting subjects and the focus survive a write + read.
+void test_v2_document_round_trips_typed_selections()
+{
+    const fs::path project = make_temp_project("roundtrip-v2");
+
+    EditorSessionState saved;
+    saved.apply_selection(kSelectionSubjectEntity, ids({"root/child"}), SelectionMode::replace);
+    saved.apply_selection(kSelectionSubjectFile, ids({"src/a.json", "src/b.json"}),
+                          SelectionMode::replace);
+    CHECK(saved.selection_focus() == kSelectionSubjectFile); // the last non-empty change
+
+    std::string error;
+    CHECK(persist_session_state(project, saved, error));
+
+    // The file is DIFFABLE: `selections` is an array of objects carrying their key, exactly like
+    // `cameras` — never map-keyed.
+    const std::string text = read_text(session_state_path(project));
+    CHECK(text.find("\"selections\": [") != std::string::npos);
+    CHECK(text.find("\"subject\": \"entity\"") != std::string::npos);
+    CHECK(text.find("\"selectionFocus\"") != std::string::npos);
+
+    EditorSessionState restored;
+    const SessionRestoreReport report = restore_session_state(project, restored);
+    CHECK(report.outcome == SessionRestoreOutcome::restored);
+    CHECK(restored.selection(kSelectionSubjectEntity) == ids({"root/child"}));
+    CHECK(restored.selection(kSelectionSubjectFile) == ids({"src/a.json", "src/b.json"}));
+    CHECK(restored.selection_focus() == kSelectionSubjectFile);
+
+    std::error_code ec;
+    fs::remove_all(project, ec);
+}
+
 // The 07 §6 contract: corrupt => renamed aside + defaults loaded + reported LOUDLY, never blocking.
 void assert_corrupt_recovery(const char* tag, const std::string& body)
 {
@@ -339,6 +522,22 @@ void test_corrupt_file_recovery()
     // A document from a FUTURE version is corrupt too: half-applying members we cannot read would be
     // worse than forgetting the selection.
     assert_corrupt_recovery("corrupt-version", "{\"version\": 99, \"selection\": {\"ids\": []}}");
+    // ...and the migration branch must not swallow that path now that it exists: a v2-SHAPED document
+    // from the future is still quarantined, exactly as before (08 §3's third test).
+    assert_corrupt_recovery(
+        "corrupt-version-v2",
+        "{\"version\": 99, \"selections\": [{\"subject\": \"entity\", \"ids\": [\"a\"]}]}");
+    // The v2 members are held to the same structural strictness as everything else.
+    assert_corrupt_recovery("corrupt-selections-mapkeyed",
+                            "{\"version\": 2, \"selections\": {\"entity\": [\"a\"]}}");
+    assert_corrupt_recovery("corrupt-selections-nosubject",
+                            "{\"version\": 2, \"selections\": [{\"ids\": [\"a\"]}]}");
+    assert_corrupt_recovery(
+        "corrupt-selections-dup",
+        "{\"version\": 2, \"selections\": [{\"subject\": \"file\", \"ids\": [\"a\"]},"
+        " {\"subject\": \"file\", \"ids\": [\"b\"]}]}");
+    assert_corrupt_recovery("corrupt-focus-shape",
+                            "{\"version\": 2, \"selectionFocus\": \"entity\"}");
 }
 
 void test_apply_json_tolerates_an_additive_document()
@@ -366,10 +565,15 @@ int main()
 {
     test_selection_modes();
     test_selection_mode_tokens_round_trip();
+    test_typed_selections_coexist_and_focus_follows();
+    test_selection_subject_vocabulary_is_refused_not_coerced();
+    test_selection_json_projections();
     test_cameras_are_opaque_and_change_detected();
     test_play_state_machine_mirrors_the_playbar();
     test_play_state_tokens_are_the_l51_indicator_vocabulary();
     test_persist_and_restore_round_trip();
+    test_v1_document_migrates_its_selection();
+    test_v2_document_round_trips_typed_selections();
     test_missing_file_is_a_clean_fresh_boot();
     test_corrupt_file_recovery();
     test_apply_json_tolerates_an_additive_document();

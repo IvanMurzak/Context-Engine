@@ -66,6 +66,20 @@ namespace
     return ids;
 }
 
+// The `subject` of a selection fact. ABSENT reads as `entity` — the documented default of the wire
+// parameter, so an older daemon or a hand-written client means what it always meant. A non-string
+// member is NOT coerced: it is answered as an empty subject, which matches nothing and is therefore
+// dropped, rather than being read as the one subject this Shell does apply.
+[[nodiscard]] std::string read_subject(const contract::Json& payload)
+{
+    if (!payload.contains("subject"))
+    {
+        return kSelectionSubjectEntity;
+    }
+    const contract::Json& raw = payload.at("subject");
+    return raw.is_string() ? raw.as_string() : std::string();
+}
+
 } // namespace
 
 SessionFeed::SessionFeed(PanelHost& host, std::string playbar_panel_id)
@@ -83,6 +97,14 @@ void SessionFeed::bind_scene_tree(scenetree::SceneTreePanel* panel, std::string 
 {
     scene_tree_ = panel;
     scene_tree_panel_id_ = std::move(panel_id);
+}
+
+void SessionFeed::add_focus_listener(FocusListener listener)
+{
+    if (listener)
+    {
+        focus_listeners_.push_back(std::move(listener));
+    }
 }
 
 bool SessionFeed::apply_event(const std::string& topic, const contract::Json& payload)
@@ -110,6 +132,15 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
     const std::string event = read_string(payload, "event");
     if (event == kSelectionChangedEvent)
     {
+        // THE SUBJECT FILTER (session_feed.h § THE SUBJECT FILTER). The Scene tree renders ENTITIES;
+        // feeding it a `file` selection would hand `apply_selection` project paths to resolve as L-35
+        // entity id-paths, and the result — a tree with nothing selected — is indistinguishable from
+        // a correct empty result. Counted, not silently skipped, so the drop is observable.
+        if (read_subject(payload) != kSelectionSubjectEntity)
+        {
+            ++foreign_subject_facts_;
+            return false;
+        }
         if (scene_tree_ == nullptr)
         {
             return false;
@@ -120,6 +151,26 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
         }
         ++facts_applied_;
         host_.touch(scene_tree_panel_id_);
+        return true;
+    }
+
+    if (event == kSelectionFocusEvent)
+    {
+        // c1/D3. The focus is DAEMON truth about which selection the human is working on, so it is
+        // adopted whatever the subject — including a subject this build cannot render, which is
+        // precisely the case a consumer needs to be told about (the Inspector stops showing an entity
+        // nobody is working on). An empty/absent subject is not a focus claim and moves nothing.
+        const std::string subject = read_subject(payload);
+        if (subject.empty() || subject == selection_focus_)
+        {
+            return false;
+        }
+        selection_focus_ = subject;
+        ++facts_applied_;
+        for (const FocusListener& listener : focus_listeners_)
+        {
+            listener(selection_focus_);
+        }
         return true;
     }
 

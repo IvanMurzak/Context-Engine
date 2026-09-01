@@ -184,6 +184,7 @@ int main()
             // editor.scene-tree / editor.inspect authored-data projections above (read_query).
             {"editor.select", Scope::session_control},
             {"editor.selection-get", Scope::session_control},
+            {"editor.selection-focus-get", Scope::session_control},
             {"editor.camera-set", Scope::session_control},
             {"editor.cameras-get", Scope::session_control},
             {"editor.play", Scope::session_control},
