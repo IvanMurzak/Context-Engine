@@ -268,9 +268,18 @@ struct Contribution
 // The grep-stable token for a content type (diagnostics + the manifest projection).
 [[nodiscard]] const char* content_type_token(ContentType type);
 
-// The grep-stable token for an instance mode (diagnostics + the manifest projection). Every inverse
-// in the tree — package_store.cpp's reader, panels.ts's parser — searches THIS table rather than
-// keeping a second hand-written copy of the vocabulary.
+// The grep-stable token for an instance mode (diagnostics + the manifest projection).
+//
+// ⚠ SCOPE, stated precisely because the obvious stronger claim is FALSE. Every C++ inverse searches
+// THIS table rather than keeping a second copy: `package_store.cpp`'s `read_instance_mode` walks
+// `kInstanceModes` below, and `scaffold.cpp` emits through this function. `panels.ts` does NOT — its
+// `PANEL_INSTANCE_MODES` is a hand-written mirror, and unlike the panel-state keys and the gesture
+// verbs, it is NOT yet enrolled in `webui-panel-contract` (check_webui_assets.py reads only
+// panel_state.h from this directory). So renaming a token here reds nothing on the TS side; the
+// parser falls to its `?? "singleton"` default and every panel silently becomes a singleton.
+// Enrolling it means generalising `_read_cpp_gesture_verbs` — which reads exactly this switch's
+// shape — into a token-switch reader and pinning the set. `DOCK_ZONES` and `CONTENT_TYPES` sit in
+// the same un-gated position and the same generalisation covers all three.
 [[nodiscard]] const char* instance_mode_token(InstanceMode mode);
 
 // Every instance mode, in declaration order, so a reader can invert `instance_mode_token` by search

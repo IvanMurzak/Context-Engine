@@ -607,8 +607,10 @@ int main()
         CHECK(std::string(content_type_token(ContentType::local)) == "local");
         // The v3 instance-mode table. These three tokens are the manifest's spelling of the mode AND
         // the wire's (panel_host.cpp projects through this function, package_store.cpp inverts by
-        // searching it), so a rename here moves both ends at once — which is the reason no second
-        // hand-written table exists anywhere.
+        // searching it), so a rename here moves both C++ ends at once — which is the reason no
+        // second hand-written table exists on THIS side. `panels.ts`'s `PANEL_INSTANCE_MODES` is a
+        // mirror that no gate yet compares against these literals (see instance_mode_token's own
+        // header comment), so this assertion pins the C++ spelling and nothing pins the TS one.
         CHECK(std::string(instance_mode_token(InstanceMode::singleton)) == "singleton");
         CHECK(std::string(instance_mode_token(InstanceMode::limited)) == "limited");
         CHECK(std::string(instance_mode_token(InstanceMode::unlimited)) == "unlimited");
