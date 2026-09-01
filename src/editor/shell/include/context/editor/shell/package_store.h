@@ -247,6 +247,11 @@ struct PackageStoreScan
 //       `dock.zone` does not, and the difference is the cost of being wrong: an unrecognised zone
 //       costs a panel its first position, while an unrecognised instance mode would decide how many
 //       live copies of it may exist. Absent is legal and means `singleton` — the restrictive answer.
+//       The same rule covers the v3 NAME LISTS: `selection.subjects`, `events.publishes` and
+//       `events.subscribes` are each read STRICTLY — present-but-not-an-array, or an array holding a
+//       non-string, is a refusal, never an entry quietly dropped. That is the reasoning (d) states
+//       for capabilities, one member over: a dropped name presents the package to a consent surface
+//       as declaring LESS than it wrote down. (Absent stays legal and means "declared nothing".)
 //   (g) THE REGISTRY'S OWN STRUCTURAL VERDICT, asked rather than restated. After (a)-(f) the parsed
 //       contribution is handed to `gui::contract::manifest_defect` — the SAME function
 //       `ExtensionRegistry::register_contribution` refuses on — and any diagnostic it returns is a
@@ -258,8 +263,9 @@ struct PackageStoreScan
 //       reader supplies as `Contribution::package_id` from the package DIRECTORY — never from the
 //       manifest text, so a package cannot name its own namespace.)
 //
-// Everything else is read permissively with a default (title defaults to the id, icon/`when`/`path`
-// to empty, dock to `center`), matching `parsePanelManifest`: the cost of a wrong default there is
+// Everything else — i.e. everything OUTSIDE rules (a)-(g) — is read permissively with a default
+// (title defaults to the id, icon/`when`/`path` to empty, dock to `center`), matching
+// `parsePanelManifest`: the cost of a wrong default there is
 // cosmetic, and a parser that refuses a manifest over a missing `icon` is a parser package authors
 // route around. `kind` is matched against `gc::contribution_kind_token` itself rather than a second
 // hand-written table, so the accepted tokens are exactly the ones the projection emits

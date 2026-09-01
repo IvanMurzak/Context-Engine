@@ -259,11 +259,15 @@ std::string names_defect(const Contribution& c, const std::vector<std::string>& 
     return {};
 }
 
+} // namespace
+
 // The manifest-v2 structural invariants (04 §3) plus the manifest-v3 ones (04 §2). Returns the reason
 // a manifest is invalid, or an empty string when it is well-formed. Deny-by-default: a manifest that
 // cannot be rendered coherently is refused at registration rather than half-honoured at panel-open
-// time.
-std::string manifest_defect_impl(const Contribution& c)
+// time. Declared in registry.h — `shell::read_package_manifest` asks THIS function rather than
+// restating its rules, which is what keeps the scan from ever accepting a package registration would
+// then refuse (see the header).
+std::string manifest_defect(const Contribution& c)
 {
     if (c.id.empty())
     {
@@ -360,13 +364,6 @@ std::string manifest_defect_impl(const Contribution& c)
     return {};
 }
 
-} // namespace
-
-std::string manifest_defect(const Contribution& contribution)
-{
-    return manifest_defect_impl(contribution);
-}
-
 RegistrationResult ExtensionRegistry::register_contribution(Contribution contribution)
 {
     if (contribution.contract_version != kContractMajor)
@@ -385,7 +382,7 @@ RegistrationResult ExtensionRegistry::register_contribution(Contribution contrib
                 "\" has a non-conformant renderer sandbox (node integration must be off; isolated "
                 "renderer + sandboxed iframe on; no daemon-socket access; non-empty CSP)");
     }
-    if (const std::string defect = manifest_defect_impl(contribution); !defect.empty())
+    if (const std::string defect = manifest_defect(contribution); !defect.empty())
     {
         return RegistrationResult::failure(
             kErrInvalidManifest,

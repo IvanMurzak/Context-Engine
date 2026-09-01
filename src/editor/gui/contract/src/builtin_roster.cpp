@@ -40,7 +40,7 @@ namespace
 // editor's own contributions, which is what lets a built-in name an unnamespaced contract-owned
 // selection subject.
 Contribution builtin_panel(std::string id, std::string title, std::string icon, DockZone zone,
-                           InstanceMode instances, std::string path, int min_width, int min_height,
+                           InstanceMode mode, std::string path, int min_width, int min_height,
                            std::vector<std::string> capabilities)
 {
     Contribution c;
@@ -51,7 +51,7 @@ Contribution builtin_panel(std::string id, std::string title, std::string icon, 
     c.dock.default_zone = zone;
     c.dock.min_width = min_width;
     c.dock.min_height = min_height;
-    c.instances.mode = instances;
+    c.instances.mode = mode;
     c.path = std::move(path);
     c.content.type = ContentType::uitree;
     c.state.schema_version = 1;
@@ -69,10 +69,10 @@ Contribution builtin_panel(std::string id, std::string title, std::string icon, 
 // the content, which is exactly what `content.type` is for. See extension.h's `ContentType::local`
 // for when this is the right answer and when it is not.
 Contribution builtin_local_panel(std::string id, std::string title, std::string icon, DockZone zone,
-                                 InstanceMode instances, std::string path, int min_width,
+                                 InstanceMode mode, std::string path, int min_width,
                                  int min_height, std::vector<std::string> capabilities)
 {
-    Contribution c = builtin_panel(std::move(id), std::move(title), std::move(icon), zone, instances,
+    Contribution c = builtin_panel(std::move(id), std::move(title), std::move(icon), zone, mode,
                                    std::move(path), min_width, min_height, std::move(capabilities));
     c.content.type = ContentType::local;
     return c;

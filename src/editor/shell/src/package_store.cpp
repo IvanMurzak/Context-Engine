@@ -389,7 +389,7 @@ bool read_package_manifest(const fs::path& manifest_file, const std::string& exp
 
         const Json& dock = read_object(source, "dock");
         contribution.dock.default_zone = read_dock_zone(dock);
-                // Clamped at 0 rather than refused: `DockDefaults` documents 0 as "no minimum stated" and
+        // Clamped at 0 rather than refused: `DockDefaults` documents 0 as "no minimum stated" and
         // negatives as refused, so a negative arriving from a manifest becomes "unstated" — the
         // permissive-default half of the rule, since the cost is cosmetic.
         // BOUNDED TO THE i32 RANGE THE FIELD CASTS TO, and that bound is the correctness half rather
