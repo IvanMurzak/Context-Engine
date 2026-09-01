@@ -1333,11 +1333,8 @@ export class PanelHost {
      * ⚠ THE RELEASE IS THE HALF THAT IS EASY TO OMIT, and omitting it is silent: the Shell's instance
      * table would only ever grow, so a `limited` panel would exhaust its ceiling after `max` opens
      * over the whole session and the next open would be refused for a copy the user closed an hour
-     * ago. Fire-and-forget on purpose — a released model is not something the DOM waits on, and
-     * blocking a close on a round trip would make tearing a panel down feel slow. Only `uitree`
-     * panels are released: they are exactly the kinds with a C++ model, and `local`/`iframe` panels
-     * would spend a guaranteed-refused round trip per close (the same reasoning `portState`'s three
-     * answers turn on).
+     * ago. It lives in `#drop` rather than here, because `restoreLayout` forgets copies too and the
+     * two must forget them the same way — see there.
      */
     close(instanceId: string): boolean {
         const panel = this.#api?.getPanel(instanceId);
@@ -1346,6 +1343,30 @@ export class PanelHost {
         }
         const hosted = this.#panels.get(instanceId);
         this.#api.removePanel(panel);
+        this.#drop(instanceId, hosted);
+        return hosted !== undefined;
+    }
+
+    /**
+     * Forget ONE live copy: dispose its renderer, release its Shell-side model, and drop both of this
+     * host's per-copy tables.
+     *
+     * ⚠ THE ONE PLACE A COPY IS FORGOTTEN, and it is one place on purpose. `close` is not the only
+     * caller — `restoreLayout` also drops the entries the restored arrangement does not name — and a
+     * drop that skipped the RELEASE would leave the Shell holding a model this host no longer shows.
+     * For a `singleton` that is not a leak but a BREAKAGE: the Shell's own ceiling then refuses to
+     * materialise the restored copy (`panel.instance_limit`) and the panel renders empty, which is
+     * exactly what a restore whose ids differ from the ones `start()` opened does (a persisted
+     * arrangement written before instances existed carries bare panel ids, and a reopened singleton
+     * carries `#2`).
+     *
+     * Fire-and-forget on purpose — a released model is not something the DOM waits on, and blocking
+     * on a round trip would make tearing a panel down feel slow. Only `uitree` panels are released:
+     * they are exactly the kinds with a C++ model, and `local`/`iframe` panels would spend a
+     * guaranteed-refused round trip per close (the same reasoning `portState`'s three answers turn
+     * on).
+     */
+    #drop(instanceId: string, hosted: HostedPanel | undefined): void {
         hosted?.renderer.dispose();
         if (hosted !== undefined && hosted.manifest.contentType === "uitree") {
             void this.#client.closeInstance(hosted.manifest.id, instanceId);
@@ -1355,7 +1376,7 @@ export class PanelHost {
         // model happened to move again — the reopened panel would sit on whatever its own `init`
         // render caught, which is the very race this driver exists to close.
         this.#revisions.delete(instanceId);
-        return this.#panels.delete(instanceId);
+        this.#panels.delete(instanceId);
     }
 
     /**
@@ -1498,24 +1519,15 @@ export class PanelHost {
         const previous = this.#api.toJSON();
         try {
             this.#api.fromJSON(state);
-            // RECONCILE THE LIVE SET (c3). `fromJSON` clears the grid and re-creates every panel it
-            // names, driving `#create` — which registers the restored copies — but nothing removes
-            // the entries `start()` opened whose ids the arrangement does NOT name. Before instances
-            // that was invisible: the ids were panel ids and a restore replayed the same ones, so
-            // every entry was overwritten. A restored arrangement can now legitimately name
-            // `p#2, p#3` where `start()` opened `p#1`, and a stale entry left behind is a renderer
-            // Dockview no longer shows, still registered for theme pushes and still counted against
-            // its kind's instance ceiling.
-            for (const [instanceId, hosted] of [...this.#panels]) {
-                if (this.#api.getPanel(instanceId) === undefined) {
-                    hosted.renderer.dispose();
-                    this.#panels.delete(instanceId);
-                    this.#revisions.delete(instanceId);
-                }
-            }
+            this.#reconcileLive();
         } catch (error) {
             try {
                 this.#api.fromJSON(previous);
+                // RECONCILE THE ROLLBACK TOO. `fromJSON` creates components as it parses, so a blob
+                // that throws PART WAY through has already driven `#create` for whatever it read
+                // first — entries the rolled-back arrangement does not name, which would otherwise
+                // survive undisposed and unreleased for the rest of the session.
+                this.#reconcileLive();
             } catch {
                 // The rollback source is the arrangement that was LIVE a moment ago, so this is not
                 // expected to throw; if it somehow does, the wipe already happened and there is
@@ -1524,6 +1536,24 @@ export class PanelHost {
             throw error;
         }
         return true;
+    }
+
+    /**
+     * RECONCILE THE LIVE SET AGAINST THE ENGINE (c3). `fromJSON` clears the grid and re-creates every
+     * panel it names, driving `#create` — which registers the restored copies — but nothing removes
+     * the entries `start()` opened whose ids the arrangement does NOT name. Before instances that was
+     * invisible: the ids were panel ids and a restore replayed the same ones, so every entry was
+     * overwritten. A restored arrangement can now legitimately name `p#2, p#3` where `start()` opened
+     * `p#1`, and a stale entry left behind is a renderer Dockview no longer shows, still registered
+     * for theme pushes and — through `#drop`'s release — still holding a Shell-side model that counts
+     * against its kind's instance ceiling.
+     */
+    #reconcileLive(): void {
+        for (const [instanceId, hosted] of [...this.#panels]) {
+            if (this.#api?.getPanel(instanceId) === undefined) {
+                this.#drop(instanceId, hosted);
+            }
+        }
     }
 
     /** Dispose every panel and the docking root. Idempotent. */

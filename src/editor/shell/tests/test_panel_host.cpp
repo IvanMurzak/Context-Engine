@@ -999,6 +999,96 @@ void carries_the_instance_id_on_every_panel_method()
     CHECK(again.contains("result") && !again.at("result").at("closed").as_bool());
 }
 
+// A CEILING REFUSAL NAMES THE LIMIT ON THE WIRE, not only on the in-process `open_instance` path.
+//
+// `resolve_instance` has nowhere to put the diagnostic `may_open` produced, so every `panel.*`
+// handler used to answer `panel.instance_limit` with its own generic wording — "cannot be rendered
+// by this build", which is FALSE (the build hosts the panel fine) and contradicts
+// `kErrPanelInstanceLimit`'s own contract that the diagnostic NAMES the limit (design 04 section 3).
+// The cost is a debugging round: a human who hit a ceiling went looking for a missing feature
+// instead of closing a panel. `open_instance` was the ONLY path that surfaced it, and it is not on
+// the wire — so the in-process tests above all passed while the renderer saw the wrong cause.
+void the_wire_names_the_limit_when_a_ceiling_refuses()
+{
+    std::vector<gc::Contribution> roster;
+    roster.push_back(with_mode("test.limited", gc::InstanceMode::limited, 2));
+    roster.push_back(with_mode("test.capped", gc::InstanceMode::limited, 1));
+    shell::PanelHost host(std::move(roster));
+    InstanceModels models;
+    CHECK(host.provide_factory("test.limited", models.factory(true, true)));
+    // The sibling subject below: a KNOWN panel that persists nothing AND sits at its own ceiling —
+    // both properties are load-bearing, see there.
+    CHECK(host.provide_factory("test.capped", models.factory(false, false)));
+    shell::BridgeRouter router;
+    CHECK(host.install(router));
+
+    CHECK(host.open_instance("test.limited").outcome == shell::InstanceOutcome::opened);
+    CHECK(host.open_instance("test.limited").outcome == shell::InstanceOutcome::opened);
+
+    // A THIRD copy, addressed from the wire — the ceiling refuses it on every method that would
+    // otherwise materialise one. Two methods rather than one because the wording is per-handler.
+    const Json rendered =
+        call(router, shell::kPanelRenderMethod, instance_params("test.limited", "test.limited#9"));
+    CHECK(rendered.contains("error"));
+    if (rendered.contains("error"))
+    {
+        CHECK(rendered.at("error").at("data").at("reason").as_string()
+              == shell::kErrPanelInstanceLimit);
+        const std::string message = rendered.at("error").at("message").as_string();
+        CHECK(shelltest::mentions(message, "max 2"));
+        // And the old wording, which asserted a cause this build contradicts, is gone.
+        CHECK(!shelltest::mentions(message, "cannot be rendered by this build"));
+    }
+
+    const Json state = call(router, shell::kPanelStateGetMethod,
+                            instance_params("test.limited", "test.limited#9"));
+    CHECK(state.contains("error"));
+    if (state.contains("error"))
+    {
+        CHECK(state.at("error").at("data").at("reason").as_string()
+              == shell::kErrPanelInstanceLimit);
+        CHECK(shelltest::mentions(state.at("error").at("message").as_string(), "max 2"));
+    }
+
+    // NON-VACUITY SIBLING, ON A PANEL THIS HOST KNOWS. A refusal that is not a ceiling keeps its
+    // handler's own wording, so the recomputation stays narrow rather than becoming a blanket
+    // rewrite of every `panel.*` error message.
+    //
+    // ⚠ THE SUBJECT NEEDS BOTH PROPERTIES, and MEASUREMENT is why — two weaker siblings were tried
+    // first and BOTH stayed green against a plant that deleted the `error_code` guard:
+    //   * an UNKNOWN panel is refused before the code is ever consulted (`find` misses, so the
+    //     fallback is returned whatever the code says), and
+    //   * a known panel BELOW its ceiling takes the defensive `may_open() == true` branch, which
+    //     also returns the fallback.
+    // Only a known panel sitting AT its ceiling reaches the recomputation with a non-ceiling code.
+    // `test.capped` is `limited` with max 1 and persists nothing, so once its single copy is open a
+    // `panel.state.get` refuses with `panel.no_state` from a panel `may_open` would refuse — the one
+    // combination that can tell a narrow recomputation from a blanket one.
+    CHECK(host.open_instance("test.capped").outcome == shell::InstanceOutcome::opened);
+    const Json no_state = call(router, shell::kPanelStateGetMethod, panel_params("test.capped"));
+    CHECK(no_state.contains("error"));
+    if (no_state.contains("error"))
+    {
+        const std::string message = no_state.at("error").at("message").as_string();
+        CHECK(no_state.at("error").at("data").at("reason").as_string()
+              != shell::kErrPanelInstanceLimit);
+        CHECK(shelltest::mentions(message, "panel.state.get refused for 'test.capped'"));
+        CHECK(!shelltest::mentions(message, "max 1"));
+    }
+
+    // And an UNKNOWN panel still keeps the render handler's own wording too.
+    const Json unknown = call(router, shell::kPanelRenderMethod,
+                              instance_params("test.nonexistent", "test.nonexistent#1"));
+    CHECK(unknown.contains("error"));
+    if (unknown.contains("error"))
+    {
+        CHECK(unknown.at("error").at("data").at("reason").as_string()
+              != shell::kErrPanelInstanceLimit);
+        CHECK(shelltest::mentions(unknown.at("error").at("message").as_string(),
+                                  "cannot be rendered by this build"));
+    }
+}
+
 } // namespace
 
 int main()
@@ -1023,5 +1113,6 @@ int main()
     bounds_instance_count_and_id_length_against_a_hostile_renderer();
     a_factory_is_probed_at_bind_time_for_renderability_and_capabilities();
     carries_the_instance_id_on_every_panel_method();
+    the_wire_names_the_limit_when_a_ceiling_refuses();
     SHELL_TEST_MAIN_END();
 }

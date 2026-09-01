@@ -1768,7 +1768,14 @@ export function makePanelDispatch(
     host?: PanelHost,
 ): (panelId: string, commandId: string) => Promise<CommandOutcome> {
     return async (panelId: string, commandId: string): Promise<CommandOutcome> => {
-        const port = host?.portRequest(panelId);
+        // ⚠ THE KIND IS RESOLVED TO A COPY FIRST (editor-UX c3). `panelId` arrives from the roster
+        // projection (`projectPanelCommands`), so it names a KIND — while `PanelHost`'s tables are
+        // keyed by INSTANCE id since c3. Asking `portRequest` for a bare kind can now only ever miss,
+        // which would silently send EVERY package panel's manifest command back down the
+        // `panel.command` route that has no C++ model to answer it — the exact dead end e13b-2 built
+        // this second route to fix.
+        const instanceId = host?.instancesOf(panelId)[0];
+        const port = instanceId === undefined ? undefined : host?.portRequest(instanceId);
         if (port !== undefined) {
             const reply = await port(PANEL_VERB_COMMAND_INVOKE, { id: commandId });
             return reply.ok
@@ -1780,7 +1787,11 @@ export function makePanelDispatch(
                       })`,
                   };
         }
-        const result = await client.command(panelId, commandId, "");
+        // Addressed to the SAME copy the port route above resolved, so a kind with two live copies
+        // does not have its two routes land on two different models. `undefined` (no host, or no live
+        // copy) leaves the wire byte-identical to the pre-c3 call and the Shell answers for its
+        // default instance, exactly as before.
+        const result = await client.command(panelId, commandId, "", undefined, instanceId);
         return result !== null && result.dispatched
             ? { ok: true, note: `${panelId}/${commandId}` }
             : { ok: false, note: `${panelId}/${commandId} not dispatched` };

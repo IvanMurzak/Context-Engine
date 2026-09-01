@@ -466,6 +466,18 @@ private:
     // May this kind hold ANOTHER live copy? `diagnostic` names the limit when it may not.
     [[nodiscard]] bool may_open(const Entry& entry, std::string& diagnostic) const;
 
+    // The MESSAGE a refused `panel.*` method carries on the wire.
+    //
+    // `kErrPanelInstanceLimit` is the ONE code whose cause the method name does not imply -- design
+    // 04 section 3 requires the limit to be NAMED -- and `resolve_instance` has nowhere to put the
+    // diagnostic `may_open` produced, so it is RECOMPUTED here from the same predicate that refused.
+    // Safe because a refusal creates nothing: the instance table is exactly what `may_open` just
+    // judged, so the answer cannot have moved. Every other code keeps the caller's own wording,
+    // which already names the method that refused.
+    [[nodiscard]] std::string refusal_message(const std::string& panel_id,
+                                              const std::string& error_code,
+                                              std::string fallback) const;
+
     // Create one live copy, calling the factory (or copying the shared provider). nullptr -- with
     // `code`/`diagnostic` set -- when the ceiling forbids it or the binding cannot render.
     [[nodiscard]] Instance* create_instance(Entry& entry, const std::string& instance_id,

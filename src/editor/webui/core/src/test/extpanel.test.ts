@@ -980,4 +980,36 @@ export const extPanelTests: readonly TestCase[] = [
             }
         },
     },
+    {
+        name: "iframe panel: a port is reachable by its INSTANCE id and never by its kind",
+        run: async () => {
+            // The fact `boot.ts` has to resolve around (c3). `portRequest` is a lookup into
+            // `#panels`, which is keyed by INSTANCE id since panel identity became a pair — while
+            // its one caller, `makePanelDispatch`, is handed a KIND by the roster projection. Asking
+            // with the kind therefore MISSES for every port panel and silently routes the command
+            // down the `panel.command` fallback, which has no C++ model for an iframe panel and
+            // answers `dispatched:false` — precisely the dead end this second route exists to close.
+            //
+            // Asserted as a pair: the kind must miss AND the copy must hit. The miss alone would
+            // also pass against a host that had no ports at all.
+            const mounted = await mountHost([manifestJson()]);
+            try {
+                const copies = mounted.host.instancesOf("pkg.hello");
+                assertEqual(copies.length, 1, "the package panel mounted exactly one copy");
+                assertEqual(copies[0], "pkg.hello#1", "and its key is an instance id, not the kind");
+                assertEqual(
+                    mounted.host.portRequest("pkg.hello"),
+                    undefined,
+                    "the KIND resolves to no port — a caller that passes it through unresolved can " +
+                        "only ever fall through",
+                );
+                assert(
+                    mounted.host.portRequest("pkg.hello#1") !== undefined,
+                    "while the resolved COPY reaches the port, which is the whole difference",
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
 ];

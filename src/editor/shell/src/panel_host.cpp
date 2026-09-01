@@ -434,6 +434,27 @@ bool PanelHost::may_open(const Entry& entry, std::string& diagnostic) const
     return false;
 }
 
+std::string PanelHost::refusal_message(const std::string& panel_id, const std::string& error_code,
+                                       std::string fallback) const
+{
+    if (error_code != kErrPanelInstanceLimit)
+    {
+        return fallback;
+    }
+    const Entry* entry = find(panel_id);
+    if (entry == nullptr)
+    {
+        return fallback;
+    }
+    std::string diagnostic;
+    if (may_open(*entry, diagnostic) || diagnostic.empty())
+    {
+        // Defensive only: the code says a ceiling refused, so the predicate must still refuse.
+        return fallback;
+    }
+    return diagnostic;
+}
+
 PanelHost::Instance* PanelHost::create_instance(Entry& entry, const std::string& instance_id,
                                                 std::string& code, std::string& diagnostic)
 {
@@ -871,8 +892,10 @@ bool PanelHost::install(BridgeRouter& router)
                  const std::optional<PanelRender> rendered = render(panel_id, error_code, instance_id);
                  if (!rendered.has_value())
                  {
-                     return BridgeResult::error(error_code, "panel '" + panel_id +
-                                                                "' cannot be rendered by this build");
+                     return BridgeResult::error(
+                         error_code, refusal_message(panel_id, error_code,
+                                                     "panel '" + panel_id +
+                                                         "' cannot be rendered by this build"));
                  }
                  ++renders_served_;
 
@@ -925,9 +948,10 @@ bool PanelHost::install(BridgeRouter& router)
                  if (!invoke(panel_id, command_id, request.params, dispatched, error_code,
                              instance_id))
                  {
-                     return BridgeResult::error(error_code, "panel '" + panel_id +
-                                                                "' cannot dispatch '" + command_id +
-                                                                "'");
+                     return BridgeResult::error(
+                         error_code, refusal_message(panel_id, error_code,
+                                                     "panel '" + panel_id + "' cannot dispatch '" +
+                                                         command_id + "'"));
                  }
                  contract::Json out = contract::Json::object();
                  out.set("dispatched", contract::Json(dispatched));
@@ -967,8 +991,11 @@ bool PanelHost::install(BridgeRouter& router)
                      // Same rule as panel.state.get below: this path also carries `panel.unknown`
                      // and `panel.not_hosted`, for which "does not accept gestures" is simply
                      // false. Report the code, not a guessed cause.
-                     return BridgeResult::error(error_code, "panel.gesture refused for '" +
-                                                                panel_id + "': " + error_code);
+                     return BridgeResult::error(
+                         error_code,
+                         refusal_message(panel_id, error_code,
+                                         "panel.gesture refused for '" + panel_id + "': " +
+                                             error_code));
                  }
                  contract::Json out = contract::Json::object();
                  out.set("dispatched", contract::Json(dispatched));
@@ -1001,9 +1028,11 @@ bool PanelHost::install(BridgeRouter& router)
                      // reached for `panel.unknown` and `panel.not_hosted` as well as
                      // `panel.no_state`, so name the code instead of claiming the panel persists
                      // no state — a refusal that misreports its own reason costs a debugging round.
-                     return BridgeResult::error(error_code,
-                                                "panel.state.get refused for '" + panel_id +
-                                                    "': " + error_code);
+                     return BridgeResult::error(
+                         error_code,
+                         refusal_message(panel_id, error_code,
+                                         "panel.state.get refused for '" + panel_id + "': " +
+                                             error_code));
                  }
                  contract::Json out = contract::Json::object();
                  out.set("panelId", contract::Json(panel_id));
@@ -1039,8 +1068,10 @@ bool PanelHost::install(BridgeRouter& router)
                  if (!restore_state(panel_id, persisted, restored, code, diagnostic, error_code,
                                     instance_id))
                  {
-                     return BridgeResult::error(error_code,
-                                                "panel '" + panel_id + "' cannot restore state");
+                     return BridgeResult::error(
+                         error_code, refusal_message(panel_id, error_code,
+                                                     "panel '" + panel_id +
+                                                         "' cannot restore state"));
                  }
                  contract::Json out = contract::Json::object();
                  out.set("panelId", contract::Json(panel_id));

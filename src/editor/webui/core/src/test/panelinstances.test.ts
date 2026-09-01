@@ -30,6 +30,7 @@ import {
 } from "../editorstate.js";
 import { PanelHost } from "../panelhost.js";
 import {
+    PANEL_COMMAND_METHOD,
     PANEL_INSTANCE_CLOSE_METHOD,
     PANEL_LIST_METHOD,
     PANEL_RENDER_METHOD,
@@ -39,6 +40,7 @@ import {
     makeInstanceId,
     panelIdOfInstance,
 } from "../panels.js";
+import { makePanelDispatch } from "../boot.js";
 
 // ------------------------------------------------------------------------------ the roster fixture
 
@@ -556,6 +558,102 @@ export const panelInstanceTests: readonly TestCase[] = [
                 );
             } finally {
                 target.dispose();
+            }
+        },
+    },
+    {
+        name: "layout restore RELEASES the copies it drops, not just its own tables",
+        run: async () => {
+            // A restore forgets the copies the arrangement does not name. Dropping them from this
+            // host's tables is only HALF the job: the Shell holds a model per copy and counts LIVE
+            // copies against the kind's ceiling, so a drop without the release leaves a singleton
+            // permanently at its limit — the Shell then refuses the copy the restore just brought
+            // back (`panel.instance_limit`) and the panel renders EMPTY. Silent, and it survives
+            // until the next restore.
+            //
+            // ⚠ ONLY A COPY THE RESTORE ITSELF FORGETS CAN PROVE IT. `close()` releases through the
+            // same `#drop`, so a version of this test that closed the doomed copy would stay green
+            // with the reconcile's release deleted — which is exactly the shape the bug shipped in.
+            const donor = await mountHost([manifest("p.one", { mode: "singleton" })]);
+            let layout: unknown;
+            try {
+                assertEqual(arrangedIds(donor.host), "p.one#1", "the donor holds the default copy");
+                layout = donor.host.captureLayout();
+                assert(layout !== null, "the donor produced an arrangement");
+            } finally {
+                donor.dispose();
+            }
+
+            const target = await mountHost([manifest("p.one", { mode: "singleton" })]);
+            try {
+                // Put the target in a shape the arrangement does NOT name: a reopen mints a fresh
+                // ordinal, so the live copy is `#2` while the donor's arrangement names `#1`. This
+                // is the ordinary case after a close-and-reopen, and the pre-c3 code never saw it
+                // because the ids were kind ids and a restore replayed the same ones.
+                const first = target.host.mounted[0] ?? "";
+                assert(target.host.close(first), "the target closed its default copy");
+                const reopened = target.host.openInstance("p.one");
+                assertEqual(reopened.instanceId, "p.one#2", "and reopened it as a fresh ordinal");
+                assertEqual(
+                    target.shell.released.join(","),
+                    "p.one#1",
+                    "only the explicitly CLOSED copy has been released so far — the restore's own " +
+                        "release has to show up on top of this one",
+                );
+
+                assertEqual(target.host.restoreLayout(layout), true, "the arrangement restores");
+                assertEqual(
+                    arrangedIds(target.host),
+                    "p.one#1",
+                    "the restored arrangement names the donor's copy",
+                );
+                assert(
+                    target.shell.released.includes("p.one#2"),
+                    "the copy the restore DROPPED was released on the wire; without it the Shell " +
+                        "still counts it against the singleton ceiling and the restored copy is " +
+                        `refused, got ${JSON.stringify(target.shell.released)}`,
+                );
+                assertEqual(
+                    [...target.host.mounted].join(","),
+                    "p.one#1",
+                    "and the dropped copy is gone from this host's tables too",
+                );
+            } finally {
+                target.dispose();
+            }
+        },
+    },
+    {
+        name: "makePanelDispatch resolves the KIND to a live copy and addresses THAT copy",
+        run: async () => {
+            // `projectPanelCommands` builds every manifest command's handler as
+            // `dispatch(panel.id, command.id)` — a KIND, because that is what a roster names. Since
+            // c3 the host's tables are keyed by INSTANCE, so a bare kind resolves to nothing: the
+            // port lookup can only ever miss, and the `panel.command` fallback would address the
+            // Shell's default copy while the port route (had it hit) addressed another. Both routes
+            // must land on the SAME copy, so the kind is resolved once, up front.
+            const mounted = await mountHost([manifest("p.many", { mode: "unlimited" })]);
+            try {
+                const second = mounted.host.openInstance("p.many");
+                assertEqual(second.instanceId, "p.many#2", "the kind has two live copies");
+
+                const dispatch = makePanelDispatch(mounted.client, mounted.host);
+                const before = mounted.shell.calls.length;
+                await dispatch("p.many", "cmd.go");
+
+                const sent = mounted.shell.calls
+                    .slice(before)
+                    .filter((entry) => entry.method === PANEL_COMMAND_METHOD);
+                assertEqual(sent.length, 1, "exactly one command reached the wire");
+                assertEqual(
+                    sent[0]?.params["instanceId"],
+                    "p.many#1",
+                    "addressed to the RESOLVED copy — a kind-addressed dispatch sends no " +
+                        "instanceId at all and leans on the Shell's default-copy rule, which is " +
+                        "the same miss that sends every port panel down this fallback",
+                );
+            } finally {
+                mounted.dispose();
             }
         },
     },
