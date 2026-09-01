@@ -56,24 +56,6 @@ DragCursor drag_cursor_for(DragOperation operation)
     }
 }
 
-const char* to_string(DragCursor cursor)
-{
-    switch (cursor)
-    {
-    case DragCursor::none:
-        return "none";
-    case DragCursor::refused:
-        return "refused";
-    case DragCursor::copy:
-        return "copy";
-    case DragCursor::link:
-        return "link";
-    case DragCursor::move:
-        return "move";
-    }
-    return "unknown";
-}
-
 const char* to_string(OsrDragInjectionKind kind)
 {
     switch (kind)

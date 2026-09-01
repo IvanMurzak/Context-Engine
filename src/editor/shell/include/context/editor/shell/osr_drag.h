@@ -150,8 +150,6 @@ enum class DragCursor
 // to `none`; the end-of-drag `none` is pushed by the Shell directly and does not come through here.
 [[nodiscard]] DragCursor drag_cursor_for(DragOperation operation);
 
-[[nodiscard]] const char* to_string(DragCursor cursor);
-
 // --------------------------------------------------------------------------- one injection
 
 // Which of the six windowless-only `CefBrowserHost` drag members an emitted step is.

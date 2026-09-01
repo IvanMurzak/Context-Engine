@@ -140,7 +140,7 @@ void EditorWindow::DragObserver::on_update_drag_cursor(DragOperation operation)
     // than one per pointer sample. THROUGH `drag_cursor_for`, which is where CEF's overloaded
     // `DRAG_OPERATION_NONE` is disambiguated — during a drag it means "this will not take the
     // drop", never "there is no drag" (osr_drag.h § the feedback cursor).
-    owner_->backend_->set_drag_cursor(drag_cursor_for(operation));
+    owner_->push_drag_cursor(drag_cursor_for(operation));
 }
 
 PresentPath EditorWindow::attach_present(render::IRhi& rhi)
@@ -273,8 +273,20 @@ void EditorWindow::apply_drag(const OsrDragInjections& injections)
         // `UpdateDragCursor(none)` of its own, so a feedback cursor left standing would outlive the
         // gesture — the cosmetic cousin of the leaked cursor capture `cross_window_drag.h` guards
         // against, and equally invisible to anything but a human.
-        backend_->set_drag_cursor(DragCursor::none);
+        push_drag_cursor(DragCursor::none);
     }
+}
+
+// ONE PUSH PER CHANGE — see shell.h. Deliberately NOT gated on `drag_.active()`: the end-of-drag
+// reset runs precisely when the session has already gone inactive.
+void EditorWindow::push_drag_cursor(DragCursor cursor)
+{
+    if (cursor == last_drag_cursor_)
+    {
+        return;
+    }
+    last_drag_cursor_ = cursor;
+    backend_->set_drag_cursor(cursor);
 }
 
 void EditorWindow::drive_drag(const PointerDispatch& dispatch, const PointerEvent& event)
@@ -325,7 +337,7 @@ void EditorWindow::end_drag(OsrDragEndReason reason, bool inject)
     // session is still ENDED rather than left active — `drags_begun()`/`drags_ended()` is the pair
     // that says a drag never dangled, and a window torn down mid-drag must not be the one case
     // where they disagree. The cursor is restored through the backend, which outlives the browser.
-    backend_->set_drag_cursor(DragCursor::none);
+    push_drag_cursor(DragCursor::none);
 }
 
 void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)

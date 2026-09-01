@@ -454,6 +454,16 @@ void post_drag_sample(Harness& harness, PointerAction action, PointI position)
     harness.backend->post(event);
 }
 
+// The "a drag is live and has ENTERED the view" precondition, which several cases below open with.
+// Named rather than repeated so that what "a drag in progress" means — a `StartDragging` plus one
+// sample inside the view — is one edit if it ever changes, not three.
+void start_live_drag(Harness& harness)
+{
+    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
+    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
+    CHECK(harness.window->pump_once(1000));
+}
+
 [[nodiscard]] std::vector<OsrDragInjectionKind> injected_kinds(const ScriptedBrowserHost& browser)
 {
     std::vector<OsrDragInjectionKind> out;
@@ -533,6 +543,48 @@ void test_a_web_view_drag_runs_end_to_end_through_the_owner_loop()
     CHECK(harness.browser->pointers().size() == pointers_before + 1);
 }
 
+void test_the_feedback_cursor_is_pushed_once_per_change()
+{
+    // `docs/shell.md` § 11's Windows/macOS/Linux cursor rows all rest on this sentence — "the
+    // push-down wiring, ONE CALL PER CHANGE, `none` on every drag end" — because the OS calls
+    // themselves are executed by nothing in CI (Session 0 delivers no pointer; the macOS smoke is
+    // headless; xvfb has no one to look at a cursor). So the recording backend is the only place the
+    // claim can be pinned, and the push COUNT is the assertion: `UpdateDragCursor` fires as often as
+    // CEF answers an injected `DragTargetDragOver` — up to one per pointer sample — while the answer
+    // it carries is near-constant for a whole gesture.
+    Harness harness;
+    start_live_drag(harness);
+    const int before = harness.backend->drag_cursor_pushes();
+
+    harness.browser->script_update_drag_cursor(DragOperation::copy);
+    CHECK(harness.backend->drag_cursor() == DragCursor::copy);
+    CHECK(harness.backend->drag_cursor_pushes() == before + 1);
+
+    // The SAME answer, repeatedly — the ordinary case for a pointer moving across one drop target.
+    harness.browser->script_update_drag_cursor(DragOperation::copy);
+    harness.browser->script_update_drag_cursor(DragOperation::copy);
+    CHECK(harness.backend->drag_cursor_pushes() == before + 1);
+
+    // A CHANGED answer does push: the guard is same-value dedup, not a latch. `move` and `copy` are
+    // distinct cursors, so a drag that crosses from a copy target to a move target must repaint.
+    harness.browser->script_update_drag_cursor(DragOperation::move);
+    CHECK(harness.backend->drag_cursor() == DragCursor::move);
+    CHECK(harness.backend->drag_cursor_pushes() == before + 2);
+
+    // ...and `DRAG_OPERATION_NONE` DURING a drag is `refused`, a real cursor change, never the
+    // end-of-drag `none` (osr_drag.h § the feedback cursor).
+    harness.browser->script_update_drag_cursor(DragOperation::none);
+    CHECK(harness.backend->drag_cursor() == DragCursor::refused);
+    CHECK(harness.backend->drag_cursor_pushes() == before + 3);
+
+    // The drag ends: exactly one more push, putting the ordinary cursor back.
+    post_drag_sample(harness, PointerAction::up, PointI{100, 100});
+    CHECK(harness.window->pump_once(2000));
+    CHECK(!harness.window->drag().active());
+    CHECK(harness.backend->drag_cursor() == DragCursor::none);
+    CHECK(harness.backend->drag_cursor_pushes() == before + 4);
+}
+
 void test_a_drag_leaving_and_re_entering_the_view_is_told_both_times()
 {
     Harness harness; // 800x600 physical client
@@ -565,9 +617,7 @@ void test_a_drag_leaving_and_re_entering_the_view_is_told_both_times()
 void test_escape_cancels_a_live_drag_and_is_not_forwarded()
 {
     Harness harness;
-    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
-    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
-    CHECK(harness.window->pump_once(1000));
+    start_live_drag(harness);
     harness.browser->script_update_drag_cursor(DragOperation::copy);
 
     const std::size_t keys_before = harness.browser->keys().size();
@@ -600,9 +650,7 @@ void test_escape_cancels_a_live_drag_and_is_not_forwarded()
 void test_losing_focus_ends_a_live_drag_through_the_protocol()
 {
     Harness harness;
-    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
-    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
-    CHECK(harness.window->pump_once(1000));
+    start_live_drag(harness);
 
     ShellEvent focus_lost;
     focus_lost.kind = ShellEventKind::focus_lost;
@@ -625,9 +673,7 @@ void test_losing_focus_ends_a_live_drag_through_the_protocol()
 void test_closing_the_window_ends_a_live_drag_without_injecting()
 {
     Harness harness;
-    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
-    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
-    CHECK(harness.window->pump_once(1000));
+    start_live_drag(harness);
     const std::size_t injections_before = harness.browser->drag_injections().size();
     // A REAL feedback cursor first, so the `none` asserted after the close is a PUSH and not the
     // backend's initial value — `none` is both, which is why `drag_cursor_pushes()` exists.
@@ -1011,6 +1057,7 @@ int main()
     test_pump_pushes_republished_chrome_regions_down_to_the_backend();
     test_focus_events_reach_the_browser_and_drop_a_live_drag();
     test_a_web_view_drag_runs_end_to_end_through_the_owner_loop();
+    test_the_feedback_cursor_is_pushed_once_per_change();
     test_a_drag_leaving_and_re_entering_the_view_is_told_both_times();
     test_escape_cancels_a_live_drag_and_is_not_forwarded();
     test_losing_focus_ends_a_live_drag_through_the_protocol();

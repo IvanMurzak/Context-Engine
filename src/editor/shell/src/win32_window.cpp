@@ -380,18 +380,31 @@ public:
     // during a drag is never. `drag_cursor_` is therefore recorded and the WM_SETCURSOR arm in
     // `handle()` re-applies it; the immediate `SetCursor` is what makes the change visible without
     // waiting for the next move.
+    // ⚠ EXACTLY ONE STOCK CURSOR IS A DELIBERATE FLOOR, not an oversight. The drag cursors a
+    // Windows user recognises — the copy plus-badge, the link shortcut-arrow — are NOT in the IDC_*
+    // stock set: Windows draws them from OLE's own resources during `DoDragDrop`, the modal loop
+    // this Shell deliberately does not enter (osr_drag.h § THE SHELL OWNS THE DRAG LOOP). What IS
+    // stock is `IDC_NO`, and it is the one that carries real information — a drop HERE will do
+    // nothing, the difference between a user who knows to keep moving and one who lets go over dead
+    // space. `docs/shell.md` § 11 records the badge as a named gap rather than pretending.
+    //
+    // Every OTHER `DragCursor` is the CLASS cursor, so it is spelled as a null `drag_cursor_` —
+    // "this window states nothing, let `DefWindowProc` answer `WM_SETCURSOR`" — rather than as a
+    // second hard-coded `IDC_ARROW` that could silently drift from the one `ensure_window_class`
+    // registers.
     void set_drag_cursor(DragCursor cursor) override
     {
-        drag_cursor_ = win32_drag_cursor(cursor);
-        if (drag_cursor_ != nullptr)
+        // Loaded ONCE. `LoadCursorW` on a system IDC_* returns a SHARED, process-lifetime handle
+        // that must never be passed to `DestroyCursor`, so caching it owns nothing and frees
+        // nothing — it only drops one USER32 call per pointer sample off the drag path.
+        static const HCURSOR no_drop = ::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_NO));
+        drag_cursor_ = cursor == DragCursor::refused ? no_drop : nullptr;
+        // ⚠ NEVER `SetCursor(nullptr)` — that HIDES the pointer outright. A null `drag_cursor_`
+        // means "no cursor of our own", which is the class cursor, so it is restored explicitly.
+        const HCURSOR show = drag_cursor_ != nullptr ? drag_cursor_ : class_cursor();
+        if (show != nullptr)
         {
-            ::SetCursor(drag_cursor_);
-        }
-        else if (hwnd_ != nullptr)
-        {
-            // Back to the class cursor. Asking Windows rather than remembering one keeps this
-            // correct if the class cursor ever changes.
-            ::SetCursor(::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW)));
+            ::SetCursor(show);
         }
     }
 
@@ -422,31 +435,16 @@ private:
         }
     }
 
-    // b1: the stock cursor a `DragCursor` shows, or null for "no drag in flight — use the class
-    // cursor". A SHARED handle in every case (`LoadCursorW` on a system IDC_*), so nothing here
-    // owns or destroys anything: a shared cursor must NOT be passed to `DestroyCursor`.
-    //
-    // ⚠ THE POSITIVE CASES ARE A DELIBERATE FLOOR, not an oversight. The drag cursors a Windows
-    // user recognises — the copy plus-badge, the link shortcut-arrow — are NOT in the IDC_* stock
-    // set: Windows draws them from OLE's own resources during `DoDragDrop`, the modal loop this
-    // Shell deliberately does not enter (osr_drag.h § THE SHELL OWNS THE DRAG LOOP). What IS stock
-    // is `IDC_NO`, and that is the one that carries real information: it says a drop HERE will do
-    // nothing, which is the difference between a user who knows to keep moving and one who lets go
-    // over dead space. `docs/shell.md` § 11 records the badge as a named gap rather than pretending.
-    [[nodiscard]] static HCURSOR win32_drag_cursor(DragCursor cursor)
+    // b1: the cursor this window's CLASS registered — ASKED of Windows rather than remembered, so
+    // it stays correct if `ensure_window_class` ever registers a different one. Null before the
+    // window exists, which the one caller checks.
+    [[nodiscard]] HCURSOR class_cursor() const
     {
-        switch (cursor)
+        if (hwnd_ == nullptr)
         {
-        case DragCursor::refused:
-            return ::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_NO));
-        case DragCursor::copy:
-        case DragCursor::link:
-        case DragCursor::move:
-            return ::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
-        case DragCursor::none:
-        default:
             return nullptr;
         }
+        return reinterpret_cast<HCURSOR>(::GetClassLongPtrW(hwnd_, GCLP_HCURSOR));
     }
 
     HWND hwnd_ = nullptr;

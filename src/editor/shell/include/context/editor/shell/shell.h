@@ -193,6 +193,16 @@ private:
     // End a live drag because the WINDOW is going away or losing the gesture. `inject` is false on
     // the teardown paths, where the browser is already closing and there is nothing left to tell.
     void end_drag(OsrDragEndReason reason, bool inject);
+    // Push a feedback cursor to the backend, ONCE PER CHANGE — the single funnel every drag-cursor
+    // write goes through (`on_update_drag_cursor`, `apply_drag`'s end-of-drag reset, `end_drag`'s).
+    //
+    // The guard is here rather than in the three backends because it is the same guard in all
+    // three, and only X11 could ever have justified writing its own (a server resource per change).
+    // `UpdateDragCursor` fires as often as CEF answers an injected `DragTargetDragOver` — up to one
+    // per pointer sample — while the operation it reports is near-constant for a whole gesture, so
+    // without this every sample would re-issue a window-server call (`[NSCursor set]`) or a USER32
+    // one on the single thread that also runs `CefDoMessageLoopWork`.
+    void push_drag_cursor(DragCursor cursor);
     void sync_browser_size();
     // Push the window's CLIENT origin on screen down to the browser (a1) — the half of the OSR
     // geometry contract `sync_browser_size` does not carry. Deliberately separate: a move is not a
@@ -211,6 +221,9 @@ private:
     // guarantees rather than the only one.
     OsrDragSession drag_;
     DragObserver drag_observer_{*this};
+    // What `push_drag_cursor` last pushed. `none` is the backends' own initial state, so starting
+    // here means a drag that never displayed a cursor also never issues a reset for one.
+    DragCursor last_drag_cursor_ = DragCursor::none;
     std::unique_ptr<IWindowBackend> backend_;
     std::unique_ptr<IBrowserHost> browser_;
     EditorWindowConfig config_;
