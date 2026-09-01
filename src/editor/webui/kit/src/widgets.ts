@@ -57,6 +57,19 @@ export function widgetClassForRole(role: string): string | undefined {
 }
 
 /**
+ * Visually hides an element while KEEPING it in the accessibility tree (a4, editor-UX
+ * `07-ui-states.md` §5: the duplicated panel title).
+ *
+ * ⚠ NOT a role class — it carries no `ctx-widget-` prefix and is outside the closed 12-role set
+ * `webui-kit-role-coverage` polices, because it is not derived from a node's role; the hydration
+ * runtime applies it structurally (a panel's first rendered node happens to be a heading whose text
+ * repeats the panel's own title). Styled with the standard clip-rect pattern in `kit.css` — the one
+ * technique that removes an element from the PAINT without removing it from the accessibility tree,
+ * which `display: none` (and `visibility: hidden`) would do.
+ */
+export const VISUALLY_HIDDEN_CLASS = "ctx-visually-hidden";
+
+/**
  * The kit class for a role the CALLER knows must exist — throwing rather than degrading when it does
  * not.
  *

@@ -7,6 +7,7 @@
 import { runTests, type TestSummary } from "./harness.js";
 import { panelsTests } from "./panels.test.js";
 import { hydrationTests } from "./hydration.test.js";
+import { panelTitleTests } from "./paneltitle.test.js";
 import { editorstateTests } from "./editorstate.test.js";
 import { guardsTests } from "./guards.test.js";
 import { whenTests } from "./when.test.js";
@@ -50,6 +51,7 @@ import { packageGrantsTests } from "./packagegrants.test.js";
 void runTests([
     ...panelsTests,
     ...hydrationTests,
+    ...panelTitleTests,
     ...editorstateTests,
     ...guardsTests,
     ...whenTests,
