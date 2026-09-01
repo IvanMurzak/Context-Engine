@@ -49,8 +49,8 @@ is a hard dependency"). `a3` and `a4` are renderer-only and block nothing.
 | Task (spec) | needs | repo/base | imp/cx | model | Status | Run / PR | Updated |
 |---|---|---|---|---|---|---|---|
 | `a0` osr-contract-audit (`tasks/a0-osr-contract-audit.md`) | — | Context-Engine/main | 7/5 | mid | Merged | [#500](https://github.com/IvanMurzak/Context-Engine/pull/500) `b563724` | 2026-09-01 |
-| `a1` osr-screen-point (`tasks/a1-osr-screen-point.md`) | — | Context-Engine/main | 8/8 | top | In progress | run `01a05cf9-3f9f` | 2026-09-01 |
-| `a2` osr-popup-dpi (`tasks/a2-osr-popup-dpi.md`) | — | Context-Engine/main | 8/8 | top | Ready | — | 2026-08-29 |
+| `a1` osr-screen-point (`tasks/a1-osr-screen-point.md`) | — | Context-Engine/main | 8/8 | top | Merged | [#501](https://github.com/IvanMurzak/Context-Engine/pull/501) `129bfb5` ⚠ | 2026-09-01 |
+| `a2` osr-popup-dpi (`tasks/a2-osr-popup-dpi.md`) | — | Context-Engine/main | 8/8 | top | In progress | run `01a05d8c-9465` | 2026-09-01 |
 | `a3` ui-state-model (`tasks/a3-ui-state-model.md`) | — | Context-Engine/main | 6/6 | mid | Ready | — | 2026-08-29 |
 | `a4` panel-title-dedup (`tasks/a4-panel-title-dedup.md`) | — | Context-Engine/main | 5/5 | mid | Ready | — | 2026-08-29 |
 | `b1` osr-html5-drag (`tasks/b1-osr-html5-drag.md`) | `a0` `a1` `a2` | Context-Engine/main | 9/10 | top | Planned | — | 2026-08-29 |
@@ -122,6 +122,7 @@ Gates specific to this set — each is a way a task could ship green and wrong:
 | 2026-08-29 | D12 added mid-planning after the owner questioned whether the framework itself was the problem. Answer recorded in `README.md`: CEF OSR's contract is adopted at 5 of 17 `CefRenderHandler` members; the defect is an incomplete adoption, not a wrong framework, and every alternative framework costs more or loses the single-window scene compositing already built. `a0` is the task that response earned |
 | 2026-08-29 | Verified during planning that `assetdb` has **no delete operation** and the registry carries only `asset move` / `asset rename` — so `e2`'s delete is a new engine operation, not wiring |
 | 2026-08-29 | **`taskflow-review` complete.** Every `file:line` in the set re-read against the tree; the OSR claims re-derived from the pinned SDK headers; the dockview DnD counts re-measured against the SHA-pinned bundle (12/1/3/5/11/3 — exact, and the artifact's SHA matches `tools/dockview-toolchain.json`). Nine findings confirmed and corrected; one product fork returned to the owner. **P0:** `selection-get`'s reply was specified as a replacement while `08 §4` claimed additivity → owner took the additive form, `D1` **REVISED**. **P1 ×5:** the compositor holds no `DpiScale` (`a2`/`e3` guidance inverted); `inspector_feed` does not consume `selection-changed` (`c1` seam wrong); the write-notice kinds are `drop`/`refusal`/`abandoned`, not `bad`/`wait` (`e2`); an un-migrated v1 session file is silently accepted, not quarantined (`c1`'s stated test was vacuous); `GetRootScreenRect` is DIP on every platform while `GetScreenPoint` splits per platform (`a1`). **P1 dependency:** `b1` now needs `a0` `a1` `a2`. **P2 ×3:** README root-cause arithmetic; `a1`'s test home is `editor-shell-test_dpi` and its sizing understated the placement plumbing; Tilemap Painter's heading is label-only. Execution isolation recorded above |
+| 2026-09-01 | **`a1` merged (⚠ GitHub's PR record is WRONG); `a2` dispatched.** `a1` landed as merge commit `129bfb5`, **42/42 green**. But `gh pr merge` hit a transient GraphQL 500: the merge succeeded server-side while the PR object kept `state:CLOSED`, `mergeCommit:null`, `mergedAt:null`, so GitHub **displays #501 as “Closed”, not “Merged”, permanently**. Verified from the ref instead, which is ground truth: `129bfb5` is an ancestor of `origin/main`, it is a merge commit whose **second parent `0b64239` is the `a1` branch tip**, and the implement commit is in the history. `land.md`'s prescribed check (`gh pr view --json state,mergeCommit`) cannot see this failure mode — 6th member of the false-halt family. `a1` also deviated from its spec's prescribed `WindowPlacement` seam, deliberately: Win32 `placement()` reports the restore rect (wrong while maximized) and macOS keeps placement in unconverted Cocoa points, so it added a pure `IWindowBackend::client_origin()` instead |
 | 2026-09-01 | **Round 1 closed out.** Both managers reported `completed` with clean teardowns. `a0`'s run independently re-read the pinned CEF distribution and **confirmed the audit table over the source**: `cef_shell.cpp:1249-1250`'s comment claiming `WasResized` re-reads `GetScreenInfo` is wrong against the SDK — live DPI refresh needs `NotifyScreenInfoChanged`, which nothing calls. The table's `NotifyScreenInfoChanged` gap row is therefore right, and the stale-comment fix is a follow-up below. Cost note for future rounds: `a0` lost 3 step-attempts to one failure family (an executor ending its turn with a child still running); no work was lost, and the improver has now unified that rule across the three unfrozen steps |
 | 2026-09-01 | **Round 1 verified and merged; round 2 dispatched.** `a0` → PR #500 (`b563724`) and `c1` → PR #499 (`58419cc`), each **42/42 checks green**, verified from GitHub not from the worker reports. `a0` DoD re-checked independently: exactly **17** `CefRenderHandler` rows, the pinned CEF `149.0.6+g0d0eeb6+chromium-149.0.7827.201` named from `tools/cef-prebuilt.json`, docs-only diff. `c1` DoD re-checked: the both-directions `file`/`entity` filter tests, `selection-get` carrying **both** `ids` and `selections` (D1 REVISED), the **falsifiable** v1 migration half plus the v99 quarantine sibling, unknown-subject `usage.invalid`, `protocolMajor` still 1 and no `editor.ui` topic added. A `/code-review` finding alleging the audit table contradicted `cef_shell.cpp:1250-1251` was checked and found **stale** — `docs/shell.md:1219` already names that contradiction and scopes it out. Round 2: `a1` (run `01a05cf9-3f9f`), `c2` (run `01a05cf9-40d9`) |
 | 2026-09-01 | **`taskflow-execute` round 1 dispatched.** Options resolved: `--scope=all` `--parallel=4` `--review=off` `--merge=on-green` `--engine=auto`→**pipeline** (`implement-task`; the Execution table prescribes it, `pipeline.yml` now declares `runner: manager`, and the prior set landed 10/10 through it) `--submodules=off` (this repo has none) `--on-fail=continue`. Ready work — not the `--parallel` ceiling — bounds the round: groups are conflict domains run in ascending `sequence`, so exactly one task per group is eligible and only `A`/`C` have their earliest sequence unblocked. Dispatched `a0` (run `01a05c81-aed8-70bb-ac8f-e29216284cfc`) and `c1` (run `01a05c81-b1d9-702e-ba37-def67f285752`). `B` `D` `E` `F` are dependency-blocked; `a1`–`a4`, `c2`, `c3` wait on their group's earlier sequence |
@@ -150,6 +151,27 @@ are **off by 8–9 lines** against the pinned distribution (`:889` → `:897`, `
 propagate into the delivered table — `docs/shell.md` § 16 carries the verified numbers. `b1` is the
 drag task and its spec draws on the same source, so its citations must be re-derived from the pinned
 headers, never trusted. The scheduler passes this to `b1`'s worker at dispatch.
+
+**The improver-edit loss has a named mechanism now.** `code-review.md` step 3's plant-residue revert
+carries **no pathspec**, so a literal `git checkout -- .` satisfies it and wipes the run's uncommitted
+`.pipeline/**` edits. It matches the observed pattern exactly — edits made before the last `code-review`
+dispatch vanish, later ones survive (`a1` salvaged 2 files where `a0`/`c1` salvaged 3). One-line fix,
+unfiled, and **not** in any captured patch.
+
+**`docs/shell.md` § 16 is citation-fragile.** It pins sixteen exact `cef_shell.cpp:<line>` references
+and nothing in CI checks that a cited line still holds its symbol. `a1`'s diff shifted all sixteen and
+re-pointed each by hand. Every later task touching that file inherits the same manual burden.
+
+**New CI flake signature.** `wasm-runner (macos-latest)`: *"The job was not acquired by Runner of type
+hosted even after multiple attempts"* — GitHub-hosted runner provisioning, not a build failure. Cleared
+by a same-SHA `gh run rerun --failed`. **`pipeline ci-wait` reports `code=1`** because it cannot
+distinguish an infra cancel from a real failure, so this shape looks like red CI.
+
+**Two more `a1`-surfaced defects, outside its diff.** A second divergent spelling of "where is this
+window's client on screen" survives at `editor_main.cpp:1442-1451` (`screen - last_placement().x/y`);
+and `CocoaWindowBackend::client_origin()`'s "honest zero" is runtime-invisible and untestable — it
+returns `PointI{}` guarded only by a comment while the CEF binding returns `true`, asserting knowledge
+of a position that platform does not have.
 
 **Carry-forward for `a2` — a candidate root cause, to VERIFY not to assume.** `a1`'s review pass read
 the pinned CEF headers on disk and argues that `GetScreenInfo` (`cef_shell.cpp:826`) should **not**
