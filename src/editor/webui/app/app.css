@@ -361,14 +361,17 @@ html[data-theme-transition="true"] * {
     left: 100%;
 }
 
-.ctx-menu__item {
+/* The shared menu-row box model — `.ctx-menu__panels-item` (the Window menu's search/tree rows,
+ * below) is the same shape with no icon gap and no forced nowrap, so those two live only on
+ * `.ctx-menu__item` itself; the rest is one declaration instead of two near-identical copies. */
+.ctx-menu__item,
+.ctx-menu__panels-item {
     appearance: none;
     background: transparent;
     border: 0;
     margin: 0;
     display: flex;
     align-items: center;
-    gap: var(--ctx-shape-space-md, 12px);
     width: 100%;
     padding: 5px var(--ctx-shape-space-sm, 8px);
     border-radius: var(--ctx-shape-radius-sm, 4px);
@@ -377,6 +380,10 @@ html[data-theme-transition="true"] * {
     color: var(--ctx-colors-ink, var(--editor-fg));
     text-align: left;
     cursor: default;
+}
+
+.ctx-menu__item {
+    gap: var(--ctx-shape-space-md, 12px);
     white-space: nowrap;
 }
 
@@ -412,6 +419,78 @@ html[data-theme-transition="true"] * {
     height: 1px;
     margin: 4px var(--ctx-shape-space-sm, 8px);
     background: var(--ctx-colors-line, rgba(230, 237, 245, 0.14));
+}
+
+/* --- the Window menu's search field + panel tree (d1/D9) --------------------------------------- *
+ * Lives INSIDE the "window" `.ctx-menu` dropdown (menu.ts `renderPanelSearchSection`), so it
+ * inherits the dropdown's panel2 surface; only the field and the result rows need their own rules —
+ * the `.ctx-palette__input` / `.ctx-menu__item` precedents, not a new visual language. */
+.ctx-menu__panels {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    padding-bottom: 4px;
+}
+
+.ctx-menu__panels-input {
+    font: inherit;
+    font-size: var(--ctx-typography-size-sm, 13px);
+    color: inherit;
+    background: rgba(0, 0, 0, 0.25);
+    border: var(--ctx-shape-border-width, 1px) solid
+        var(--ctx-colors-line, rgba(230, 237, 245, 0.2));
+    border-radius: var(--ctx-shape-radius-sm, 4px);
+    padding: 5px var(--ctx-shape-space-sm, 8px);
+    margin: 0 var(--ctx-shape-space-sm, 8px);
+    outline: none;
+}
+
+.ctx-menu__panels-input:focus-visible {
+    outline: 2px solid var(--ctx-colors-accent, var(--editor-fg));
+    outline-offset: -2px;
+}
+
+.ctx-menu__panels-list {
+    display: flex;
+    flex-direction: column;
+    max-height: 280px;
+    overflow-y: auto;
+}
+
+/* Group headers are non-interactive (`role="presentation"`) — muted, smaller, no hover/selection
+ * styling of their own, so they read as labels rather than rows. */
+.ctx-menu__panels-group {
+    padding: 4px var(--ctx-shape-space-sm, 8px) 2px;
+    font-size: var(--ctx-typography-size-2xs, 10.5px);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    color: var(--ctx-colors-muted2, #7e7e7e);
+}
+
+/* A panel row shares `.ctx-menu__item`'s box model (the combined rule above); VIRTUAL selection
+ * (aria-selected, not real focus — see menu.ts) gets its own highlight so it stays visible while
+ * DOM focus sits on the search field above. */
+.ctx-menu__panels-item:hover,
+.ctx-menu__panels-item--selected {
+    background: var(--ctx-colors-panel, #0a0a0a);
+}
+
+.ctx-menu__panels-item[aria-disabled="true"] {
+    color: var(--ctx-colors-muted2, #7e7e7e);
+}
+
+/* Matched characters (04 §4: highlighting driven by `{positions}`) — the palette's own bolded-match
+ * convention, ONE span per contiguous run (`highlightRuns`), never `innerHTML`. */
+.ctx-menu__panels-highlight {
+    font-weight: 700;
+    color: var(--ctx-colors-accent, var(--editor-fg));
+}
+
+.ctx-menu__panels-empty {
+    padding: 6px var(--ctx-shape-space-sm, 8px);
+    opacity: 0.6;
+    font-style: italic;
+    font-size: var(--ctx-typography-size-sm, 13px);
 }
 
 /* --- the About dialog (d3: version + update state, 03's table) -------------------------------- *

@@ -52,7 +52,6 @@ import { PanelClient } from "./panels.js";
 import {
     PanelHost,
     type LocalPanelFactory,
-    type PanelOpenResult,
     type PanelVerbBinding,
 } from "./panelhost.js";
 import {
@@ -81,6 +80,8 @@ import {
     mountMenubar,
     openAboutDialog,
     subscribeMenuFacts,
+    windowPanelOpenCommands,
+    type PanelSearchHost,
 } from "./menu.js";
 import {
     EDITOR_PLAYBAR_ID,
@@ -945,9 +946,14 @@ function startPlaybar(
 interface MenuBringUp {
     /** The d3 command set, registered through `buildCommandRegistry`'s `menuCommands` source. */
     readonly commands: readonly Command[];
-    /** Filled by startPanels once the PanelHost exists — `view.panel.open.settings`'s late bind. */
+    /**
+     * Filled by startPanels once the PanelHost exists — `view.panel.open.settings`'s late bind, and
+     * (d1/D9) the SAME holder `mountMenubar`'s Window-menu panel section reads through: a real
+     * `PanelHost` already satisfies `PanelSearchHost` structurally (`openInstance` /
+     * `instancesOf` / `roster`), so one holder serves both consumers.
+     */
     readonly hostHolder: {
-        current: { openInstance(panelId: string): PanelOpenResult } | undefined;
+        current: PanelSearchHost | undefined;
     };
     /** Route a command id through the late-bound registry (the menubar + the native-fact path). */
     readonly executeCommand: (commandId: string) => void;
@@ -1034,6 +1040,10 @@ async function startMenu(bridge: ShellBridge, options: StartMenuOptions): Promis
                 executeCommand,
                 commandAvailable,
                 isMaximized,
+                // d1/D9: the SAME holder `openPanel` reads (below) — `undefined` until startPanels
+                // fills it, which is fine: the Window menu's search section reads it at OPEN time,
+                // well after boot, and degrades honestly in the meantime (renderPanelSearchSection).
+                panelHost: hostHolder,
             });
         } catch {
             // Reported by the absence of `data-editor-menubar`; the editor is up and usable.
@@ -1593,6 +1603,13 @@ function startCommandLayer(
         return undefined;
     }
     const dispatchPanelCommand = makePanelDispatch(client, host);
+    // d1/D9: one `view.panel.open.<panelId>` command per rostered panel (menu.ts § the Window panel
+    // tree) — joins the d3 menu set below so BOTH ride the same incumbent-wins protection ahead of
+    // the panel-manifest source. Built here (not inside `startMenu`) because it needs the roster AND
+    // the live `host`, neither of which exists yet when `startMenu` runs (boot.ts's own ordering:
+    // menu before panels).
+    const windowPanelOpenSet = windowPanelOpenCommands(roster, host);
+    const menuCommandsCombined = [...(menuCommandSet ?? []), ...windowPanelOpenSet];
     try {
         const registry = buildCommandRegistry({
             // The daemon RPC fan-in (D19) is a later seam; contract verbs are PROJECTED into the
@@ -1623,9 +1640,10 @@ function startCommandLayer(
             // them) — registered BEFORE the panel source, so incumbent-wins protects the ids.
             playActions,
             // d3: the menu-backed commands (project/edit/selection/window/help + the per-recent and
-            // per-window entries), same incumbent-wins protection. The spread keeps the option
-            // ABSENT when no menu came up, per exactOptionalPropertyTypes.
-            ...(menuCommandSet === undefined ? {} : { menuCommands: menuCommandSet }),
+            // per-window entries) PLUS the d1/D9 per-panel open set, same incumbent-wins protection.
+            // The spread keeps the option ABSENT when there is nothing to register, per
+            // exactOptionalPropertyTypes.
+            ...(menuCommandsCombined.length === 0 ? {} : { menuCommands: menuCommandsCombined }),
             roster,
             // A panel-manifest command dispatches to its panel over the real `panel.command` bridge.
             panelDispatch: dispatchPanelCommand,
