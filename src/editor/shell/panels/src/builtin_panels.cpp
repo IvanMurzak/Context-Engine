@@ -801,11 +801,21 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         // A refused binding DROPS the feed (the ProblemsFeed rule): a feed nothing routes to would
         // pump daemon reads into a model no renderer can ever see.
 
-        // c1/D3: the Files panel renders whether IT currently has focus (bind_files_focus, unlike
-        // the Inspector's re-pointing, only flips a boolean the panel already owns — see that
-        // seam's own comment). Wired AFTER the move for the same reason bind_scene_tree is.
+        // Point the session feed at the panel whose rendered `file`-subject selection it drives —
+        // the SAME seam `bind_scene_tree` wires for the Scene tree above. Without this, a
+        // `selection-changed{subject:"file"}` fact from ANOTHER client (a second window, the CLI, a
+        // scripted agent) would hit `apply_event`'s `files_ == nullptr` guard and be silently
+        // dropped: the Files panel would never learn of a file another client selected, breaking the
+        // D7 "one truth, every client" claim this whole feed exists to uphold. Wired AFTER the move
+        // for the same reason `bind_scene_tree` is — the pointer must be into the feed that will
+        // actually live in the bag.
         if (out.files != nullptr)
         {
+            out.session->bind_files(&out.files->panel(), gui::panels::files::FilesPanel::kContributionId);
+
+            // c1/D3: the Files panel renders whether IT currently has focus (bind_files_focus,
+            // unlike the Inspector's re-pointing, only flips a boolean the panel already owns — see
+            // that seam's own comment).
             bind_files_focus(*out.session, *out.files);
         }
     }
