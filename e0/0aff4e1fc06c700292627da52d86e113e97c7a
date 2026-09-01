@@ -1,0 +1,38 @@
+src/editor/shell/src/package_store.cpp
+  s_782aa603d2bdb2::t_f815375850069b 448
+  s_782aa603d2bdb2::t_c1e13d4a7945e8 115
+  s_782aa603d2bdb2::t_e48b595e6e36be 191-209
+  s_782aa603d2bdb2::t_3fcff1e446a2af 463-467,469-470,472-475,477,479-480,482-485
+src/cli/src/scaffold.cpp
+  s_782aa603d2bdb2::t_2c313241831c77 194-196
+  s_782aa603d2bdb2::t_d0839d629ad182 188-192
+src/editor/gui/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_975099089b166d 155
+  s_782aa603d2bdb2::t_bc1b29e67cf235 70-94,118,120,126,132
+  s_782aa603d2bdb2::t_ed563456716cfb 175-179,181,183
+  s_782aa603d2bdb2::t_50e2f2eae10d73 308-311,313-319,321-325
+  s_782aa603d2bdb2::t_a2b0ab281c132c 11
+src/editor/gui/contract/src/builtin_roster.cpp
+  s_782aa603d2bdb2::t_96ab009daf4403 228-237
+  s_782aa603d2bdb2::t_624ca037129a05 163-171,174-183,186-195,198-206
+  s_782aa603d2bdb2::t_62384d713d35d3 107-115,118-126,130-139,146-154
+  s_782aa603d2bdb2::t_7e838e588d9374 34,36-70,78-80,83,85-92,94-96
+  s_782aa603d2bdb2::t_e8596051665e98 71-77
+  s_782aa603d2bdb2::t_09d3f0c1061b2e 212-221
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "e00aff4e1fc06c700292627da52d86e113e97c7a",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
