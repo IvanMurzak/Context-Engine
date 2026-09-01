@@ -1,0 +1,29 @@
+tools/check_webui_assets.py
+  s_782aa603d2bdb2::t_7037351f86bd10 693-706
+  s_782aa603d2bdb2::t_c8a3ffe40261e9 533-535
+  s_782aa603d2bdb2::t_41e1028a640233 175-183
+  s_782aa603d2bdb2::t_9534af80f2e3f8 1375-1377
+  s_782aa603d2bdb2::t_796f4bbc4227c5 726-727
+  s_782aa603d2bdb2::t_34b4be03fb869b 1365-1373
+  s_782aa603d2bdb2::t_5e536338501f25 193-196,201-207,209,214,218,222-228
+  s_782aa603d2bdb2::t_c85d2d1f869588 707-708
+tools/tests/test_check_webui_assets.py
+  s_782aa603d2bdb2::t_4a8da161c09169 1669-1672
+  s_782aa603d2bdb2::t_886d0bf74666e5 1620-1624,1627-1629
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "43aaf372c51cbe65166d33583b2cad98d4b03251",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
