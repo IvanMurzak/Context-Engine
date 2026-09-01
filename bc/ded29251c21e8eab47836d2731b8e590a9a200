@@ -1,0 +1,37 @@
+src/editor/shell/tests/test_shell.cpp
+  s_782aa603d2bdb2::t_fa5a3f228aa6b8 70-84
+  s_782aa603d2bdb2::t_9225fc22539049 141
+  s_782aa603d2bdb2::t_7de334698395ac 487
+src/editor/shell/include/context/editor/shell/dpi.h
+  s_782aa603d2bdb2::t_5c6ed2359bf72b 125-126
+  s_782aa603d2bdb2::t_0ef2196a6851d6 3-9
+src/editor/shell/tests/test_compositor.cpp
+  s_782aa603d2bdb2::t_fbbf24a494fe30 71-72,275,319,354,534,595,881,966
+  s_782aa603d2bdb2::t_911feb4a1f7340 329-332,335-338
+  s_782aa603d2bdb2::t_3b3006c53a28c6 44-54,64-70
+  s_782aa603d2bdb2::t_ab4cf46036879c 603-606,608-610
+  s_782aa603d2bdb2::t_4805f535af4853 274,318,353,533,594,880,965
+src/editor/shell/include/context/editor/shell/compositor.h
+  s_782aa603d2bdb2::t_7e64178724a54a 247-251
+src/editor/shell/cef/src/cef_shell.cpp
+  s_782aa603d2bdb2::t_c9618c2da63986 88-94
+src/editor/shell/src/compositor.cpp
+  s_782aa603d2bdb2::t_bcd0b703f3c2c5 584
+  s_782aa603d2bdb2::t_c16e22f332f28a 389-393,402
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "bcded29251c21e8eab47836d2731b8e590a9a200",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
