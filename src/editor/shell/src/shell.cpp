@@ -120,6 +120,20 @@ bool EditorWindow::DragObserver::on_start_dragging(DragOperationMask allowed, Po
 
 void EditorWindow::DragObserver::on_update_drag_cursor(DragOperation operation)
 {
+    // ⚠ ONLY WHILE A DRAG IS LIVE, and that gate is load-bearing rather than defensive. CEF keeps
+    // dispatching this callback for a beat AFTER the drag is over — the `DragTargetDrop` /
+    // `DragSourceEndedAt` the Shell just injected are answered on a later `CefDoMessageLoopWork`,
+    // typically with `DRAG_OPERATION_NONE`, which arrives after `apply_drag` has already restored
+    // the ordinary cursor. Without this early return that late `none` would be read as "the thing
+    // under the pointer refuses the drop" (the disambiguation below) and leave the editor showing
+    // the NO-DROP cursor for good: nothing resets it until the NEXT drag ends. Same story on the
+    // `escaped` / `focus_lost` cancels, which end the session while the renderer is still talking.
+    // The session-state half was already gated — `set_operation` no-ops when inactive — so this
+    // only brings the OS half into line with it.
+    if (!owner_->drag_.active())
+    {
+        return;
+    }
     owner_->drag_.set_operation(operation);
     // Straight through to the OS: this callback is the ONLY source of drag feedback, and CEF sends
     // it only when the answer CHANGES, so pushing it down here is one OS call per change rather

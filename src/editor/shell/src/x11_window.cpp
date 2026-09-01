@@ -562,7 +562,13 @@ void X11WindowBackend::set_drag_cursor(DragCursor cursor)
     if (drag_cursor_ == 0)
     {
         // The server refused the allocation. Nothing to define, and nothing to report: a missing
-        // drag cursor is cosmetic, and the drag itself is unaffected.
+        // drag cursor is cosmetic, and the drag itself is unaffected. UNDEFINE first, though: the
+        // cursor freed above is still the one the window DISPLAYS (`XFreeCursor` drops our id, not
+        // the window's reference), and the kind is being reset to `none` — so without this the next
+        // `set_drag_cursor(none)` would take the `cursor == drag_cursor_kind_` early return and the
+        // stale drag cursor would stay on the window for the rest of the session.
+        ::XUndefineCursor(conn.display, window_);
+        ::XFlush(conn.display);
         drag_cursor_kind_ = DragCursor::none;
         return;
     }

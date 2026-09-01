@@ -516,6 +516,17 @@ void test_a_web_view_drag_runs_end_to_end_through_the_owner_loop()
     // feedback cursor left standing would outlive the gesture.
     CHECK(harness.backend->drag_cursor() == DragCursor::none);
 
+    // A LATE `UpdateDragCursor` — the callback CEF really does dispatch a beat after the drop, once
+    // it has processed the `DragTargetDrop` / `DragSourceEndedAt` the batch above injected — must
+    // change NOTHING. `DRAG_OPERATION_NONE` means "this will not take the drop" only DURING a drag
+    // (osr_drag.h § the feedback cursor); arriving after one it would leave the editor wearing the
+    // no-drop cursor with nothing left to reset it. The push COUNT is the assertion, because the
+    // value `none` is also what a missing push looks like.
+    const int cursor_pushes_after_the_drop = harness.backend->drag_cursor_pushes();
+    harness.browser->script_update_drag_cursor(DragOperation::none);
+    CHECK(harness.backend->drag_cursor_pushes() == cursor_pushes_after_the_drop);
+    CHECK(harness.backend->drag_cursor() == DragCursor::none);
+
     // The ordinary mouse stream resumes once the drag is over.
     post_drag_sample(harness, PointerAction::move, PointI{210, 160});
     CHECK(harness.window->pump_once(3000));
@@ -618,6 +629,10 @@ void test_closing_the_window_ends_a_live_drag_without_injecting()
     post_drag_sample(harness, PointerAction::move, PointI{100, 100});
     CHECK(harness.window->pump_once(1000));
     const std::size_t injections_before = harness.browser->drag_injections().size();
+    // A REAL feedback cursor first, so the `none` asserted after the close is a PUSH and not the
+    // backend's initial value — `none` is both, which is why `drag_cursor_pushes()` exists.
+    harness.browser->script_update_drag_cursor(DragOperation::copy);
+    CHECK(harness.backend->drag_cursor() == DragCursor::copy);
 
     harness.window->close();
 

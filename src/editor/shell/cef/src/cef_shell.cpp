@@ -1149,8 +1149,16 @@ public:
     }
 
     // b1: the drag data `StartDragging` handed us, held for the `DragTargetDragEnter` that answers
-    // it (cef_browser.h:897 takes the same object back). Null outside a live drag.
+    // it (cef_browser.h:897 takes the same object back) — and for every RE-entry, since a drag that
+    // leaves the view and comes back needs a second enter with the same object. Null outside a live
+    // drag, which `clear_pending_drag_data()` below is what makes true.
     [[nodiscard]] CefRefPtr<CefDragData> pending_drag_data() const { return pending_drag_data_; }
+
+    // b1: released on the drag's terminal step (`DragSourceSystemDragEnded`) and on `begin_close()`.
+    // Not merely tidiness: without it the clone — the renderer's drag payload, file contents reset
+    // but everything else intact — is held for the whole process lifetime after ONE drag, and the
+    // "null outside a live drag" the accessor above documents would be false on every path.
+    void clear_pending_drag_data() { pending_drag_data_ = nullptr; }
     void set_view(render::Extent2D logical_size, DpiScale dpi)
     {
         logical_size_ = logical_size;
@@ -1575,6 +1583,12 @@ public:
             break;
         case OsrDragInjectionKind::source_system_ended:
             host->DragSourceSystemDragEnded();
+            // THE TERMINAL STEP of every sequence `OsrDragSession` emits (release and cancel alike),
+            // so this is the one place the held `CefDragData` can be released without breaking the
+            // leave/re-enter cycle, which needs it for its second `DragTargetDragEnter`. Still not a
+            // decision this switch makes — WHICH member ends the drag is the session's, and this
+            // just stops holding the payload past it.
+            client_->clear_pending_drag_data();
             break;
         }
     }
