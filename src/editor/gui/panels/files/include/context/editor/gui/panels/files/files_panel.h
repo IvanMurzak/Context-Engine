@@ -2,8 +2,23 @@
 // file tree into a headless context_gui_uitree Panel, publishes `subject: "file"` selections through
 // the SAME daemon selection surface c1 added (`editor select` / the `session` topic's
 // `selection-changed` fact), and renders the c1/D3 `selection-focus` fact when it names `file`.
-// Read-only observer: no writes into the project, no new error-catalog codes (rename/move/delete are
-// task e2). The whole panel is CI-assertable WITHOUT booting CEF, exactly like SceneTreePanel.
+// Since M9 e2 it is also the D10 WRITE half: rename / move / DELETE, authored through the ONE L-30
+// write path and never by the panel itself. The whole panel is CI-assertable WITHOUT booting CEF,
+// exactly like SceneTreePanel.
+//
+// THE WRITE HALF FOLLOWS THE SELECTION HALF'S RULE EXACTLY, and that is the point rather than a
+// coincidence: `rename()` / `move()` / `remove()` decide NOTHING. They are write REQUESTS through
+// the FileWriteGateway seam below (the Shell's WireFileWriteGateway drives the daemon's
+// `editor file-move` / `editor file-delete` / `editor file-restore`), and what the panel renders
+// afterwards is what the write path ANSWERED. A refusal renders a refusal -- loudly, in the status
+// line, on top of the `editor.ui.write-notice` the Shell publishes from the same listener -- because
+// on a destructive operation a silent failure is the worst outcome available (design 10's
+// non-negotiable UX invariant: destructive/lossy moments are LOUD, never silent).
+//
+// THE PANEL DOES NOT OWN THE UNDO STEP EITHER. A landed operation is announced through
+// `add_write_listener`; the Shell records the session-undo checkpoint from there, so the journal
+// entry is minted by the same code that already owns undo for every other authored mutation rather
+// than by a second, panel-private history.
 //
 // THIS PANEL DOES NOT OWN SELECTION (M9 e08b's rule, restated for a second subject — see
 // scene_tree_panel.h for the full rationale, which applies here unchanged):
@@ -52,6 +67,68 @@ struct FileSelection
 // The command a focusable tree row binds so selection has a keyboard path (R-A11Y-001 / R-CLI-001).
 inline constexpr const char* kSelectCommand = "files.select";
 
+// The M9 e2 authoring commands. Every affordance has a keyboard/CLI path (R-CLI-001), and each is
+// exposed ONLY when it is actually reachable (a bound write gateway AND a selected file row) so
+// audit_a11y never sees a command with nothing behind it.
+inline constexpr const char* kRenameCommand = "files.rename";
+inline constexpr const char* kMoveCommand = "files.move";
+inline constexpr const char* kDeleteCommand = "files.delete";
+
+// Which authoring operation a result describes. Free of any wire spelling: the Shell maps it to the
+// verb it sends and to the human-readable `action` on a write notice.
+enum class FileWriteVerb
+{
+    move,    // rename IS move -- one engine operation, one journal entry shape
+    remove,  // the destructive one
+    restore, // the inverse of `remove`, replayed by session undo
+};
+
+// What one requested file operation ANSWERED. `refused` is a first-class outcome here, not an error
+// path bolted on: every field a human needs in order to understand a refused destructive operation
+// travels on it.
+struct FileWriteResult
+{
+    enum class Status
+    {
+        none,    // nothing was requested (or no gateway is bound to request through)
+        applied, // the write path performed it
+        refused, // the write path said no, and NOTHING was written
+    };
+
+    Status status = Status::none;
+    std::string code;    // the R-CLI-008 catalog code on a refusal ("" when applied)
+    std::string message; // the human/AI-readable detail the write path produced
+    std::string path;    // the primary path the operation targeted
+    std::string other_path;    // move: the destination ("" otherwise)
+    std::string restore_token; // remove: the handle an undo restores through
+
+    [[nodiscard]] bool ok() const noexcept { return status == Status::applied; }
+};
+
+// The seam the panel WRITES file operations through -- the ONE L-30 write path, reached exactly the
+// way the Inspector reaches its own (a boundary-clean pure-virtual the Shell implements over the
+// wire). The panel opens no file and links no filesync/assetdb type, so hosting it never moves the
+// D10 shell-boundary FORBIDDEN list.
+//
+// An implementation NEVER throws and never reports success it did not achieve: an unbound / dead
+// connection answers `refused` with a code, which is what makes the failure path renderable instead
+// of invisible.
+class FileWriteGateway
+{
+public:
+    virtual ~FileWriteGateway() = default;
+
+    // Move (or rename -- the same operation) `from` to `to`, sidecar and GUID identity travelling
+    // with it. An occupied destination is REFUSED, never overwritten.
+    [[nodiscard]] virtual FileWriteResult move_file(const std::string& from,
+                                                    const std::string& to) = 0;
+    // Delete `path` and its sidecar. On success the result carries the `restore_token` that makes it
+    // reversible.
+    [[nodiscard]] virtual FileWriteResult delete_file(const std::string& path) = 0;
+    // Restore a deletion by the token `delete_file` returned (the undo replay path).
+    [[nodiscard]] virtual FileWriteResult restore_file(const std::string& restore_token) = 0;
+};
+
 // The seam the panel WRITES selection through (M9 e1, mirrors scenetree::SelectionGateway). The real
 // implementation is the Shell's SessionFeed (session_feed.h), driving `editor select
 // {subject:"file"}` over the wire with the SAME origin echo-suppression c1 established.
@@ -74,10 +151,25 @@ public:
     // The R-EDIT-001 contribution id this built-in panel registers under.
     static constexpr const char* kContributionId = "builtin.files";
 
+    // The LOCAL refusal codes (M9 e2). Deliberately NOT R-CLI-008 catalog codes and deliberately not
+    // `internal.error`: nothing failed on the write path — the panel refused before asking, because
+    // the request could not be honoured as stated. `panel_host.h` and
+    // `WireOverrideWriteGateway::kNoDaemonCode` state the same rule: a host-side condition does not
+    // get to pollute the published catalog.
+    static constexpr const char* kNoWritePathCode = "files.no_write_path";
+    static constexpr const char* kInvalidRequestCode = "files.invalid_request";
+
     // `gateway` may be null: the panel then renders daemon selection it is given but can request no
     // change of its own (the a11y harness's default-constructed panel). Non-owning — the gateway
     // must outlive the panel.
     explicit FilesPanel(SelectionGateway* gateway = nullptr) noexcept : gateway_(gateway) {}
+
+    // Bind the write path (M9 e2). `nullptr` detaches, and an UNBOUND panel is not a silent no-op:
+    // it exposes NO authoring command at all, so a human is never offered a delete that would
+    // quietly do nothing. Non-owning — the gateway must outlive the panel, the same contract
+    // SelectionGateway carries.
+    void set_write_gateway(FileWriteGateway* gateway) noexcept { writes_ = gateway; }
+    [[nodiscard]] bool can_write() const noexcept { return writes_ != nullptr; }
 
     // Replace the rendered file tree (e.g. from a fresh `editor.files` read). The selection is not
     // touched — it belongs to the daemon, and a path vanishing from THIS panel's view is not the
@@ -111,6 +203,37 @@ public:
     using SelectionListener = std::function<void(const FileSelection&)>;
     void add_selection_listener(SelectionListener listener);
 
+    // --- M9 e2: the authoring surface (WRITE requests; the panel decides nothing) ----------------
+    //
+    // Each returns true when the write path APPLIED the operation. False covers both "refused" and
+    // "not attempted" — `last_write()` distinguishes them, and the write listeners are told either
+    // way, because a refusal the human is not told about is the failure mode this panel exists to
+    // avoid.
+
+    // Rename in place: `new_name` is a BASENAME, resolved against the row's own directory. A name
+    // carrying a '/' is refused LOCALLY (that is a move, and silently reinterpreting it would move
+    // the human's file somewhere they did not name) — as is an empty one, or a rename to the name
+    // it already has.
+    bool rename(const std::string& identity, const std::string& new_name);
+    // Move to an explicit project-relative destination path.
+    bool move(const std::string& identity, const std::string& destination);
+    // DELETE the row's file and its sidecar. Reversible: a landed delete's `restore_token` reaches
+    // the write listeners, which is how the session journal makes it undoable.
+    bool remove(const std::string& identity);
+    // Restore a previously deleted file by its token — the seam session-undo replays through, kept
+    // on the panel so undo and the human's own action travel the identical path.
+    bool restore(const std::string& restore_token);
+
+    // The most recent write outcome, rendered in the status line and readable by a test.
+    [[nodiscard]] const FileWriteResult& last_write() const noexcept { return last_write_; }
+
+    // Every attempted write, applied or refused, in the order they happened. The Shell binds this
+    // ONCE and fans out from there: a landed operation becomes an undo checkpoint, a refused one
+    // becomes an `editor.ui.write-notice`. Keeping BOTH on one listener is what stops the two
+    // reactions drifting onto different notions of what happened.
+    using WriteListener = std::function<void(FileWriteVerb, const FileWriteResult&)>;
+    void add_write_listener(WriteListener listener);
+
     // c1/D3: whether the daemon's `selection-focus` currently names `file` — the Shell's SessionFeed
     // drives this from the `selection-focus` fact (session_feed.h), exactly as it re-points the
     // Inspector. Rendered in the panel's status line so the panel's own state proves the wiring
@@ -126,10 +249,20 @@ public:
 private:
     void notify() const;
     [[nodiscard]] bool write_selection(const std::vector<std::string>& ids);
+    // The ONE place a write outcome is adopted + announced, so `last_write_` and the listeners can
+    // never disagree about what the write path said.
+    bool settle_write(FileWriteVerb verb, FileWriteResult result);
+    // A locally-refused request (no gateway, unknown row, malformed name): still a REFUSAL, still
+    // announced, never a silent return.
+    bool refuse_locally(FileWriteVerb verb, std::string code, std::string message,
+                        std::string path);
 
     SelectionGateway* gateway_ = nullptr;
+    FileWriteGateway* writes_ = nullptr;
     FilesModel model_;
     FileSelection selection_;
+    FileWriteResult last_write_;
+    std::vector<WriteListener> write_listeners_;
     bool focused_ = false;
     std::uint64_t generation_ = 0;
     bridge::Stability stability_ = bridge::Stability::stable;

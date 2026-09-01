@@ -219,6 +219,9 @@ sim-vs-presentation-observer split) · `sim-render-timing-contract.md` (fixed ti
 interpolation) · `query-language.md` (the one query grammar) · `deprecation-policy.md` (the frozen
 `protocolMajor 1` contract lifecycle) · `wgsl-tool-decision.md` (Tint, measured) ·
 `client-sdk.md` (the `context_client` SDK, the subscription consumer, and the D10 boundary gate) ·
+`asset-delete-and-restore.md` (the M9 e2 destructive path: the removal order, the reference
+refusal and what its sweep cannot see, the `.editor/trash/` quarantine that makes undo
+byte-identical, and the refusal catalog) ·
 `editor-session-state.md` (the M9 e08a daemon session state: the `editor` verbs, the `session` topic
 facts, the `origin` echo-suppression contract, and `.editor/session.json`) ·
 `editor-ui-bus.md` (the M9 e08c `editor.ui` local bus — D7's chrome tier: the daemon-shaped envelope,

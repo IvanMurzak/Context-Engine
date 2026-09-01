@@ -25,8 +25,12 @@ target_include_directories(context_gui_undo PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/i
 # interface (the seam is the boundary-clean inspector::OverrideWriteRequest, which undo_journal.cpp
 # builds directly); the serializer helpers still arrive transitively. context_warnings is PRIVATE
 # (no flag leak to a CEF-host consumer, per conventions.md). NO new third-party dependency.
+#   context_gui_panel_files     -> files::FileWriteGateway / FileWriteResult (M9 e2: the FILE
+#                                  half of the journal — the SAME seam the Files panel authors
+#                                  through, so an undo is the identical operation in reverse)
 target_link_libraries(context_gui_undo
-    PUBLIC context_gui_panel_inspector context_gui_uitree context_serializer
+    PUBLIC context_gui_panel_inspector context_gui_panel_files context_gui_uitree
+           context_serializer
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------

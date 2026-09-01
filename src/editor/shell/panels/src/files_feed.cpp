@@ -98,6 +98,105 @@ std::optional<std::string> files_row_identity(const std::string& node_id)
 FilesFeed::FilesFeed(PanelHost& host, std::string panel_id, files::SelectionGateway* selection_gateway)
     : host_(host), panel_id_(std::move(panel_id)), panel_(selection_gateway)
 {
+    // The ONE write listener, installed here rather than by the composition root, so a FilesFeed is
+    // never half-wired: every construction path (including the T1 suite's) gets the same fan-out,
+    // and the sinks it fans out TO are optional (see on_panel_write).
+    panel_.add_write_listener([this](files::FileWriteVerb verb, const files::FileWriteResult& result)
+                              { on_panel_write(verb, result); });
+}
+
+void FilesFeed::bind_write_gateway(files::FileWriteGateway* gateway)
+{
+    panel_.set_write_gateway(gateway);
+    write_gateway_bound_ = gateway != nullptr;
+    // The authoring commands appear/disappear with the gateway, so the rendered surface CHANGED.
+    host_.touch(panel_id_);
+}
+
+void FilesFeed::bind_checkpoint_sink(CheckpointSink sink)
+{
+    checkpoints_ = std::move(sink);
+}
+
+void FilesFeed::bind_notice_sink(NoticeSink sink)
+{
+    notices_ = std::move(sink);
+}
+
+void FilesFeed::on_panel_write(files::FileWriteVerb verb, const files::FileWriteResult& result)
+{
+    // The Shell's own prose for the human-facing `action` (write_notice.h: the action crosses as
+    // prose, not as a pinned token, precisely so a new caller cannot introduce a silent drift).
+    const char* action = "delete";
+    switch (verb)
+    {
+    case files::FileWriteVerb::move:
+        action = "rename";
+        break;
+    case files::FileWriteVerb::remove:
+        action = "delete";
+        break;
+    case files::FileWriteVerb::restore:
+        action = "restore";
+        break;
+    }
+
+    if (!result.ok())
+    {
+        ++writes_refused_;
+        if (notices_)
+        {
+            notices_(action, result);
+        }
+        // NO refetch: nothing was written, so the rendered tree is still current. The panel itself
+        // re-renders anyway (its own status line now names the refusal), which is why the host is
+        // touched on BOTH arms.
+        host_.touch(panel_id_);
+        return;
+    }
+
+    ++writes_landed_;
+    if (checkpoints_)
+    {
+        undo::FileEdit edit;
+        // Whether this operation becomes an undo STEP is a separate question from whether it
+        // happened — the refetch below is unconditional either way, because EVERY landed operation
+        // changes the tree this panel is rendering (a restore most of all: it brings back a row that
+        // is by definition absent from the current model).
+        bool journal = true;
+        switch (verb)
+        {
+        case files::FileWriteVerb::move:
+            edit.op = undo::FileEdit::Op::move;
+            edit.from = result.path;
+            edit.to = result.other_path;
+            break;
+        case files::FileWriteVerb::remove:
+            edit.op = undo::FileEdit::Op::remove;
+            edit.from = result.path;
+            edit.restore_token = result.restore_token;
+            // An applied DELETE with no restore token is not reversible (wire_file_gateway.h states
+            // when that is reachable). Recording it would offer the human an undo guaranteed to
+            // refuse; not recording it costs them one history entry. The second is the honest
+            // failure.
+            journal = !edit.restore_token.empty();
+            break;
+        case files::FileWriteVerb::restore:
+            // A RESTORE is never journaled, and that is deliberate rather than an omission: the only
+            // caller that issues one is the journal's own undo replay, and recording the inverse of
+            // a replay as a NEW step would make Ctrl+Z followed by Ctrl+Z undo itself forever.
+            journal = false;
+            break;
+        }
+        if (journal)
+        {
+            checkpoints_(std::move(edit), std::string(action) + " " + result.path);
+        }
+    }
+    // READ-YOUR-WRITES: the write went out over the gateway, not through anything that re-hydrates
+    // this panel, so the tree it is rendering is stale by exactly the row the human acted on.
+    fetch_due_ = true;
+    host_.touch(panel_id_);
 }
 
 bool FilesFeed::apply_result(const contract::Json& reply)
@@ -145,19 +244,45 @@ PanelProvider FilesFeed::make_provider()
     provider.build = [this] { return panel_.build_panel(); };
     provider.invoke = [this](const std::string& command_id, const contract::Json& params)
     {
-        if (command_id != files::kSelectCommand)
+        if (command_id == files::kSelectCommand)
         {
-            return false;
+            // The hydration runtime sends the ACTIVATED NODE's id — it knows nothing about file
+            // identities. `files_row_identity` is the translation that keeps it that way.
+            //
+            // M9 e1, mirrors SceneTreeFeed::make_provider's invoke: select() is a WRITE to the daemon
+            // (subject "file"), so what comes back is "the daemon applied it", not "the panel
+            // decided".
+            const std::optional<std::string> identity =
+                files_row_identity(read_string(params, "nodeId"));
+            return identity.has_value() && panel_.select(*identity);
         }
-        // The hydration runtime sends the ACTIVATED NODE's id — it knows nothing about file
-        // identities. `files_row_identity` is the translation that keeps it that way.
-        //
-        // M9 e1, mirrors SceneTreeFeed::make_provider's invoke: select() is a WRITE to the daemon
-        // (subject "file"), so what comes back is "the daemon applied it", not "the panel decided".
-        const std::optional<std::string> identity = files_row_identity(read_string(params, "nodeId"));
-        return identity.has_value() && panel_.select(*identity);
+
+        // M9 e2: the authoring commands. Their SUBJECT is the panel's current selection rather than
+        // a node id — a rename dialog's confirmation carries the new name, not the row it came from,
+        // and the row the human is acting on is by definition the selected one (build_panel only
+        // exposes these commands when a file row IS selected).
+        const std::string& subject = panel_.selection().identity;
+        if (command_id == files::kRenameCommand)
+        {
+            return panel_.rename(subject, read_string(params, "name"));
+        }
+        if (command_id == files::kMoveCommand)
+        {
+            return panel_.move(subject, read_string(params, "destination"));
+        }
+        if (command_id == files::kDeleteCommand)
+        {
+            // NO confirmation gate here, deliberately: confirming a destructive action is the
+            // RENDERER's job (it owns the dialog, the copy and the a11y naming), and a second
+            // C++-side prompt would be an un-dismissable one for a scripted or CLI caller that has
+            // already decided. What this layer owes the human instead is reversibility and a loud
+            // answer, which is exactly what it provides.
+            return panel_.remove(subject);
+        }
+        return false;
     };
-    // No gesture, no state pair: a read-only observer with selection (see the header).
+    // No gesture, no state pair: the undo STEP a file operation produces is persisted by the
+    // journal, which owns that seam (see the header).
     return provider;
 }
 

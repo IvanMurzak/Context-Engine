@@ -36,6 +36,7 @@
 #include "context/editor/bridge/scope.h"
 #include "context/editor/client/client.h"
 #include "context/editor/contract/handshake.h"
+#include "context/editor/gui/contract/builtin_roster.h"
 #include "context/editor/gui/contract/extension.h"
 #include "context/editor/gui/contract/registry.h"
 #include "context/editor/gui/contract/sandbox.h"
@@ -387,6 +388,67 @@ void test_a_bad_entry_drops_only_its_own_package()
 }
 
 // ------------------------------------------------------------------- 4. capabilities -> scopes
+
+// ------------------------------------------------- 4b. M9 e2: the Files panel's file_write grant
+
+// GRANT ENFORCEMENT, BOTH HALVES, on the exact declaration `builtin_roster.cpp` ships.
+//
+// This is the enforcement the e2 task requires proven rather than stated, and it is worth being
+// precise about WHERE it lives: nothing in the Files panel checks a capability. The panel declares
+// `file_write` in its manifest; the Shell DERIVES the daemon session's scope set from the declared
+// capabilities (`granted_scope_set`); and `bridge::authorize` refuses the write method before the
+// verb even resolves. So the test that means anything is the one that runs the REAL roster entry
+// through the REAL derivation into the REAL authorizer — in both directions, because a build that
+// refused everything would satisfy the denial half on its own.
+void test_the_files_panel_grant_gates_the_file_write_verbs()
+{
+    const std::vector<gc::Contribution>& roster = gc::builtin_contributions();
+    const gc::Contribution* files = nullptr;
+    const gc::Contribution* scene_tree = nullptr;
+    for (const gc::Contribution& c : roster)
+    {
+        if (c.id == "builtin.files")
+        {
+            files = &c;
+        }
+        if (c.id == "builtin.scene-tree")
+        {
+            scene_tree = &c;
+        }
+    }
+    CHECK(files != nullptr);
+    CHECK(scene_tree != nullptr);
+    if (files == nullptr || scene_tree == nullptr)
+    {
+        return;
+    }
+
+    // The DECLARATION itself, pinned exactly rather than as a `contains` — an entry that quietly
+    // grew a second grant is as much a defect as one that lost this one.
+    CHECK(files->capabilities ==
+          (std::vector<std::string>{gc::kCapabilityReadQuery, gc::kCapabilityFileWrite}));
+
+    const bridge::ScopeSet granted = shell::granted_scope_set(files->capabilities);
+    const bridge::ScopeSet read_only = shell::granted_scope_set(scene_tree->capabilities);
+
+    const char* const write_methods[] = {"editor.file-move", "editor.file-delete",
+                                         "editor.file-restore"};
+    for (const char* method : write_methods)
+    {
+        // (a) WITH the grant, the verbs are authorized...
+        CHECK(bridge::required_scope_for(method) == bridge::Scope::file_write);
+        CHECK(bridge::authorize(method, granted));
+        // (b) ...and WITHOUT it they are refused. The Scene tree's own declaration is the fixture,
+        // so this is a real sibling panel's real grant list rather than an invented one.
+        CHECK(!bridge::authorize(method, read_only));
+    }
+
+    // THE DISCRIMINATOR: the same read-only grant still authorizes the READ half. Without this, the
+    // refusals above would be equally satisfied by a build that denied the Files panel everything —
+    // which is a broken editor, not an enforced boundary.
+    CHECK(bridge::authorize("editor.files", read_only));
+    CHECK(bridge::authorize("editor.files", granted));
+}
 
 void test_scope_derivation()
 {
@@ -962,6 +1024,7 @@ int main()
     test_load_faults_all_deny();
     test_a_bad_entry_drops_only_its_own_package();
     test_scope_derivation();
+    test_the_files_panel_grant_gates_the_file_write_verbs();
     test_the_clamp_and_the_registry_refusal();
     test_the_consent_surface_lists_the_requested_scopes();
     test_the_grant_host_records_clamps_and_persists();

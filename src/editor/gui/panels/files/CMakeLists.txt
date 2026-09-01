@@ -1,8 +1,9 @@
 # src/editor/gui/panels/files/ — M9 e1: the Files observer panel (context_gui_panel_files, D10 read
-# half / R-A11Y-001 / R-HUX-011). Renders the project's file tree as a headless context_gui_uitree
-# Panel, publishes `subject: "file"` selections through the c1 typed-selection surface, and consumes
-# the c1/D3 `selection-focus` fact. Read-only: no writes, no new error-catalog codes (the write half
-# — rename/move/delete — is task e2).
+# half / R-A11Y-001 / R-HUX-011) plus the M9 e2 WRITE half. Renders the project's file tree as a
+# headless context_gui_uitree Panel, publishes `subject: "file"` selections through the c1
+# typed-selection surface, consumes the c1/D3 `selection-focus` fact, and authors rename / move /
+# delete through the boundary-clean FileWriteGateway seam (e2) — a pure virtual, so this library
+# still links no assetdb/filesync type and stays Shell-hostable.
 #
 # Pure C++ over the F0b headless libs — NO CEF, NO assetdb/filesync — so it builds + unit-tests on the
 # DEFAULT 3-OS matrix and the local dev gate, exactly like context_gui_panel_scenetree. The kernel-
@@ -41,6 +42,7 @@ set(_context_gui_panel_files_static_runtime
 set(_context_gui_panel_files_tests
     test_files_model
     test_files_panel
+    test_files_write
     test_a11y)
 
 # The tests link context_gui_panel_builders too: they exercise the kernel-side build_files_model

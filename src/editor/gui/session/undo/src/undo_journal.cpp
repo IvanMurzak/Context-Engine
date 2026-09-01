@@ -151,6 +151,57 @@ using Status = inspector::CommitResult::Status;
     return obj;
 }
 
+// --- M9 e2: the FILE edit atom's JSON form ------------------------------------------------------
+// Op crosses as a TOKEN, not as the enum's integer: a persisted journal outlives the build that
+// wrote it, and renumbering the enum must never silently turn a recorded delete into a move.
+inline constexpr const char* kFileOpMove = "move";
+inline constexpr const char* kFileOpRemove = "remove";
+
+[[nodiscard]] JsonValue file_edit_to_json(const FileEdit& edit)
+{
+    JsonValue obj;
+    obj.type = JsonValue::Type::object;
+    obj.members.push_back({"from", jstring(edit.from)});
+    obj.members.push_back(
+        {"op", jstring(edit.op == FileEdit::Op::remove ? kFileOpRemove : kFileOpMove)});
+    obj.members.push_back({"restore_token", jstring(edit.restore_token)});
+    obj.members.push_back({"to", jstring(edit.to)});
+    return obj;
+}
+
+[[nodiscard]] bool file_edit_from_json(const JsonValue& obj, FileEdit& out)
+{
+    const std::string* op = string_member(obj, "op");
+    const std::string* from = string_member(obj, "from");
+    if (op == nullptr || from == nullptr || from->empty())
+    {
+        return false; // the operation and its subject are required
+    }
+    if (*op == kFileOpRemove)
+    {
+        out.op = FileEdit::Op::remove;
+    }
+    else if (*op == kFileOpMove)
+    {
+        out.op = FileEdit::Op::move;
+    }
+    else
+    {
+        return false; // an unknown op is malformed, never coerced to a default — the default would
+                      // be `move`, and reading a recorded DELETE as a move is the worst guess here
+    }
+    out.from = *from;
+    if (const std::string* to = string_member(obj, "to"))
+    {
+        out.to = *to;
+    }
+    if (const std::string* token = string_member(obj, "restore_token"))
+    {
+        out.restore_token = *token;
+    }
+    return out.op == FileEdit::Op::move ? !out.to.empty() : !out.restore_token.empty();
+}
+
 [[nodiscard]] JsonValue checkpoint_to_json(const Checkpoint& cp)
 {
     JsonValue obj;
@@ -162,6 +213,13 @@ using Status = inspector::CommitResult::Status;
         edits.elements.push_back(edit_to_json(e));
     }
     obj.members.push_back({"edits", std::move(edits)});
+    JsonValue file_edits;
+    file_edits.type = JsonValue::Type::array;
+    for (const FileEdit& e : cp.file_edits)
+    {
+        file_edits.elements.push_back(file_edit_to_json(e));
+    }
+    obj.members.push_back({"file_edits", std::move(file_edits)});
     obj.members.push_back({"label", jstring(cp.label)});
     return obj;
 }
@@ -226,7 +284,26 @@ using Status = inspector::CommitResult::Status;
         }
         out.edits.push_back(std::move(edit));
     }
-    return !out.edits.empty();
+    // M9 e2: `file_edits` is OPTIONAL on read (a journal written before e2 has none) but a PRESENT
+    // wrong-shaped one is malformed, not ignored — silently dropping a recorded delete would hand
+    // the human a Session History that has forgotten the one operation they most need to undo.
+    if (const JsonValue* file_edits = member(obj, "file_edits"); file_edits != nullptr)
+    {
+        if (file_edits->type != JsonValue::Type::array)
+        {
+            return false;
+        }
+        for (const JsonValue& entry : file_edits->elements)
+        {
+            FileEdit edit;
+            if (!file_edit_from_json(entry, edit))
+            {
+                return false;
+            }
+            out.file_edits.push_back(std::move(edit));
+        }
+    }
+    return !out.empty();
 }
 
 // Parse a stack array into `out`; a malformed element aborts the whole load (return false).
@@ -252,11 +329,27 @@ using Status = inspector::CommitResult::Status;
     return true;
 }
 
+// Is there anything on `cp` that a BOUND gateway could actually replay? (M9 e2.)
+//
+// This replaces the old `gateway_ == nullptr` guard at the top of undo()/redo(), and the
+// replacement is exact rather than approximate: with only field edits and no override gateway it
+// answers the same `false` the old test did, so the step is reported `none` and KEPT — which is what
+// the whole keep-vs-consume contract rests on (`aggregate` maps an all-`none` replay to `applied`,
+// so falling through with nothing bound would report a clean replay and CONSUME a step that never
+// ran). What it adds is the other half: a checkpoint made entirely of FILE edits is replayable
+// through the file gateway even when no override gateway exists, and vice versa.
+[[nodiscard]] bool replayable(const Checkpoint& cp, const inspector::OverrideWriteGateway* gateway,
+                              const files::FileWriteGateway* file_gateway)
+{
+    return (gateway != nullptr && !cp.edits.empty()) ||
+           (file_gateway != nullptr && !cp.file_edits.empty());
+}
+
 } // namespace
 
 void UndoJournal::record(Checkpoint checkpoint)
 {
-    if (checkpoint.edits.empty())
+    if (checkpoint.empty())
     {
         return; // a gesture that captured nothing is not an undo step
     }
@@ -267,7 +360,7 @@ void UndoJournal::record(Checkpoint checkpoint)
 void UndoJournal::begin_gesture(std::string label)
 {
     end_gesture(); // flush any already-open batch first
-    open_gesture_ = Checkpoint{std::move(label), {}};
+    open_gesture_ = Checkpoint{std::move(label), {}, {}};
 }
 
 void UndoJournal::capture(FieldEdit edit)
@@ -280,6 +373,19 @@ void UndoJournal::capture(FieldEdit edit)
     // No open batch -> auto-checkpoint this lone edit as its own gesture (L-20).
     Checkpoint cp;
     cp.edits.push_back(std::move(edit));
+    record(std::move(cp));
+}
+
+void UndoJournal::capture_file(FileEdit edit, std::string label)
+{
+    if (open_gesture_.has_value())
+    {
+        open_gesture_->file_edits.push_back(std::move(edit));
+        return;
+    }
+    Checkpoint cp;
+    cp.label = std::move(label);
+    cp.file_edits.push_back(std::move(edit));
     record(std::move(cp));
 }
 
@@ -360,10 +466,63 @@ inspector::CommitResult UndoJournal::replay_edit(const FieldEdit& edit, bool red
                                             edit.pointer, expected, current.raw_hash);
 }
 
+inspector::CommitResult UndoJournal::replay_file_edit(FileEdit& edit, bool redo)
+{
+    inspector::CommitResult res;
+    res.file = edit.from;
+
+    if (file_gateway_ == nullptr)
+    {
+        // Honest refusal, not `none`: `none` means "there was nothing to replay", and reporting it
+        // here would let `aggregate` call the checkpoint cleanly replayed and move it to the other
+        // stack — losing a step that never ran. An `error` KEEPS it.
+        res.status = Status::error;
+        res.code = kFileWriteUnavailableCode;
+        res.message = "no file write path is bound, so the " + std::string(redo ? "redo" : "undo") +
+                      " of `" + edit.from + "` was not attempted; nothing was written";
+        return res;
+    }
+
+    files::FileWriteResult out;
+    switch (edit.op)
+    {
+    case FileEdit::Op::move:
+        // Undo moves the file BACK; redo re-applies the original direction. Either way it is the
+        // same engine operation the human's own rename issued — never a privileged restore of
+        // remembered bytes, which is precisely what R-HUX-001 forbids.
+        out = redo ? file_gateway_->move_file(edit.from, edit.to)
+                   : file_gateway_->move_file(edit.to, edit.from);
+        res.file = redo ? edit.to : edit.from;
+        break;
+    case FileEdit::Op::remove:
+        out = redo ? file_gateway_->delete_file(edit.from)
+                   : file_gateway_->restore_file(edit.restore_token);
+        break;
+    }
+
+    if (out.ok())
+    {
+        res.status = Status::applied;
+        // A REDONE delete re-quarantines the bytes under a possibly-new handle; adopting it here is
+        // what keeps the NEXT undo of this step restorable.
+        if (edit.op == FileEdit::Op::remove && redo && !out.restore_token.empty())
+        {
+            edit.restore_token = out.restore_token;
+        }
+        return res;
+    }
+    res.status = Status::error;
+    res.code = out.code;
+    res.message = out.message;
+    return res;
+}
+
 ReplayResult UndoJournal::undo()
 {
     ReplayResult r;
-    if (undo_.empty() || gateway_ == nullptr)
+    // The gateway test is per-CHECKPOINT since e2 (a checkpoint may be all file edits, replayed
+    // through the other gateway) — see `replayable` for why this cannot become an unconditional pop.
+    if (undo_.empty() || !replayable(undo_.back(), gateway_, file_gateway_))
     {
         r.status = Status::none;
         last_ = r;
@@ -373,8 +532,16 @@ ReplayResult UndoJournal::undo()
     undo_.pop_back();
     r.label = cp.label;
 
-    // Revert in REVERSE order (the last-applied field reverts first).
+    // Revert in REVERSE order (the last-applied field reverts first). File edits revert BEFORE
+    // field edits for the same reason: they were applied last within a step that carries both, and
+    // reverting a field write into a file that has not come back yet would refuse.
     bool all_ok = true;
+    for (auto it = cp.file_edits.rbegin(); it != cp.file_edits.rend(); ++it)
+    {
+        inspector::CommitResult res = replay_file_edit(*it, /*redo=*/false);
+        all_ok = all_ok && res.ok();
+        r.edits.push_back(std::move(res));
+    }
     for (auto it = cp.edits.rbegin(); it != cp.edits.rend(); ++it)
     {
         inspector::CommitResult res = replay_edit(*it, /*redo=*/false);
@@ -390,7 +557,7 @@ ReplayResult UndoJournal::undo()
 ReplayResult UndoJournal::redo()
 {
     ReplayResult r;
-    if (redo_.empty() || gateway_ == nullptr)
+    if (redo_.empty() || !replayable(redo_.back(), gateway_, file_gateway_))
     {
         r.status = Status::none;
         last_ = r;
@@ -400,12 +567,19 @@ ReplayResult UndoJournal::redo()
     redo_.pop_back();
     r.label = cp.label;
 
-    // Re-apply in FORWARD order (the original application order).
+    // Re-apply in FORWARD order (the original application order) — the exact mirror of undo's
+    // reverse pass, so field edits go first and file edits last.
     bool all_ok = true;
     for (const FieldEdit& edit : cp.edits)
     {
         inspector::CommitResult res = replay_edit(edit, /*redo=*/true);
         all_ok = all_ok && (res.status == Status::applied || res.status == Status::rebased);
+        r.edits.push_back(std::move(res));
+    }
+    for (FileEdit& edit : cp.file_edits)
+    {
+        inspector::CommitResult res = replay_file_edit(edit, /*redo=*/true);
+        all_ok = all_ok && res.ok();
         r.edits.push_back(std::move(res));
     }
     r.status = aggregate(r.edits);
@@ -495,6 +669,13 @@ uitree::Panel UndoJournal::build_panel() const
 
     std::ostringstream status;
     status << undo_.size() << " undoable, " << redo_.size() << " redoable";
+    // M9 e2: NAME the next step, not just count it. A file operation's entry is otherwise
+    // indistinguishable from any other in Session History — and "undo" on a panel that just deleted
+    // a file is exactly the moment a human needs to read what they are about to undo.
+    if (!undo_.empty() && !undo_.back().label.empty())
+    {
+        status << " - next undo: " << undo_.back().label;
+    }
     root.add_child(UiNode(Role::status, "session.undo.status")
                        .set_label("Session History status")
                        .set_text(status.str()));

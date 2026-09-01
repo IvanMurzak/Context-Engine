@@ -15,6 +15,7 @@
 #include "context/editor/shell/panels/session_feed.h" // SessionFeed complete type (e08b)
 #include "context/editor/shell/panels/undo_feed.h"    // UndoFeed complete type (e09c)
 #include "context/editor/shell/panels/wire_override_gateway.h" // complete type (e09b-2)
+#include "context/editor/shell/panels/wire_file_gateway.h" // M9 e2: the FILE write gateway
 #include "context/editor/shell/write_notice.h" // WriteNoticeRelay complete type (e09b-3)
 
 #include <cstdio>
@@ -379,6 +380,10 @@ void bind_write_client(BuiltinPanels& panels, client::Client* client)
     {
         panels.writes->bind_client(client);
     }
+    if (panels.file_writes != nullptr)
+    {
+        panels.file_writes->bind_client(client);
+    }
 }
 
 namespace
@@ -501,6 +506,33 @@ namespace
     return notice;
 }
 
+// One refused FILE operation -> the notice the human is shown (M9 e2).
+//
+// THE KIND IS ALWAYS `refusal`, and unlike `notice_kind_for` there is nothing to switch on — which
+// is the point rather than a shortcut. A file operation has no L-30 field-value collision to lose to:
+// the write path either performed it or refused it by name (an occupied destination, a still-live
+// reference, a missing restore token, no daemon). `drop` would tell the human a co-writer changed
+// "that field" — there is no field — and `abandoned` would tell them nothing was ever attempted,
+// when the daemon attempted it and said no. Both are confidently wrong explanations of a moment
+// where the human just tried to delete something, which write_notice.h calls a worse failure than a
+// missing notice.
+//
+// No user-facing sentence is composed here either (see notice_from_commit): the Shell puts FACTS on
+// the wire and notifications.ts writes the prose.
+[[nodiscard]] shell::WriteNotice notice_from_file_write(const char* verb,
+                                                        const files::FileWriteResult& result)
+{
+    shell::WriteNotice notice;
+    notice.kind = shell::kWriteNoticeKindRefusal;
+    notice.action = verb;
+    notice.code = result.code;
+    notice.message = result.message;
+    // `pointer` is the FIELD pointer a refused override write targeted; a file operation has none,
+    // so it stays empty and the path travels in the message the write path already composed. Putting
+    // a path in a field named `pointer` would mis-label it on every renderer that reads the notice.
+    return notice;
+}
+
 } // namespace
 
 void bind_write_notice_relay(BuiltinPanels& panels, WriteNoticeRelay& relay)
@@ -526,6 +558,16 @@ void bind_write_notice_relay(BuiltinPanels& panels, WriteNoticeRelay& relay)
     {
         panels.undo->bind_notice_sink([target](const char* verb, const undo::ReplayResult& result)
                                       { (void)target->publish(notice_from_replay(verb, result)); });
+    }
+    // M9 e2 — the FOURTH loss site on the same relay: a refused rename / move / DELETE. It belongs
+    // here for the reason this function's header states about the other three, only more so: on a
+    // destructive operation a silent failure is the worst outcome available, so the refusal reaches
+    // every open window through exactly the transport the other refusals already use.
+    if (panels.files != nullptr)
+    {
+        panels.files->bind_notice_sink(
+            [target](const char* verb, const files::FileWriteResult& result)
+            { (void)target->publish(notice_from_file_write(verb, result)); });
     }
 }
 
@@ -706,6 +748,10 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         // session feed's, so a reconnect (a new Client, a new connection) needs no re-binding here
         // and a lost daemon makes every commit refuse honestly instead of calling a freed pointer.
         out.writes = std::make_unique<WireOverrideWriteGateway>();
+        // M9 e2: the FILE write gateway, created in the same breath as the override one — both are
+        // re-pointed at the daemon link every frame through `bind_write_client`, and both must
+        // outlive every panel that holds them.
+        out.file_writes = std::make_unique<WireFileWriteGateway>();
         inspector->bind_gateway(out.writes.get());
 
         const bool tree_bound =
@@ -817,6 +863,11 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
             // unlike the Inspector's re-pointing, only flips a boolean the panel already owns — see
             // that seam's own comment).
             bind_files_focus(*out.session, *out.files);
+
+            // M9 e2 (D10 WRITE half): point the panel at the wire file-write gateway. Until this
+            // line the panel exposes NO authoring command at all — which is the honest posture for a
+            // build with no write path, not a degradation to a delete that quietly does nothing.
+            out.files->bind_write_gateway(out.file_writes.get());
         }
     }
 
@@ -829,6 +880,9 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         auto undo_feed =
             std::make_unique<UndoFeed>(host, std::string(undo::UndoJournal::kContributionId));
         undo_feed->bind_gateway(out.writes.get());
+        // M9 e2: and the FILE write path, so a rename/move/delete is undoable through the SAME
+        // journal every other authored mutation goes through — not a second, panel-private history.
+        undo_feed->bind_file_gateway(out.file_writes.get());
         if (host.provide(undo::UndoJournal::kContributionId, undo_feed->make_provider()))
         {
             ++out.bound;
@@ -847,6 +901,16 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
             UndoFeed* undo_ptr = out.undo.get();
             out.inspector->bind_checkpoint_sink([undo_ptr](undo::FieldEdit edit)
                                                 { undo_ptr->record(std::move(edit)); });
+        }
+        // M9 e2 — the same recording loop for the FILE half. Wired only when both ends exist, and
+        // safe by the same construction: the Files feed is declared AFTER `undo` in the bag, so it
+        // is destroyed FIRST and its sink's target outlives it.
+        if (out.undo != nullptr && out.files != nullptr)
+        {
+            UndoFeed* undo_ptr = out.undo.get();
+            out.files->bind_checkpoint_sink([undo_ptr](undo::FileEdit edit, std::string label)
+                                            { undo_ptr->record_file(std::move(edit),
+                                                                    std::move(label)); });
         }
     }
 
