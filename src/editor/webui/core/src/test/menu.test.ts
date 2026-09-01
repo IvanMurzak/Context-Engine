@@ -87,7 +87,7 @@ import {
     CHROME_WINDOW_SECONDARY,
     type ChromeState,
 } from "../window.js";
-import type { PanelOpenResult } from "../panelhost.js";
+import { admits, type PanelOpenResult } from "../panelhost.js";
 import type { UpdateState } from "../banners.js";
 import type { PanelManifest, PanelRoster } from "../panels.js";
 
@@ -216,12 +216,11 @@ function fakePanelSearchHost(
             if (manifest.instances.mode === "singleton" && copies.length >= 1) {
                 return { outcome: "focused", instanceId: copies[0] ?? `${panelId}#1`, diagnostic: "" };
             }
-            if (manifest.instances.mode === "limited" && copies.length >= manifest.instances.max) {
-                return {
-                    outcome: "refused",
-                    instanceId: "",
-                    diagnostic: `'${panelId}' allows at most ${String(manifest.instances.max)} open copies`,
-                };
+            // The SAME refusal source `PanelHost.open` and `panelRowState` both read — a fixture
+            // re-deriving its own wording could silently drift from the real refusal text.
+            const reason = admits(manifest, copies.length);
+            if (reason !== "") {
+                return { outcome: "refused", instanceId: "", diagnostic: reason };
             }
             return {
                 outcome: "opened",

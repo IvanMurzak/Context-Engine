@@ -361,14 +361,17 @@ html[data-theme-transition="true"] * {
     left: 100%;
 }
 
-.ctx-menu__item {
+/* The shared menu-row box model — `.ctx-menu__panels-item` (the Window menu's search/tree rows,
+ * below) is the same shape with no icon gap and no forced nowrap, so those two live only on
+ * `.ctx-menu__item` itself; the rest is one declaration instead of two near-identical copies. */
+.ctx-menu__item,
+.ctx-menu__panels-item {
     appearance: none;
     background: transparent;
     border: 0;
     margin: 0;
     display: flex;
     align-items: center;
-    gap: var(--ctx-shape-space-md, 12px);
     width: 100%;
     padding: 5px var(--ctx-shape-space-sm, 8px);
     border-radius: var(--ctx-shape-radius-sm, 4px);
@@ -377,6 +380,10 @@ html[data-theme-transition="true"] * {
     color: var(--ctx-colors-ink, var(--editor-fg));
     text-align: left;
     cursor: default;
+}
+
+.ctx-menu__item {
+    gap: var(--ctx-shape-space-md, 12px);
     white-space: nowrap;
 }
 
@@ -460,26 +467,9 @@ html[data-theme-transition="true"] * {
     color: var(--ctx-colors-muted2, #7e7e7e);
 }
 
-/* A panel row shares `.ctx-menu__item`'s box model exactly; VIRTUAL selection (aria-selected, not
- * real focus — see menu.ts) gets its own highlight so it stays visible while DOM focus sits on the
- * search field above. */
-.ctx-menu__panels-item {
-    appearance: none;
-    background: transparent;
-    border: 0;
-    margin: 0;
-    display: flex;
-    align-items: center;
-    width: 100%;
-    padding: 5px var(--ctx-shape-space-sm, 8px);
-    border-radius: var(--ctx-shape-radius-sm, 4px);
-    font: inherit;
-    font-size: var(--ctx-typography-size-sm, 13px);
-    color: var(--ctx-colors-ink, var(--editor-fg));
-    text-align: left;
-    cursor: default;
-}
-
+/* A panel row shares `.ctx-menu__item`'s box model (the combined rule above); VIRTUAL selection
+ * (aria-selected, not real focus — see menu.ts) gets its own highlight so it stays visible while
+ * DOM focus sits on the search field above. */
 .ctx-menu__panels-item:hover,
 .ctx-menu__panels-item--selected {
     background: var(--ctx-colors-panel, #0a0a0a);

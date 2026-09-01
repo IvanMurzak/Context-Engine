@@ -1385,6 +1385,19 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                 list.append(emptyRow("Panels are not available yet"));
                 return;
             }
+            // Shared by both branches below: look up live copies, build the row, and register it
+            // as a selectable — the only difference between browse and search mode is WHICH
+            // manifests/labels/positions they feed in.
+            const appendRow = (
+                manifest: PanelManifest,
+                labelText: string,
+                positions: readonly number[],
+            ): void => {
+                const live = host.instancesOf(manifest.id);
+                const row = buildRow(manifest, labelText, positions, live);
+                list.append(row.element);
+                selectable.push(row);
+            };
             const query = input.value;
             if (query.trim() === "") {
                 // Browse mode: the path tree (04 §4), no highlighting (positions are empty).
@@ -1399,10 +1412,7 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                         continue;
                     }
                     any = true;
-                    const live = host.instancesOf(treeEntry.manifest.id);
-                    const row = buildRow(treeEntry.manifest, treeEntry.manifest.title, [], live);
-                    list.append(row.element);
-                    selectable.push(row);
+                    appendRow(treeEntry.manifest, treeEntry.manifest.title, []);
                 }
                 if (!any) {
                     list.append(emptyRow("No panels available"));
@@ -1414,10 +1424,7 @@ export function mountMenubar(slot: HTMLElement, options: MountMenubarOptions): M
                     list.append(emptyRow("No matching panels"));
                 }
                 for (const result of results) {
-                    const live = host.instancesOf(result.manifest.id);
-                    const row = buildRow(result.manifest, result.candidate, result.positions, live);
-                    list.append(row.element);
-                    selectable.push(row);
+                    appendRow(result.manifest, result.candidate, result.positions);
                 }
             }
             setSelected(0);
