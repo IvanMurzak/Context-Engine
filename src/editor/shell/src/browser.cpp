@@ -72,6 +72,12 @@ void ScriptedBrowserHost::resize(render::Extent2D logical_size, DpiScale dpi)
     ++resize_count_;
 }
 
+void ScriptedBrowserHost::set_client_origin(PointI origin)
+{
+    last_client_origin_ = origin;
+    ++client_origin_pushes_;
+}
+
 void ScriptedBrowserHost::send_pointer(const PointerDispatch& /*dispatch*/,
                                        const PointerEvent& event)
 {

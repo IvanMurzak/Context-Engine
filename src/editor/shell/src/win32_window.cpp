@@ -372,6 +372,7 @@ public:
     }
 
     [[nodiscard]] WindowPlacement placement() const override;
+    [[nodiscard]] PointI client_origin() const override;
     void apply_placement(const WindowPlacement& placement) override;
     void close() override
     {
@@ -847,6 +848,29 @@ WindowPlacement Win32WindowBackend::placement() const
         }
     }
     return placement;
+}
+
+PointI Win32WindowBackend::client_origin() const
+{
+    if (hwnd_ == nullptr)
+    {
+        return PointI{};
+    }
+    // ASK THE OS, rather than deriving the origin from `placement()` + `win32_frameless_client_insets`.
+    // Two reasons, both correctness rather than brevity:
+    //   * `placement()` reports rcNormalPosition — the RESTORE rect — so a derived origin would be
+    //     wrong for the whole time the window is maximized;
+    //   * the frameless insets are OURS, applied in WM_NCCALCSIZE, so ClientToScreen already
+    //     accounts for exactly what we told Windows the client rect is. Re-deriving them here would
+    //     be a second spelling of the same decision, free to drift from the first.
+    // Physical screen pixels under per-monitor-v2 awareness, which is the convention the
+    // Windows/Linux half of `osr_screen_point` takes (dpi.h).
+    POINT origin{0, 0};
+    if (::ClientToScreen(hwnd_, &origin) == FALSE)
+    {
+        return PointI{};
+    }
+    return PointI{static_cast<std::int32_t>(origin.x), static_cast<std::int32_t>(origin.y)};
 }
 
 void Win32WindowBackend::apply_placement(const WindowPlacement& placement)

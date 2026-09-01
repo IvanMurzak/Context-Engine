@@ -155,6 +155,11 @@ public:
 private:
     void handle_event(const ShellEvent& event, std::uint64_t now_us);
     void sync_browser_size();
+    // Push the window's CLIENT origin on screen down to the browser (a1) — the half of the OSR
+    // geometry contract `sync_browser_size` does not carry. Deliberately separate: a move is not a
+    // resize, and folding it into `sync_browser_size` would fire CEF's `WasResized()` (a re-layout
+    // + repaint) on every step of a window drag.
+    void sync_browser_origin();
     void poll_placement(std::uint64_t now_us);
 
     std::unique_ptr<IWindowBackend> backend_;

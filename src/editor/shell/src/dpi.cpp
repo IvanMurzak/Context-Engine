@@ -68,4 +68,26 @@ PointI to_physical_point(PointI logical, DpiScale scale)
     return PointI{scale_coord(logical.x, factor), scale_coord(logical.y, factor)};
 }
 
+PointI osr_screen_point(PointI view_dip, PointI client_origin, DpiScale scale,
+                        bool screen_coords_are_dip)
+{
+    // The OFFSET carries the per-platform split; the ORIGIN is already in the platform's own
+    // screen convention, so it is added untouched. Scaling the sum instead would scale the origin
+    // twice — the same class of double-application the root rect below must not make.
+    const PointI offset = screen_coords_are_dip ? view_dip : to_physical_point(view_dip, scale);
+    return PointI{client_origin.x + offset.x, client_origin.y + offset.y};
+}
+
+ScreenRect osr_root_screen_rect(PointI client_origin, render::Extent2D logical_size, DpiScale scale,
+                                bool screen_coords_are_dip)
+{
+    // DIP OUT, on every platform (see dpi.h). The size is already DIP and passes through
+    // UNSCALED — giving it osr_screen_extent's treatment is precisely the bug this member's
+    // wording rules out. Only the origin is converted, and only where the platform hands it to us
+    // in device pixels.
+    const PointI origin_dip =
+        screen_coords_are_dip ? client_origin : to_logical_point(client_origin, scale);
+    return ScreenRect{origin_dip, logical_size};
+}
+
 } // namespace context::editor::shell

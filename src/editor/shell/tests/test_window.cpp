@@ -969,6 +969,35 @@ void test_headless_backend_records_placement_and_redraws()
     CHECK(backend.title() == "Context Editor — demo");
 }
 
+void test_headless_backend_client_origin_is_computed_not_stored()
+{
+    // a1: the OSR screen-mapping seam on the honest offscreen shell. COMPUTED from the placement
+    // plus the modelled frame inset — never a second stored copy of where the window is, which is
+    // what makes a `moved` event (which the pump applies to the placement) move it too.
+    WindowDesc desc;
+    HeadlessWindowBackend backend(desc);
+    CHECK(backend.client_origin() == (PointI{0, 0}));
+
+    backend.apply_placement(WindowPlacement{"", 1000, 500, 640, 480, false});
+    CHECK(backend.client_origin() == (PointI{1000, 500}));
+
+    // With an inset the client is NOT the window rect — the frameless Win32 shape
+    // (`win32_frameless_client_insets`: 8 px at 96 dpi, 12 px at 144, top zero while restored).
+    backend.set_client_inset(PointI{win32_resize_border_thickness(DpiScale{144}), 0});
+    CHECK(backend.client_origin() == (PointI{1012, 500}));
+    CHECK(backend.client_origin() != (PointI{1000, 500}));
+
+    // A move goes through the pump's own state application, so the origin follows without anyone
+    // writing it: the placement IS the source.
+    ShellEvent moved;
+    moved.kind = ShellEventKind::moved;
+    moved.position = PointI{-1720, -300}; // a monitor left of the primary one
+    backend.post(moved);
+    std::vector<ShellEvent> drained;
+    CHECK(backend.pump(drained));
+    CHECK(backend.client_origin() == (PointI{-1708, -300}));
+}
+
 void test_headless_backend_chrome_verbs_are_honest_state_only()
 {
     // a1 (editor-window-chrome): the two chrome verbs on the honest offscreen shell. There is no OS
@@ -2067,6 +2096,7 @@ int main()
     test_headless_backend_applies_state_before_delivering_events();
     test_headless_backend_close_ends_the_pump();
     test_headless_backend_records_placement_and_redraws();
+    test_headless_backend_client_origin_is_computed_not_stored();
     test_headless_backend_chrome_verbs_are_honest_state_only();
     test_headless_backend_records_the_pushed_down_chrome_facts();
     test_platform_backend_selection_is_never_silent();

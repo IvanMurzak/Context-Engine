@@ -139,6 +139,80 @@ void test_pump_syncs_the_browser_size_in_dip_on_the_first_iteration()
     CHECK(harness.browser->resize_count() >= 2);
 }
 
+// a1: the OTHER half of the OSR geometry contract. `resize()` tells the browser how big its view is;
+// this tells it WHERE that view is, which an off-screen browser cannot ask the OS for — and without
+// it CEF answers `GetScreenPoint` with view coordinates and every native menu opens at the wrong
+// place (docs/shell.md § 16, owner item #5).
+void test_pump_pushes_the_client_origin_and_a_move_updates_it()
+{
+    // THE REAL 250 ms POLL INTERVAL, deliberately — not the tests' usual 0. With the poll never due
+    // inside this test's timeline, every push here is ATTRIBUTABLE to the event path: a version that
+    // pushed only from the placement poll (the backstop, exercised by the next test) would leave the
+    // browser mis-positioned for up to a quarter second after a window drag, and this test is what
+    // says so rather than passing on the poll's coattails.
+    Harness harness(render::Extent2D{800, 600}, 250'000);
+    // Model the frameless Win32 client: it is INSET from the window rect
+    // (`win32_frameless_client_insets` — 12 px at 150%, 8 px at 100%), so the window origin and the
+    // client origin are different points, and only the client one is correct here.
+    harness.backend->set_client_inset(PointI{12, 0});
+
+    // The first pump seeds it, alongside the view size — a browser is positioned before it paints.
+    CHECK(harness.window->pump_once(1000));
+    CHECK(harness.browser->last_client_origin() == (PointI{12, 0}));
+    CHECK(harness.browser->client_origin_pushes() == 1);
+
+    // A move, 1 ms later: the client origin travels with the window, on the EVENT.
+    ShellEvent moved;
+    moved.kind = ShellEventKind::moved;
+    moved.position = PointI{1000, 500};
+    harness.backend->post(moved);
+    CHECK(harness.window->pump_once(2000));
+    CHECK(harness.browser->last_client_origin() == (PointI{1012, 500}));
+    // The WINDOW rect origin is a different point, and pushing it would put every menu 12 px off.
+    CHECK(harness.browser->last_client_origin() != (PointI{1000, 500}));
+    CHECK(harness.browser->client_origin_pushes() == 2);
+
+    // An IDLE pump pushes NOTHING. The negative half: a per-iteration re-push would be invisible in
+    // the value (it never changes) while driving a CEF callback on every frame.
+    CHECK(harness.window->pump_once(3000));
+    CHECK(harness.browser->client_origin_pushes() == 2);
+    CHECK(harness.browser->last_client_origin() == (PointI{1012, 500}));
+
+    // A DPI change re-pushes even with the window where it is: the mapping is scale-dependent on
+    // Windows/Linux, so a stale origin after a monitor change is a stale menu position.
+    ShellEvent dpi;
+    dpi.kind = ShellEventKind::dpi_changed;
+    dpi.dpi = DpiScale{144};
+    harness.backend->post(dpi);
+    CHECK(harness.window->pump_once(4000));
+    CHECK(harness.browser->client_origin_pushes() == 3);
+}
+
+void test_a_placement_change_with_no_move_event_still_repositions_the_browser()
+{
+    // THE BACKSTOP, and it is not redundant: a window can move without the Shell seeing a `moved`
+    // event — a WM-driven move, a maximize/restore, or simply a backend that reports geometry by
+    // polling rather than by event (the Cocoa one does exactly that, window.h § the five Cocoa
+    // shapes). The placement poll already re-reads the backend for persistence; the origin rides
+    // the same observation, re-read from the backend rather than derived from the placement — which
+    // is the one case a derivation would get wrong (a maximized window's persisted rect is its
+    // RESTORE rect, not where it is).
+    Harness harness(render::Extent2D{800, 600}); // poll every pump
+    harness.backend->set_client_inset(PointI{12, 0});
+    CHECK(harness.window->pump_once(1000));
+    CHECK(harness.browser->client_origin_pushes() == 1);
+
+    // Move the window behind the pump's back: no ShellEvent is queued, so only the poll can notice.
+    harness.backend->apply_placement(WindowPlacement{"", 640, 360, 800, 600, false});
+    CHECK(harness.window->pump_once(2000));
+    CHECK(harness.browser->last_client_origin() == (PointI{652, 360}));
+    CHECK(harness.browser->client_origin_pushes() == 2);
+
+    // And the poll does not re-push a placement that did not change.
+    CHECK(harness.window->pump_once(3000));
+    CHECK(harness.browser->client_origin_pushes() == 2);
+}
+
 void test_input_round_trip_reaches_the_browser()
 {
     Harness harness;
@@ -608,6 +682,8 @@ int main()
     test_shell_attach_options_ask_for_the_shell_scope();
     test_attach_to_a_project_with_no_daemon_is_reported_not_fatal();
     test_pump_syncs_the_browser_size_in_dip_on_the_first_iteration();
+    test_pump_pushes_the_client_origin_and_a_move_updates_it();
+    test_a_placement_change_with_no_move_event_still_repositions_the_browser();
     test_input_round_trip_reaches_the_browser();
     test_a_viewport_region_takes_input_away_from_the_browser();
     test_caption_samples_are_suppressed_and_control_samples_reach_the_browser();

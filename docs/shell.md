@@ -444,6 +444,43 @@ to be kept in sync.
   port is the working route — and an open debugging port in a shipped editor is a security hole.
 - **Never `SendExternalBeginFrame`** (L-41, cef#4033): CEF-internal pacing only.
 
+### The OSR screen mapping — where the view is (a1)
+
+An off-screen browser gets none of its geometry from the OS. `resize()` tells it how big its view is;
+`IBrowserHost::set_client_origin()` tells it **where that view sits on screen**, which is what
+`CefRenderHandler::GetScreenPoint` and `GetRootScreenRect` answer with. Unimplemented, both default to
+`false` and CEF then treats view coordinates AS screen coordinates — the reported offset context menu
+(§ 16, owner item #5).
+
+Three things about it are easy to get wrong, so all three live in one place:
+
+- **The two members do NOT share a convention** (pinned `cef_render_handler.h`): `GetScreenPoint`
+  wants screen **device pixels** on Windows/Linux and screen **DIP** on macOS — the same split
+  `osr_screen_extent` already encodes — while `GetRootScreenRect` is **DIP on every platform**.
+  Applying the split to both multiplies the root rect by the scale factor on Windows/Linux, and like
+  every bug in this family it is invisible at 100 %.
+- **The arithmetic is in `dpi.h`, not in the CEF binding** (`osr_screen_point` /
+  `osr_root_screen_rect`), for the reason that file already states about `osr_screen_extent`: the
+  per-platform branch is the ONE branch the local gate cannot build *and* no CI job executes. The
+  binding passes its platform's convention as a single file-scope constant that all three screen
+  callbacks share, so the three cannot disagree.
+- **It is the CLIENT origin, never the window rect.** The Win32 window is frameless, so its client is
+  inset from its window rect (§ 15) — the window origin puts every menu that inset away from the
+  cursor, at every scale. `IWindowBackend::client_origin()` is the one source: each backend answers
+  from the live OS (Win32 `ClientToScreen`, X11 the root translation the placement already uses),
+  because the persisted `WindowPlacement` cannot answer it — on Win32 it is the RESTORE rect, so it is
+  wrong for as long as the window is maximized, and on macOS it is deliberately kept in Cocoa points
+  with a bottom-left origin.
+
+The origin is pushed on the window's **`moved` event** and re-read on the **placement poll** as a
+backstop (a WM-driven move, a maximize, or a backend that reports geometry by polling rather than by
+event), never on every pump: the value changes only when the window does, and `set_client_origin`
+deliberately does NOT drive `WasResized()` — a window that moved has not resized.
+
+macOS is an honest zero here and unchanged in behaviour: the browser there is still created with no
+NSView owner, so there is no OSR view positioned against that window to map, and the flip convention
+Chromium expects for macOS screen DIP is verified by nothing in this repo.
+
 `OnPaint` delivers straight into the compositor with **no copy**: it runs inside
 `CefDoMessageLoopWork()`, on the one owner thread, so CEF's buffer is valid for exactly the duration
 of the callback and the sink consumes it there.
@@ -548,17 +585,17 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 
 | Test | Covers |
 |---|---|
-| `editor-shell-test_dpi` | Scale derivation, the OS-nonsense clamp, round-to-nearest, the never-collapse rule (and that empty stays empty), signed point conversion across zero |
+| `editor-shell-test_dpi` | Scale derivation, the OS-nonsense clamp, round-to-nearest, the never-collapse rule (and that empty stays empty), signed point conversion across zero; **a1**: the OSR screen mapping on both platform conventions — view→screen at a NON-INTEGRAL scale from a NON-ZERO (and negative) client origin, the three wrong answers it must not give, the root rect proved DIP by describing ONE window in each convention and requiring the SAME rect (the no-split rule in a form a scaled implementation cannot pass), the two members' agreement at the view origin, and the CLIENT-origin case composed from the real `win32_frameless_client_insets` at 96 and 144 dpi |
 | `editor-shell-test_input` | Back-to-front hit-testing, edges and NEGATIVE coordinates, wholesale publish, viewport-vs-browser arbitration, DIP dispatch positions, the implicit drag capture (incl. a second button mid-drag), modal swallow vs overlay fall-through, focus-class key routing, the R-HUX-011 stamp |
 | `editor-shell-test_editor_state` | Round-trip (incl. a negative x and a maximized window's restore rect), the debounce, no-op on identical, `flush_now`, the atomic replace leaving no temp, the degrade on a malformed/negative-extent document, a failed write staying dirty to retry |
-| `editor-shell-test_window` | The pure Win32 decoder — signed LPARAM halves, the minimize carve-out, button mapping, MK_*/modifier split, the signed wheel delta and its deliberate absence of a position, key/char/sys-key, `WM_DPICHANGED`'s low word — plus the headless backend and the never-silent platform selection; since editor-window-chrome b1 the frameless-frame decisions (insets, the no-8px-overhang max geometry at 96 and 150 %, `hit_test_frame`'s bands / corners / precedence / DPI scaling / maximized branch, the NC-mouse forwarding + consume + synthetic leave, the headless chrome recorder), and since g1 the `hit_test_frame` SWEEP CORPUS — every point of the window rect at five DPIs (three exact scales plus 100 and 150, where the round-to-nearest metric rule is what decides), both frame states, three region maps, judged against a spec oracle and six oracle-free invariants (§ 15) |
+| `editor-shell-test_window` | The pure Win32 decoder — signed LPARAM halves, the minimize carve-out, button mapping, MK_*/modifier split, the signed wheel delta and its deliberate absence of a position, key/char/sys-key, `WM_DPICHANGED`'s low word — plus the headless backend and the never-silent platform selection; since editor-window-chrome b1 the frameless-frame decisions (insets, the no-8px-overhang max geometry at 96 and 150 %, `hit_test_frame`'s bands / corners / precedence / DPI scaling / maximized branch, the NC-mouse forwarding + consume + synthetic leave, the headless chrome recorder, and — a1 — the headless `client_origin()` proved COMPUTED from the placement plus a modelled frame inset rather than stored beside it), and since g1 the `hit_test_frame` SWEEP CORPUS — every point of the window rect at five DPIs (three exact scales plus 100 and 150, where the round-to-nearest metric rule is what decides), both frame states, three region maps, judged against a spec oracle and six oracle-free invariants (§ 15) |
 | `editor-shell-test_cocoa_chrome` | editor-window-chrome c1: the caption-press consult (drag / zoom / none over the real `RegionMap`, last-match-wins layering, click-count rules), the measured traffic-light inset arithmetic (Retina, RTL, degenerate frames), and the off-platform / wrong-backend refusals of the `cocoa_chrome.h` surface |
 | `editor-shell-test_chrome_facts` / `editor-shell-test_menu_facts` | a1 / d3: the `editor.ui.chrome` maximized fact and the `editor.ui.menu` activation fact — envelope shape, UNICAST delivery to the affected window, the honest unbound-store path (and, for the menu, the empty-id refusal + the off-platform `cocoa_menu` refusals) |
 | `editor-shell-test_menu_model` | d3: the published menu model's total, fail-closed parse (drop-per-item tolerance, depth/size caps, the outer shape) and the accelerator tokenizer, on every leg |
 | `editor-shell-x11-window` | e12a: a REAL X11 window through the real `make_window_backend`, the real X11-SHM blitter, live panels, a server-driven repaint (`XClearArea` → `Expose`) and resize (`ConfigureNotify`), the placement readback and the session flush; e12a-x11-legs (#408): a pointer pair + a key INJECTED THROUGH THE X SERVER and decoded by the real `translate_x11_event`, down to one press / one release and the round-tripped `VK_TAB`; **editor-window-chrome g1**: a caption gesture in the a2 shape — hover, press, the drag that leaves the strip, release — suppressed end to end through the X server with the implicit capture released on the release, the dock forwarded again afterwards, and a control press forwarded INSIDE its physical rect (§ 15, Linux). SKIPs (77) with no display; the Linux `editor-cef-smoke` job runs it DIRECTLY with `--require-x11 --require-display` (§ 10) |
 | `editor-shell-cocoa-window` | e12c-3 (#442): a REAL `NSWindow`, the real `CALayer.contents` blitter, live panels, a granted resize, a marked pointer pair + key round-tripped IN-PROCESS through `-[NSApplication postEvent:atStart:]` (the three Cocoa fidelity limits § 11); **editor-window-chrome c1 / d3 / f1**: the hybrid style mask re-read LIVE, the measured positive inset, a caption press consumed whole by `performWindowDragWithEvent:` and a double-click by `zoom:` (which really zooms), the release still arbitrated, no leaked capture, a non-caption press forwarded; the `NSMenu` bar built from `menu.publish` and activated programmatically (`cocoa_menu_perform`, disabled items refused); a factory-created second window carrying the same mask + inset. SKIPs with no GUI session; the macOS `editor-cef-smoke` job runs it DIRECTLY with `--require-cocoa --require-display` |
 | `editor-shell-test_compositor` | The extrapolated layer UV (incl. the full-window identity vs e03), the premultiplied blend + clipping, damage-driven skip, LAYER ORDER and the popup's scissor rect, a hidden popup dropping its layer, the resize protocol, Outdated/Lost keeping the damage, Suboptimal presenting first, a refused surface, both present paths, a malformed producer frame |
-| `editor-shell-test_shell` | The attach guard, the owner loop end to end (DIP browser sizing, input round-trip, viewport vs browser, focus dropping a live drag, idle skip, popup), placement persistence + restore, window drop, shutdown flush |
+| `editor-shell-test_shell` | The attach guard, the owner loop end to end (DIP browser sizing, input round-trip, viewport vs browser, focus dropping a live drag, idle skip, popup), placement persistence + restore, window drop, shutdown flush; **a1**: the client origin seeded before the first paint and updated on the `moved` event under the REAL 250 ms poll interval (so the push is attributable to the event, not to the poll), the modelled frameless inset proving it is the CLIENT origin and not the window rect, the placement-poll BACKSTOP for a move with no event, and the negative half — an idle pump pushes nothing |
 | `editor-shell-smoke-session0` | **The blocking CI requirement**: the whole shell loop over software-OSR frames with the composited present asserted PER-PIXEL — see § 9 |
 | `editor-shell-boundary` | The D10 link-closure audit actually ran and covered a real forbidden target |
 | `editor-shell-test_panel_host` | The panel-agnostic surface over SYNTHETIC panels: roster projection (hosted vs listed-but-unhosted), render payload, command dispatch + the stale-command refusal, the four gesture verbs and the refusal of a fifth, the D6 round-trip and all three degrade paths, every `panel.*` binding, and hostile params on every method |
@@ -1099,6 +1136,7 @@ cmake --build --preset dev --target context_editor    # from src/
 | Live DPI change | Drag the window between monitors at different scale factors (or change scaling while it is open): the window keeps its APPARENT size and the UI re-renders crisp, not scaled-up. |
 | Minimize/restore | Minimize and restore: no crash, and the content is present again on restore. |
 | `window.open` | A page calling `window.open` produces NO second native window (`OnBeforePopup` suppresses it). |
+| Context menu placement (a1) | Move the window well away from the screen origin, then right-click inside it: CEF's own menu opens **at the cursor**, not offset by the window's position. Repeat at 150 % scaling and with the window MAXIMIZED (the state a placement-derived origin would get wrong), and on a second monitor placed LEFT of the primary one, where the client origin is negative. The pure arithmetic and the push plumbing are ctest-pinned on all three legs (§ 8); what only a real desktop can show is that the number CEF asks for is the one it receives. |
 
 Automating this needs an interactive runner, which the design's gate table still tracks as
 unprovisioned — **every row of the table above is still manual, on all three OSes.**
@@ -1176,7 +1214,7 @@ distribution (`include/cef_render_handler.h`, `include/cef_browser.h`,
 with the `dev` preset). Reading the headers needs no MSVC and no link step, so this audit runs on the
 box whose GCC dev gate cannot build the CEF-linking targets (see this repo's `CLAUDE.md`).
 
-`ShellCefClient` (`src/editor/shell/cef/src/cef_shell.cpp:653-658`) derives `CefClient`,
+`ShellCefClient` (`src/editor/shell/cef/src/cef_shell.cpp:668-673`) derives `CefClient`,
 `CefRenderHandler`, `CefLifeSpanHandler`, `CefLoadHandler`, `CefDisplayHandler` and
 `CefRequestHandler` — **not** `CefContextMenuHandler`, and nothing in `src/` derives `CefDragHandler`
 or calls the windowless-only `CefBrowserHost` drag/IME/visibility family.
@@ -1186,13 +1224,13 @@ or calls the windowless-only `CefBrowserHost` drag/IME/visibility family.
 | Member | Verdict | Detail |
 |---|---|---|
 | `GetAccessibilityHandler` | gap | An OS-level screen reader sees nothing in this window; the `gui-a11y-*` gates assert the C++ models and the DOM only, which is honestly green and still blind here — sharp for a repo with R-A11Y-001. Registered outside this set's scope (no task id yet); tracked in `01-current-architecture.md` §1 and this table pending a follow-up issue. |
-| `GetRootScreenRect` | gap | Same family as `GetScreenPoint` below — the other input to menu/popup placement. Closed by task `a1`. |
-| `GetViewRect` | **implemented** | `cef_shell.cpp:762` — reports the view in DIP. |
-| `GetScreenPoint` | gap | Default returns `false`, so CEF treats view coordinates as screen coordinates — this **is** the reported offset context menu (owner item #5). Closed by task `a1`. |
-| `GetScreenInfo` | **implemented** | `cef_shell.cpp:770` — `device_scale_factor` plus the per-platform DIP/device screen-rect split. |
-| `OnPopupShow` | **implemented** | `cef_shell.cpp:792`. |
-| `OnPopupSize` | **implemented** | `cef_shell.cpp:802` — the rect itself is reported correctly, in DIP; the bug that mis-places/crops the popup is downstream, in how the compositor consumes it (`01-current-architecture.md` §2; task `a2`), not a gap in this member. |
-| `OnPaint` | **implemented** | `cef_shell.cpp:814`. |
+| `GetRootScreenRect` | **implemented** | Closed by task `a1`. `cef_shell.cpp:794` — the CLIENT rect on screen, always in DIP (`osr_root_screen_rect`, dpi.h), with no per-platform split: the header's own fallback for this member is `GetViewRect`, so the honest correction of it for a windowless browser whose view IS the client is that same rect moved to where it really is. |
+| `GetViewRect` | **implemented** | `cef_shell.cpp:777` — reports the view in DIP. |
+| `GetScreenPoint` | **implemented** | Closed by task `a1` — the default returned `false`, so CEF treated view coordinates as screen coordinates, which **was** the reported offset context menu (owner item #5). `cef_shell.cpp:807` — view DIP + the window's CLIENT origin through `osr_screen_point` (dpi.h), taking the per-platform device/DIP split `GetRootScreenRect` above must NOT take. macOS remains an honest zero-origin (no NSView owner exists there yet — § 5), i.e. unchanged rather than wrongly changed. |
+| `GetScreenInfo` | **implemented** | `cef_shell.cpp:817` — `device_scale_factor` plus the per-platform DIP/device screen-rect split. |
+| `OnPopupShow` | **implemented** | `cef_shell.cpp:835`. |
+| `OnPopupSize` | **implemented** | `cef_shell.cpp:845` — the rect itself is reported correctly, in DIP; the bug that mis-places/crops the popup is downstream, in how the compositor consumes it (`01-current-architecture.md` §2; task `a2`), not a gap in this member. |
+| `OnPaint` | **implemented** | `cef_shell.cpp:857`. |
 | `OnAcceleratedPaint` | deliberately not needed | Owner ruling 2026-07-19: stock wgpu-native exposes no external-texture import and a patched fork was rejected; rationale recorded in `cef_shell.h:13-17`. The seam stays wired (`CefShellOptions::accelerated_osr` feeds e03's `OsrImportOptions`) and `shared_texture_enabled` is left at its default (off), so CEF never calls this. |
 | `GetTouchHandleSize` | gap | No touch input pipeline exists anywhere in the Shell (`input.h` has no touch event type). `01-current-architecture.md` §1 already flags this "not needed today" but explicitly **not yet decided** — no ruling is recorded. Tracked here pending a follow-up issue. |
 | `OnTouchHandleStateChanged` | gap | Pairs with `GetTouchHandleSize` above — same absent decision, same absent input source. |
@@ -1203,7 +1241,10 @@ or calls the windowless-only `CefBrowserHost` drag/IME/visibility family.
 | `OnTextSelectionChanged` | gap | OS services that read the current selection (e.g. a screen reader's text cursor, macOS Services) get nothing. Registered outside this set's scope; tracked pending a follow-up issue. |
 | `OnVirtualKeyboardRequested` | gap | Same IME family as `OnImeCompositionRangeChanged` — an on-screen keyboard is never shown or hidden automatically. Registered outside this set's scope; tracked pending a follow-up issue. |
 
-Count: 17/17 — five implemented, one deliberately not needed, eleven gaps.
+Count: 17/17 — **seven** implemented, one deliberately not needed, nine gaps. (The audit counted five
+and eleven; `a1` closed `GetScreenPoint` and `GetRootScreenRect`. The counts are updated in place
+rather than left as of the audit date, so this table stays a statement about the CURRENT tree — which
+is the only form in which it can be re-audited.)
 
 ### `CefBrowserHost` — windowless-only members
 
@@ -1213,29 +1254,29 @@ windowless input-injection surface the render-handler contract above depends on)
 
 | Member | Verdict | Detail |
 |---|---|---|
-| `SetFocus` (`cef_browser.h:401`) | **implemented** | `cef_shell.cpp:1320`. |
-| `WasResized` (`:699`) | **implemented** | `cef_shell.cpp:1254` — the resize protocol: makes CEF re-read `GetViewRect` and repaint. |
+| `SetFocus` (`cef_browser.h:401`) | **implemented** | `cef_shell.cpp:1380`. |
+| `WasResized` (`:699`) | **implemented** | `cef_shell.cpp:1307` — the resize protocol: makes CEF re-read `GetViewRect` and repaint. |
 | `WasHidden` (`:707`) | gap | No call site in `src/`. CEF keeps laying out and calling `OnPaint` at full rate while the window is minimized or hidden — a CPU/GPU cost with no correctness effect. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
-| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1243-1255`) drives only `WasResized` on a DPI change, and the CEF SDK's own doc comment for `WasResized` (`cef_browser.h`) says it re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — note this is narrower than `resize()`'s own local comment, which says `WasResized` re-reads `GetScreenInfo` too; that local comment is itself inaccurate against the pinned SDK doc, a pre-existing mismatch outside this task's scope. So a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
-| `SendKeyEvent` (`:751`) | **implemented** | `cef_shell.cpp:1312`. |
-| `SendMouseClickEvent` (`:758`) | **implemented** | `cef_shell.cpp:1282,1286`. |
-| `SendMouseMoveEvent` (`:768`) | **implemented** | `cef_shell.cpp:1274,1279`. |
-| `SendMouseWheelEvent` (`:780`) | **implemented** | `cef_shell.cpp:1290`. |
+| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1296-1308`) drives only `WasResized` on a DPI change, and the CEF SDK's own doc comment for `WasResized` (`cef_browser.h`) says it re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — note this is narrower than `resize()`'s own local comment, which says `WasResized` re-reads `GetScreenInfo` too; that local comment is itself inaccurate against the pinned SDK doc, a pre-existing mismatch outside this task's scope. So a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
+| `SendKeyEvent` (`:751`) | **implemented** | `cef_shell.cpp:1372`. |
+| `SendMouseClickEvent` (`:758`) | **implemented** | `cef_shell.cpp:1342,1346`. |
+| `SendMouseMoveEvent` (`:768`) | **implemented** | `cef_shell.cpp:1334,1339`. |
+| `SendMouseWheelEvent` (`:780`) | **implemented** | `cef_shell.cpp:1350`. |
 | `SendTouchEvent` (`:788`) | gap | Same absent decision as `GetTouchHandleSize` / `OnTouchHandleStateChanged` above — no touch input pipeline exists in the Shell. Tracked here pending a follow-up issue. |
 | `NotifyMoveOrResizeStarted` (`:801`) | gap | Popups are not dismissed or repositioned when the window moves. Registered outside this set's scope; already on `03-osr-geometry-and-drag.md`'s pre-registered gap list (§ "a0 — The OSR conformance audit"), pending a follow-up issue. |
-| `SetWindowlessFrameRate` (`:821`) | deliberately not needed | The frame rate is fixed at browser-creation time via `CefBrowserSettings.windowless_frame_rate` (`cef_shell.h:116`, set at `cef_shell.cpp:1731-1732`; default 60, most smokes pin 10) and never needs a runtime change — consistent with `cef_shell.h`'s `NEVER SendExternalBeginFrame … CEF-internal pacing only` rule for the same reason: let CEF own pacing rather than drive it from the host. |
+| `SetWindowlessFrameRate` (`:821`) | deliberately not needed | The frame rate is fixed at browser-creation time via `CefBrowserSettings.windowless_frame_rate` (`cef_shell.h:116`, set at `cef_shell.cpp:1791-1792`; default 60, most smokes pin 10) and never needs a runtime change — consistent with `cef_shell.h`'s `NEVER SendExternalBeginFrame … CEF-internal pacing only` rule for the same reason: let CEF own pacing rather than drive it from the host. |
 | `ImeSetComposition` and siblings — `ImeSetComposition` (`:849`), `ImeCommitText` (`:865`), `ImeFinishComposingText` (`:876`), `ImeCancelComposition` (`:885`) | gap | The host-injection half of the same IME family as `OnImeCompositionRangeChanged` / `OnVirtualKeyboardRequested` above — no call site for any of the four. Registered outside this set's scope; tracked pending a follow-up issue. |
 | `DragTargetDragEnter` / `DragTargetDragOver` / `DragTargetDragLeave` / `DragTargetDrop` (`:897-927`) | gap | No call site — the injection half of the drag protocol `StartDragging` above needs. Closed by task `b1`. |
 | `DragSourceEndedAt` / `DragSourceSystemDragEnded` (`:939-951`) | gap | No call site. Closed by task `b1`. |
 
 ### `CefContextMenuHandler` — 0 of 7 members
 
-Not derived by `ShellCefClient` at all (`cef_shell.cpp:653-658`), so CEF displays its own built-in
+Not derived by `ShellCefClient` at all (`cef_shell.cpp:668-673`), so CEF displays its own built-in
 context menu for every member below.
 
 | Member | Verdict | Detail |
 |---|---|---|
-| `OnBeforeContextMenu` (`cef_context_menu_handler.h:106`) | deliberately not needed | CEF's own built-in menu is used; task `a1`'s own scope note records this as acceptable: *"CEF's own menu, positioned through this callback, is acceptable once positioned correctly."* The reported offset (owner item #5) is fully explained by the missing `GetScreenPoint` above, not by this handler. |
+| `OnBeforeContextMenu` (`cef_context_menu_handler.h:106`) | deliberately not needed | CEF's own built-in menu is used; task `a1`'s own scope note records this as acceptable: *"CEF's own menu, positioned through this callback, is acceptable once positioned correctly."* The reported offset (owner item #5) was fully explained by the then-missing `GetScreenPoint` above, not by this handler — and `a1` closed it there, leaving this row's verdict unchanged. |
 | `RunContextMenu` (`:120`) | deliberately not needed | Same reason. |
 | `OnContextMenuCommand` (`:138`) | deliberately not needed | Same reason. |
 | `OnContextMenuDismissed` (`:151`) | deliberately not needed | Same reason. |
@@ -1247,11 +1288,14 @@ context menu for every member below.
 
 - Replaces an impression ("is this the wrong framework?",
   `.taskflow/2026-08-29-editor-ux-packages-events/README.md` § "The framework question, answered
-  once" — not the repo-root `README.md`, which has no such section) with a count: 5 implemented, 3
+  once" — not the repo-root `README.md`, which has no such section) with a count: 5 implemented at
+  audit time (**7 now** — see the render-handler count above), 3
   deliberately-not-needed groups (`OnAcceleratedPaint`,
   `SetWindowlessFrameRate`, all of `CefContextMenuHandler`), and the rest gaps.
 - Tasks `a1` and `b1` each close a named subset of the gaps above; their own task files cite the exact
-  rows they close.
+  rows they close. **`a1` has landed**: `GetScreenPoint` + `GetRootScreenRect`, with the arithmetic in
+  `dpi.h` and the client-origin channel through `IWindowBackend::client_origin()` →
+  `IBrowserHost::set_client_origin()` (§ 5). `b1`'s drag rows are still open.
 - Six gaps surfaced by this audit were **not** already on `03-osr-geometry-and-drag.md`'s
   pre-registered list: `WasHidden`, `NotifyScreenInfoChanged`, `SendTouchEvent` (plus its render-handler
   counterparts `GetTouchHandleSize` / `OnTouchHandleStateChanged`), and `OnScrollOffsetChanged`. None

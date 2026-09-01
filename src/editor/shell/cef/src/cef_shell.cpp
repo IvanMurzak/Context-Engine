@@ -83,6 +83,21 @@ static_assert(kSchemeOptionFetchEnabled == static_cast<unsigned>(CEF_SCHEME_OPTI
 namespace
 {
 
+// WHICH CONVENTION THIS PLATFORM'S SCREEN COORDINATES USE, in ONE place.
+//
+// CEF documents the same split three times over — `GetScreenInfo::rect`, `GetScreenPoint`, and (by
+// its absence) `GetRootScreenRect`: Windows/Linux speak screen DEVICE pixels, macOS speaks screen
+// DIP. All three callbacks below read this constant rather than each carrying their own `#if
+// defined(__APPLE__)`, because three copies of one platform decision are three chances for the
+// macOS branch — the one no CI job in this repo EXECUTES and the local gate cannot even compile —
+// to disagree with itself. The ARITHMETIC each callback applies lives in dpi.h, tested on all three
+// legs; this constant is only which side of it this build is on.
+#if defined(__APPLE__)
+constexpr bool kScreenCoordsAreDip = true;
+#else
+constexpr bool kScreenCoordsAreDip = false;
+#endif
+
 // The names the message router injects onto `window` in editor-core's frames.
 //
 // DELIBERATELY NOT CEF's default `cefQuery`: that name is what every CEF sample and every piece of
@@ -767,6 +782,38 @@ public:
                  static_cast<int>(logical_size_.height));
     }
 
+    // a1 (audit D12, docs/shell.md § 16): the two members that say WHERE the view is. Unimplemented,
+    // both default to `false` and CEF then treats view coordinates as SCREEN coordinates — which is
+    // the reported offset context menu: the menu opens at the cursor's position measured from the
+    // screen origin instead of the window's.
+    //
+    // ⚠ THE TWO DO NOT SHARE A CONVENTION (pinned cef_render_handler.h): `GetScreenPoint` takes the
+    // per-platform device/DIP split, `GetRootScreenRect` is DIP everywhere. Both call into dpi.h
+    // rather than deciding here, so the difference is pinned by `editor-shell-test_dpi` on all three
+    // legs instead of living in the one TU no local gate compiles.
+    bool GetRootScreenRect(CefRefPtr<CefBrowser>, CefRect& rect) override
+    {
+        const ScreenRect root =
+            osr_root_screen_rect(client_origin_, logical_size_, dpi_, kScreenCoordsAreDip);
+        // CefRect::Set takes ints and the origin is legitimately NEGATIVE (a monitor left of or
+        // above the primary one), which is why the dpi.h rect carries a signed origin rather than
+        // render::Rect2D's unsigned one — clamping here would report a window on a left-hand monitor
+        // as if it sat at the screen origin.
+        rect.Set(root.origin.x, root.origin.y, static_cast<int>(root.size.width),
+                 static_cast<int>(root.size.height));
+        return true;
+    }
+
+    bool GetScreenPoint(CefRefPtr<CefBrowser>, int viewX, int viewY, int& screenX,
+                        int& screenY) override
+    {
+        const PointI screen =
+            osr_screen_point(PointI{viewX, viewY}, client_origin_, dpi_, kScreenCoordsAreDip);
+        screenX = screen.x;
+        screenY = screen.y;
+        return true;
+    }
+
     bool GetScreenInfo(CefRefPtr<CefBrowser>, CefScreenInfo& screen_info) override
     {
         // The other half of real DPI: the scale CEF multiplies the DIP view rect by to decide how
@@ -774,13 +821,9 @@ public:
         screen_info.device_scale_factor = dpi_.factor();
         // CefScreenInfo::rect is a RAW cef_rect_t (unlike CefRect it carries no Set()). Which
         // convention it wants is a per-platform choice; the ARITHMETIC lives in dpi.h so both
-        // branches are compiled and tested on all three legs (see osr_screen_extent).
-#if defined(__APPLE__)
-        constexpr bool kScreenRectIsDip = true;
-#else
-        constexpr bool kScreenRectIsDip = false;
-#endif
-        const render::Extent2D screen = osr_screen_extent(logical_size_, dpi_, kScreenRectIsDip);
+        // branches are compiled and tested on all three legs (see osr_screen_extent), and WHICH
+        // branch is the file-scope kScreenCoordsAreDip this callback shares with the two below.
+        const render::Extent2D screen = osr_screen_extent(logical_size_, dpi_, kScreenCoordsAreDip);
         screen_info.rect.x = 0;
         screen_info.rect.y = 0;
         screen_info.rect.width = static_cast<int>(screen.width);
@@ -979,6 +1022,12 @@ public:
         dpi_ = dpi;
     }
 
+    // a1: where the view sits on screen, in this platform's screen convention. STORED ONLY — CEF
+    // pulls it through GetScreenPoint / GetRootScreenRect when it needs it (opening a menu), so
+    // there is nothing to notify. `NotifyScreenInfoChanged` is a separate audited gap
+    // (docs/shell.md § 16) and stays one: nothing here claims to close it.
+    void set_client_origin(PointI origin) { client_origin_ = origin; }
+
     [[nodiscard]] CefRefPtr<CefBrowser> browser() const { return browser_; }
     [[nodiscard]] bool closed() const { return closed_; }
 
@@ -1007,6 +1056,10 @@ private:
     CefRefPtr<CefBrowser> browser_;
     render::Extent2D logical_size_;
     DpiScale dpi_;
+    // The window's client origin on screen (a1). Zero until the owner loop's first push, which is
+    // the honest pre-boot state and reproduces the old behaviour exactly rather than inventing a
+    // position; `EditorWindow::sync_browser_size` pushes it before the first pump.
+    PointI client_origin_{};
     render::Rect2D popup_rect_{};
     // The browser-side message router + the handler bridging it to the CEF-free BridgeRouter. Both
     // null when no bridge was configured, which is what keeps the query function uninjected.
@@ -1252,6 +1305,13 @@ public:
         // repaint. Reconfiguring the swapchain without this leaves the browser painting at the old
         // size and the composite sampling a UV sub-rect that no longer matches the window.
         browser->GetHost()->WasResized();
+    }
+
+    void set_client_origin(PointI origin) override
+    {
+        // No WasResized()/notify: the browser has not resized, and CEF re-reads the screen mapping
+        // on demand. This is what makes pushing on every window-move step cheap (browser.h).
+        client_->set_client_origin(origin);
     }
 
     void send_pointer(const PointerDispatch& dispatch, const PointerEvent& event) override

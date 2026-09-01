@@ -168,7 +168,16 @@ void EditorWindow::sync_browser_size()
     // what keeps the browser laying out at the right size on a non-100% monitor.
     const render::Extent2D logical = to_logical(backend_->client_size(), backend_->dpi());
     browser_->resize(logical, backend_->dpi());
+    // A resize can MOVE the client origin as well (a maximize does both), and a DPI change moves it
+    // in DIP terms even when the physical rect is unchanged — so the origin rides along here rather
+    // than waiting for the next move event or placement poll.
+    sync_browser_origin();
     browser_size_synced_ = true;
+}
+
+void EditorWindow::sync_browser_origin()
+{
+    browser_->set_client_origin(backend_->client_origin());
 }
 
 void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
@@ -195,6 +204,10 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
     }
     case ShellEventKind::moved:
         placement_dirty_ = true;
+        // a1: the window moved, so every view->screen mapping the browser answers is now stale.
+        // Pushed on the EVENT rather than only on the 250 ms placement poll: a context menu opened
+        // straight after a drag would otherwise be placed where the window used to be.
+        sync_browser_origin();
         break;
     case ShellEventKind::paint_requested:
         compositor_.mark_external_damage();
@@ -271,6 +284,11 @@ void EditorWindow::poll_placement(std::uint64_t now_us)
     {
         last_placement_ = current;
         placement_dirty_ = true;
+        // a1: the backstop for the push above. A maximize/restore, a WM-driven move, or a backend
+        // that reports no `moved` event at all still lands here within one poll interval — and the
+        // maximized case is exactly the one `placement()` alone cannot answer, which is why the
+        // origin is re-read from the backend rather than derived from `current`.
+        sync_browser_origin();
     }
 }
 
