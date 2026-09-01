@@ -1,0 +1,21 @@
+src/editor/webui/core/src/panels.ts
+  s_782aa603d2bdb2::t_1dd88a22ad8fd8 256-261,267
+src/editor/webui/core/src/test/panels.test.ts
+  s_782aa603d2bdb2::t_8497daf1a69f40 113-127
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "53a98f524038021d60f81ace4799569580e67b2e",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
