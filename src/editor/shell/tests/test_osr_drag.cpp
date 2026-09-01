@@ -316,7 +316,34 @@ void test_second_begin_is_refused()
     CHECK(session.drags_begun() == 2);
 }
 
-// ------------------------------------------------------ 9. the vocabulary a diagnostic prints
+// --------------------------------------------- 9. the overflow flag can actually be set
+
+// Every `overflowed()` assertion above is a `!overflowed()`, and a flag that never fires is the
+// vacuous-gate failure in miniature — the same control `ShellEventBatch` carries next door
+// (test_window.cpp, `..._reports_overflow_rather_than_dropping_silently`). No PROTOCOL path emits a
+// fifth step (osr_drag.h derives the capacity from the longest legal sequence), so the buffer is
+// driven directly: that is the point — it proves the tripwire works for the future path that would.
+void test_injections_report_overflow_rather_than_dropping_silently()
+{
+    OsrDragInjections injections;
+    OsrDragInjection step;
+    step.kind = OsrDragInjectionKind::target_over;
+
+    for (std::size_t i = 0; i < OsrDragInjections::kCapacity; ++i)
+    {
+        injections.push(step);
+    }
+    CHECK(injections.size() == OsrDragInjections::kCapacity);
+    CHECK(!injections.overflowed()); // filling it EXACTLY is not an overflow
+
+    injections.push(step);
+    CHECK(injections.overflowed());
+    // The tail is dropped, never a torn sequence: a caller iterating `begin()`..`end()` still sees
+    // a prefix of well-formed steps rather than a fifth slot that was never written.
+    CHECK(injections.size() == OsrDragInjections::kCapacity);
+}
+
+// ------------------------------------------------------ 10. the vocabulary a diagnostic prints
 
 void test_to_string()
 {
@@ -344,6 +371,7 @@ int main()
     test_cancel_paths();
     test_inactive_session_is_silent();
     test_second_begin_is_refused();
+    test_injections_report_overflow_rather_than_dropping_silently();
     test_to_string();
     SHELL_TEST_MAIN_END();
 }

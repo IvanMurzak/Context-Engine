@@ -71,6 +71,7 @@
 #include "context/editor/shell/window_bridge.h"
 #include "context/editor/shell/window_registry.h"
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -148,16 +149,18 @@ ColourScan scan_colour(const std::vector<std::uint8_t>& surface, render::Extent2
                        std::uint8_t b, std::uint8_t g, std::uint8_t r)
 {
     ColourScan scan;
+    // CLAMPED ONCE rather than bounds-checked per texel: the surface is the only thing that can be
+    // short (a frame composed at a smaller size than `composed` claims), and it is short by the same
+    // amount for every texel — so re-deriving the limit 307,200 times answers one question with one
+    // answer. `scanned` still reports what was actually read, which is what every caller compares
+    // against.
     const std::size_t texels =
-        static_cast<std::size_t>(composed.width) * static_cast<std::size_t>(composed.height);
+        std::min(static_cast<std::size_t>(composed.width) * static_cast<std::size_t>(composed.height),
+                 surface.size() / 4u);
+    scan.scanned = texels;
     for (std::size_t i = 0; i < texels; ++i)
     {
         const std::size_t offset = i * 4u;
-        if (offset + 3u >= surface.size())
-        {
-            break;
-        }
-        ++scan.scanned;
         if (surface[offset + 0] == b && surface[offset + 1] == g && surface[offset + 2] == r)
         {
             ++scan.matched;
@@ -551,10 +554,20 @@ int main(int argc, char** argv)
                 "every drag that began also ended — none dangled");
     SMOKE_CHECK(!editor->drag().active(), "no drag is live after the drop");
 
-    std::printf("[editor-cef-smoke-shell-osrdrag] begun=%llu ended=%llu reason=%s\n",
+    // THE FAMILY INVARIANT every smoke that stands up the full boot surface asserts (`-shell`,
+    // `-palette`, `-settings`, `-drag`, `-iframe`). The router denies unknown methods BY DEFAULT, so
+    // a surface this smoke forgot to install — or one editor-core starts calling and nothing here
+    // provides — shows up as a refusal and nowhere else: the boot still "succeeds", the fixture
+    // still paints, and the gate stays green while editor-core is being refused. Without this line
+    // the newest blocking smoke is quietly narrower than its siblings.
+    SMOKE_CHECK(bridge.refused() == 0,
+                "window 0's bridge refused nothing across the whole drag scenario");
+
+    std::printf("[editor-cef-smoke-shell-osrdrag] begun=%llu ended=%llu reason=%s refused=%llu\n",
                 static_cast<unsigned long long>(editor->drag().drags_begun()),
                 static_cast<unsigned long long>(editor->drag().drags_ended()),
-                shell::to_string(editor->drag().end_reason()));
+                shell::to_string(editor->drag().end_reason()),
+                static_cast<unsigned long long>(bridge.refused()));
 
     // Teardown in the documented order: the manager's windows first, then CEF, while every bridge
     // local is still in scope (cef_shell.h § the LIFETIME INVARIANT / CE #319).
