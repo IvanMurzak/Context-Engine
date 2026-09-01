@@ -1617,11 +1617,16 @@ def test_the_real_repo_closed_vocabularies_agree_across_languages() -> None:
     This is the one that would have caught the gap while it was open: it reads the real
     `extension.cpp` switches and the real `panels.ts` arrays and compares them as SETS.
     """
-    extension = (REPO_ROOT / "src" / "editor" / "gui" / "contract" / "src" / "extension.cpp")
+    token_sources = {
+        "extension.cpp": (REPO_ROOT / "src" / "editor" / "gui" / "contract" / "src" /
+                          "extension.cpp"),
+        "panel_host.cpp": REPO_ROOT / "src" / "editor" / "shell" / "src" / "panel_host.cpp",
+    }
     ts = (REPO_ROOT / "src" / "editor" / "webui" / "core" / "src" / "panels.ts").read_text(
         encoding="utf-8")
-    for _human, function, ts_name, pinned, ts_only, _why in check_webui_assets.TOKEN_VOCABULARIES:
-        cpp_tokens = check_webui_assets._read_cpp_token_switch(extension, function)
+    for _human, source, function, ts_name, pinned, ts_only, _why in (
+            check_webui_assets.TOKEN_VOCABULARIES):
+        cpp_tokens = check_webui_assets._read_cpp_token_switch(token_sources[source], function)
         assert set(cpp_tokens) == set(pinned), (
             f"the real C++ {function} vocabulary {sorted(cpp_tokens)} drifted from the pinned "
             f"{sorted(pinned)}")
@@ -1661,20 +1666,10 @@ def test_the_real_repo_panel_sources_agree_across_languages() -> None:
                                                                  cpp_name)
         assert f'{ts_name} = "{cpp_value}"' in statusbar_ts, (
             f"{ts_name} drifted from C++ {cpp_name}")
-    # The gesture vocabulary, read from BOTH real sources as SETS — the C++ wire tokens out of the
-    # actual switch, the TS array out of the actual module. Asserting only `verb in ts` (the old
-    # form) could not catch a .cpp token rename at all, because it never opened the .cpp.
-    shell_src = REPO_ROOT / "src" / "editor" / "shell" / "src"
-    cpp_verbs = check_webui_assets._read_cpp_token_switch(
-        shell_src / "panel_host.cpp", "gesture_verb_token")
-    assert set(cpp_verbs) == set(check_webui_assets.GESTURE_VERBS), (
-        f"the real C++ gesture vocabulary {sorted(cpp_verbs)} drifted from the pinned "
-        f"{sorted(check_webui_assets.GESTURE_VERBS)}")
-    ts_verbs = check_webui_assets._read_ts_string_array_from_bundle(ts, "GESTURE_VERBS")
-    assert ts_verbs is not None, "panels.ts declares no GESTURE_VERBS array"
-    assert set(ts_verbs) == set(cpp_verbs), (
-        f"panels.ts GESTURE_VERBS {sorted(ts_verbs)} drifted from the C++ wire tokens "
-        f"{sorted(cpp_verbs)}")
+    # The gesture vocabulary is NOT re-asserted here: it is a row of TOKEN_VOCABULARIES, so
+    # `test_the_real_repo_closed_vocabularies_agree_across_languages` above already reads it from
+    # both real sources as SETS. Two shapes of one assertion meant a fifth vocabulary was covered
+    # only if an author happened to edit the right one.
 
 
 def test_the_real_editor_core_dependencies_are_the_approved_set() -> None:

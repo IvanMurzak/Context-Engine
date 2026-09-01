@@ -172,9 +172,15 @@ PANEL_CONSTANTS = (
      "PANEL_INSTANCE_SEPARATOR"),
 )
 
-# --- the R-EDIT-001 CLOSED VOCABULARIES (check 7c2, editor-UX c3) ---------------------------------
-# Three token tables that exist once as a C++ `*_token` switch (gui/contract/src/extension.cpp) and
-# once as a hand-written TS array (panels.ts), with NOTHING comparing them until c3.
+# --- the R-EDIT-001 CLOSED VOCABULARIES (check 7c, editor-UX c3) ----------------------------------
+# Every closed token vocabulary that exists once as a C++ `*_token` switch and once as a hand-written
+# TS array (panels.ts). Three of them (the manifest tables in gui/contract/src/extension.cpp) had
+# NOTHING comparing them until c3; the fourth, the gesture verbs, had a hand-written check.
+#
+# READ FROM THE `.cpp`, NEVER THE HEADER — the property that makes every row here trustworthy. A
+# header carries only the ENUMERATOR names (`begin,` `extend,` ...) and prose, so a substring probe
+# against it is satisfied unconditionally and can never fail: it would report OK on a genuine drift.
+# The tokens that actually go on the wire are the `return "<tok>";` literals in the switch.
 #
 # WHY THEY NEEDED A GATE, and why the instance-mode row is the one that forced it. Every TS parser
 # here fails CLOSED by searching its array and falling back: `readInstances` falls back to
@@ -184,28 +190,42 @@ PANEL_CONSTANTS = (
 # becomes a singleton: no method refuses, no build breaks, no test reds, and the symptom ("I can only
 # open one viewport") looks like a product decision rather than a defect.
 #
-# Compared SET vs SET, C++ switch against the BUILT bundle's array, exactly as the gesture verbs are
-# (check 7c) — this is that check generalised, which is what `instance_mode_token`'s own header
-# comment asked for. Each row also PINS the vocabulary this script expects, so a deliberate change to
-# a closed set has to be made here too rather than sliding through on both sides at once.
+# Compared SET vs SET, C++ switch against the BUILT bundle's array. Each row also PINS the vocabulary
+# this script expects, so a deliberate change to a closed set has to be made here too rather than
+# sliding through on both sides at once; when the C++ set stops matching its pin, that is an anti-rot
+# CheckError (exit 2), not a drift failure — the check can no longer judge either side.
 #
 # ⚠ `CONTENT_TYPES` deliberately omits `unknown`: it is a TS-ONLY parse outcome (the honest reading of
 # a token this build does not recognise) with no C++ enumerator, so it is subtracted from the TS side
 # before the comparison rather than added to the pin. That asymmetry is stated in panels.ts.
+#
+# Rows are (human, source file, C++ function, TS array, pinned tokens, TS-only tokens, consequence).
+# The SOURCE FILE is per row because the vocabularies do not share one home: the manifest tables are
+# the GUI contract's, the gesture verbs are the Shell's. Enrolling the gesture verbs here is what
+# retired the hand-written copy of this comparison — it had already drifted from the loop (it grew
+# neither the `ts_only` subtraction nor a `consequence`), which is the standing cost of two spellings
+# of one check: the improvement lands on one, and the copy that misses it still reports a pass.
 TOKEN_VOCABULARIES = (
-    ("instance mode", "instance_mode_token", "PANEL_INSTANCE_MODES",
+    ("instance mode", "extension.cpp", "instance_mode_token", "PANEL_INSTANCE_MODES",
      ("singleton", "limited", "unlimited"), (),
      "every panel would silently collapse to `singleton` — the TS parser falls back to the most "
      "restrictive mode for a token it does not recognise, so a rename removes multi-instance "
      "panels with no error anywhere"),
-    ("dock zone", "dock_zone_token", "DOCK_ZONES",
+    ("dock zone", "extension.cpp", "dock_zone_token", "DOCK_ZONES",
      ("left", "right", "top", "bottom", "center"), (),
      "every panel would dock in the `center` fallback zone, so the whole default arrangement "
      "collapses into one group with nothing reporting a drift"),
-    ("content type", "content_type_token", "CONTENT_TYPES",
+    ("content type", "extension.cpp", "content_type_token", "CONTENT_TYPES",
      ("uitree", "iframe", "local"), ("unknown",),
      "every panel of the renamed type would read as `unknown`, which `PanelHost` refuses to mount — "
      "the editor comes up missing a whole class of panel and reports only `unavailable`"),
+    # The D7 gesture verbs (M9 e05d1), the Shell's own vocabulary: the hydration runtime emits them
+    # and `PanelHost::gesture` accepts them, so a verb added on one side without the other is a
+    # runtime refusal with no build error.
+    ("gesture verb", "panel_host.cpp", "gesture_verb_token", "GESTURE_VERBS",
+     ("begin", "extend", "commit", "cancel"), (),
+     "a verb one side sends and the other does not accept is refused at runtime with no build "
+     "error, which is exactly what this gate exists to catch"),
 )
 
 # The D6 persisted-blob member names, which live in the GUI contract library rather than the Shell.
@@ -510,18 +530,9 @@ PACKAGE_GRANT_CONSTANTS = (
      "kPackageGrantsListMethod", "PACKAGE_GRANTS_LIST_METHOD"),
 )
 
-# The closed gesture vocabulary (04 §4), compared SET vs SET between the C++ wire tokens and the
-# bundle's own GESTURE_VERBS array, so a verb added on one side without the other — which would be
-# refused at runtime with no build error — fails here instead.
-#
-# READ FROM `panel_host.cpp`, NOT THE HEADER. The header holds only the ENUMERATOR names (`begin,`
-# `extend,` ...) and prose; a substring probe against it is satisfied unconditionally and can never
-# fail, so it would report OK on a genuine drift. The tokens that actually go on the wire are the
-# `return "<tok>";` literals in `gesture_verb_token`'s switch — those are the authority.
-#
-# This tuple is this script's own PIN of the vocabulary: when the C++ set stops matching it, that is
-# an anti-rot CheckError (exit 2), not a drift failure — the check can no longer judge either side.
-GESTURE_VERBS = ("begin", "extend", "commit", "cancel")
+# The closed gesture vocabulary (04 §4) is a row of TOKEN_VOCABULARIES above, not a constant of its
+# own: it is the same C++-switch-vs-bundle-array comparison as the three manifest tables, and keeping
+# a second spelling of it here is what let the two drift apart.
 
 # The pinned docking engine must be LOADED BY THE DOCUMENT, not bundled. Asserting the script tag is
 # what keeps `webui-assets`' SHA re-hash of the staged file meaningful: if the engine were ever
@@ -679,6 +690,22 @@ def _read_cpp_string_constant(source: Path, name: str) -> str:
     return match.group(1)
 
 
+@functools.lru_cache(maxsize=None)
+def _cpp_source_text(source: Path) -> str:
+    """A C++ source read once per path — `_stripped_cpp_source`'s memo without the comment strip.
+
+    `TOKEN_VOCABULARIES` names a FUNCTION per row rather than a file, so one file backs several rows:
+    `extension.cpp` alone carries three. Without the memo each row pays its own read, which is the
+    per-row cost `_stripped_cpp_source` already documents for the constant pins. Safe to cache for
+    this process's lifetime for the same reason it gives: a short-lived one-shot over a tree nothing
+    mutates while it runs.
+    """
+    try:
+        return source.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise CheckError(f"cannot read {source}: {exc}") from exc
+
+
 def _read_cpp_token_switch(source: Path, function: str) -> tuple[str, ...]:
     """Read the WIRE TOKENS out of a C++ `<function>` token switch body.
 
@@ -696,11 +723,8 @@ def _read_cpp_token_switch(source: Path, function: str) -> tuple[str, ...]:
     repeats one of the tokens already emitted; keeping the duplicate would make a set comparison
     report a phantom extra.
     """
-    try:
-        text = source.read_text(encoding="utf-8")
-    except OSError as exc:
-        raise CheckError(f"cannot read {source}: {exc}") from exc
-    body = re.search(rf"{re.escape(function)}\s*\([^)]*\)\s*\{{(.*?)\n\}}", text, re.DOTALL)
+    body = re.search(rf"{re.escape(function)}\s*\([^)]*\)\s*\{{(.*?)\n\}}", _cpp_source_text(source),
+                     re.DOTALL)
     if body is None:
         raise CheckError(
             f"`{function}` not found in {source} — the closed vocabulary moved, so this check can no "
@@ -1338,42 +1362,19 @@ def check_panel_contract(asset_dir: Path, bundle_name: str, shell_include_dir: P
                 f"persisted panel state would be written under one key and read under another, so "
                 f"every restore would degrade to the D6 null-state path.")
 
-    # 7c — the closed gesture vocabulary, compared SET vs SET between the C++ wire tokens and the
-    # bundle's own array. Both sides are read from where the values actually live: the tokens from
-    # `gesture_verb_token`'s returns in panel_host.cpp, the array from the BUILT bundle.
-    cpp_verbs = _read_cpp_token_switch(shell_src_dir / "panel_host.cpp", "gesture_verb_token")
-    if set(cpp_verbs) != set(GESTURE_VERBS):
-        # An anti-rot assertion, not a drift failure: this script's own pinned vocabulary is stale,
-        # so it can no longer be trusted to judge either side. Loud (exit 2), never a quiet pass.
-        raise CheckError(
-            f"the C++ gesture vocabulary is {sorted(cpp_verbs)} but this check pins "
-            f"{sorted(GESTURE_VERBS)} — the closed vocabulary changed, so update GESTURE_VERBS "
-            f"(and the hydration runtime) deliberately.")
-    ts_verbs = _read_ts_string_array_from_bundle(bundle_text, "GESTURE_VERBS")
-    if ts_verbs is None:
-        failures.append(
-            "the bundle does not declare a GESTURE_VERBS array — the hydration runtime cannot emit "
-            "a verb vocabulary it does not name, so that half of the gesture contract is dead")
-    elif set(ts_verbs) != set(cpp_verbs):
-        missing = sorted(set(cpp_verbs) - set(ts_verbs))
-        extra = sorted(set(ts_verbs) - set(cpp_verbs))
-        failures.append(
-            f"gesture vocabulary DRIFTED: C++ `gesture_verb_token` emits {sorted(cpp_verbs)} but "
-            f"the bundle's GESTURE_VERBS is {sorted(ts_verbs)}"
-            + (f" (missing from TS: {missing})" if missing else "")
-            + (f" (unknown to C++: {extra})" if extra else "")
-            + " — a verb one side sends and the other does not accept is refused at runtime with "
-              "no build error, which is exactly what this gate exists to catch.")
-
-    # 7c2 — the three R-EDIT-001 CLOSED VOCABULARIES agree, SET vs SET (editor-UX c3). Same mechanism
-    # as 7c one block up, over the manifest token tables instead of the gesture verbs: the C++ side is
-    # read from the `*_token` switch that actually EMITS on the wire, the TS side from the BUILT
-    # bundle's array. See TOKEN_VOCABULARIES for why each drift is silent and what it costs.
-    for human, function, ts_name, pinned, ts_only, consequence in TOKEN_VOCABULARIES:
-        cpp_tokens = _read_cpp_token_switch(contract_src_dir / "extension.cpp", function)
+    # 7c — every R-EDIT-001 CLOSED VOCABULARY agrees, SET vs SET. The C++ side is read from the
+    # `*_token` switch that actually EMITS on the wire, the TS side from the BUILT bundle's array.
+    # See TOKEN_VOCABULARIES for the rows, why each drift is silent, and what it costs.
+    token_sources = {
+        "extension.cpp": contract_src_dir / "extension.cpp",
+        "panel_host.cpp": shell_src_dir / "panel_host.cpp",
+    }
+    for human, source, function, ts_name, pinned, ts_only, consequence in TOKEN_VOCABULARIES:
+        cpp_tokens = _read_cpp_token_switch(token_sources[source], function)
         if set(cpp_tokens) != set(pinned):
-            # An anti-rot assertion, not a drift failure — identical in kind to 7c's: this script's
-            # own pinned vocabulary is stale, so it can no longer be trusted to judge either side.
+            # An anti-rot assertion, not a drift failure: this script's own pinned vocabulary is
+            # stale, so it can no longer be trusted to judge either side. Loud (exit 2), never a
+            # quiet pass.
             raise CheckError(
                 f"the C++ {human} vocabulary is {sorted(cpp_tokens)} but this check pins "
                 f"{sorted(pinned)} — the closed vocabulary changed, so update TOKEN_VOCABULARIES "
