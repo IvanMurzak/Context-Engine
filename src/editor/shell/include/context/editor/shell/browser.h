@@ -57,6 +57,13 @@ public:
     // VISIBILITY (OnPopupShow) as separate callbacks and does not guarantee an order, so the sink
     // gets both halves as one call and keeps no partial state of its own.
     //
+    // `rect` IS IN DIP — view coordinates, exactly as `OnPopupSize` reports it, and the ONE rect on
+    // this seam that is not already physical pixels (a2). The SINK converts, because the conversion
+    // needs a scale and the compositor is the one holder of that scale (`WindowCompositor::dpi_`);
+    // converting in the CEF binding instead would put the arithmetic in a TU no local gate compiles
+    // and no headless CI job executes. The popup's own OnPaint TEXTURE is physical like every other
+    // frame — that split between the rect and the texture is the whole of the bug a2 fixed.
+    //
     // A hidden popup MUST drop its layer rather than merely stop drawing it: CEF reuses the popup
     // texture for the next dropdown at a different size, and a retained stale layer would composite
     // the previous menu's pixels for the frame between the hide and the next paint.

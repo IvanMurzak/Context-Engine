@@ -293,8 +293,6 @@ void WindowCompositor::on_browser_frame(const BrowserFrame& frame)
     if (frame.layer == BrowserLayer::popup)
     {
         ++stats_.popup_frames;
-        popup_visible_rect_ = frame.frame.visible_rect;
-        popup_coded_size_ = frame.frame.coded_size;
         if (path_ == PresentPath::gpu_swapchain && device_ != nullptr)
         {
             have_popup_frame_ = popup_importer_.update(*device_, frame.frame);
@@ -303,6 +301,17 @@ void WindowCompositor::on_browser_frame(const BrowserFrame& frame)
         {
             capture_cpu_frame(cpu_popup_, frame.frame);
             have_popup_frame_ = cpu_popup_.valid;
+        }
+        // The frame GEOMETRY is recorded only once the frame was ACCEPTED. A refused frame (a
+        // truncated producer buffer — see capture_cpu_frame / the import driver's bounds rule)
+        // leaves no pixels behind, so recording its rect would leave `popup_dest_rect()` — half of
+        // which is this pair — describing a menu that was never stored, and would decouple the CPU
+        // path's destination SIZE (read from here) from its source pointer (read from cpu_popup_).
+        // Keeping the last GOOD frame's geometry matches what both paths still hold.
+        if (have_popup_frame_)
+        {
+            popup_visible_rect_ = frame.frame.visible_rect;
+            popup_coded_size_ = frame.frame.coded_size;
         }
         damage_.popup = true;
         return;
@@ -331,9 +340,13 @@ void WindowCompositor::on_popup_state(bool visible, const render::Rect2D& rect)
     {
         // Drop the layer, do not merely stop drawing it — see the seam note in browser.h: CEF reuses
         // the popup texture for the next dropdown, so a retained layer composites stale pixels for
-        // the frame between the hide and the next paint.
+        // the frame between the hide and the next paint. The frame GEOMETRY goes with it (a2): it is
+        // half of `popup_dest_rect()`, and keeping it would let that accessor report the size of a
+        // menu that is no longer on screen.
         have_popup_frame_ = false;
         cpu_popup_ = CpuFrame{};
+        popup_visible_rect_ = render::Rect2D{};
+        popup_coded_size_ = render::Extent2D{};
     }
     damage_.popup = true;
 }
@@ -344,8 +357,19 @@ void WindowCompositor::publish_viewports(std::vector<ViewportLayer> layers)
     damage_.layout = true;
 }
 
-void WindowCompositor::on_resize(render::Extent2D physical_size)
+void WindowCompositor::on_resize(render::Extent2D physical_size, DpiScale dpi)
 {
+    if (dpi != dpi_)
+    {
+        // a2: the scale is taken BEFORE the empty-size guard below, deliberately. A minimized window
+        // reports 0x0 every frame and its DPI can still change underneath it (moved to another
+        // monitor, or the user changing scaling), so returning early would drop the new scale and
+        // composite the next popup at the old factor.
+        dpi_ = dpi;
+        // The popup rect is stored in DIP and converted per FRAME, so a new scale moves an
+        // already-open popup with no new callback from the browser — but only if something redraws.
+        damage_.popup = true;
+    }
     if (render::is_empty(physical_size))
     {
         return; // a minimized window reports 0x0 every frame — keep the last valid configuration
@@ -360,6 +384,22 @@ void WindowCompositor::on_resize(render::Extent2D physical_size)
         swapchain_->resize(physical_size);
     }
     damage_.resize = true;
+}
+
+render::Rect2D WindowCompositor::popup_source_rect() const
+{
+    return visible_within(popup_visible_rect_, popup_coded_size_);
+}
+
+render::Rect2D WindowCompositor::popup_dest_rect() const
+{
+    // The SIZE is the popup texture's own visible extent, which is PHYSICAL (CEF scales its OnPaint
+    // buffer by device_scale_factor); only the ORIGIN is converted from the DIP rect. Reading it
+    // from `popup_visible_rect_`/`popup_coded_size_` rather than from either path's private copy is
+    // what makes the GPU and CPU paths composite the popup at the SAME place by construction —
+    // `on_browser_frame` sets that pair from whichever frame each path ACCEPTED, so it describes the
+    // texture that path is actually holding.
+    return osr_popup_dest_rect(popup_rect_, popup_source_rect().size, dpi_);
 }
 
 void WindowCompositor::reconfigure()
@@ -530,13 +570,19 @@ bool WindowCompositor::render_gpu_frame()
     }
 
     // 4. the PET_POPUP layer — a SECOND OSR layer, confined to the popup rect.
+    //
+    // The destination is `popup_dest_rect()`, NOT the rect CEF reported: that one is DIP (a2). Using
+    // it raw drew a 150 % dropdown two thirds of the way toward the window origin, and — because
+    // draw_layer maps the source onto the destination — SQUEEZED the physical texture into the
+    // smaller DIP-sized rect, softening every glyph in the menu.
     if (popup_visible_ && have_popup_frame_ && popup_importer_.texture() != nullptr &&
         !render::is_empty(popup_rect_.size))
     {
         popup_layer = popup_importer_.texture()->create_view();
         if (popup_layer != nullptr)
         {
-            if (draw_layer(*pass, popup_rect_, *popup_layer, popup_visible_rect_, popup_coded_size_,
+            const render::Rect2D popup_src = popup_source_rect();
+            if (draw_layer(*pass, popup_dest_rect(), *popup_layer, popup_src, popup_coded_size_,
                            slot))
             {
                 ++slot;
@@ -623,22 +669,27 @@ bool WindowCompositor::render_cpu_frame()
     if (popup_visible_ && have_popup_frame_ && cpu_popup_.valid &&
         !render::is_empty(popup_rect_.size))
     {
-        // The popup's VISIBLE rect inside its own allocation is what gets drawn, at the popup rect's
-        // origin in the window. Reading from the allocation's top-left (or sizing by the coded size)
-        // would composite the unused margin as if it were content.
+        // The popup's VISIBLE rect inside its own allocation is what gets drawn, at the popup's
+        // PHYSICAL origin in the window. Reading from the allocation's top-left (or sizing by the
+        // coded size) would composite the unused margin as if it were content.
+        //
+        // The destination comes from `popup_dest_rect()`, exactly as on the GPU path (a2): the
+        // origin converted DIP -> physical, and the size taken from the TEXTURE rather than from
+        // the DIP rect. The old `min(dip_rect.size, texture.size)` here is what CROPPED a 150 %
+        // dropdown to two thirds of its width and height — the clamp read a DIP number as a pixel
+        // count. Clamping against the WINDOW is still needed and still happens, inside
+        // blend_premultiplied_bgra, which is the only clamp whose two operands share a unit.
         const render::Rect2D popup_visible =
             visible_within(cpu_popup_.visible_rect, cpu_popup_.coded_size);
-        const render::Extent2D popup_size{
-            std::min(popup_rect_.size.width, popup_visible.size.width),
-            std::min(popup_rect_.size.height, popup_visible.size.height)};
-        if (!render::is_empty(popup_size))
+        const render::Rect2D popup_dest = popup_dest_rect();
+        if (!render::is_empty(popup_dest.size))
         {
             const std::uint8_t* popup_src =
                 cpu_popup_.pixels.data() +
                 static_cast<std::size_t>(popup_visible.origin.y) * cpu_popup_.bytes_per_row +
                 static_cast<std::size_t>(popup_visible.origin.x) * 4u;
-            blend_premultiplied_bgra(cpu_surface_.data(), size_, stride, popup_src, popup_size,
-                                     cpu_popup_.bytes_per_row, popup_rect_.origin);
+            blend_premultiplied_bgra(cpu_surface_.data(), size_, stride, popup_src, popup_dest.size,
+                                     cpu_popup_.bytes_per_row, popup_dest.origin);
             ++stats_.popup_draws;
         }
     }

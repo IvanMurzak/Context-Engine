@@ -164,10 +164,24 @@ void EditorWindow::attach_cpu_present()
 
 void EditorWindow::sync_browser_size()
 {
+    // The window's geometry, read ONCE and pushed to both consumers. Reading the pair here rather
+    // than in each arm of handle_event is what keeps the browser and the compositor from ever being
+    // told a size and a scale sampled at two different moments.
+    const render::Extent2D physical = backend_->client_size();
+    const DpiScale dpi = backend_->dpi();
     // CEF's view rect is DIP, not physical (see IBrowserHost::resize). Converting here, once, is
     // what keeps the browser laying out at the right size on a non-100% monitor.
-    const render::Extent2D logical = to_logical(backend_->client_size(), backend_->dpi());
-    browser_->resize(logical, backend_->dpi());
+    const render::Extent2D logical = to_logical(physical, dpi);
+    browser_->resize(logical, dpi);
+    // a2: the compositor takes the PHYSICAL size and the SAME scale. It needs the scale because the
+    // one geometry CEF reports in DIP is the popup rect (OnPopupSize), which the compositor draws
+    // onto a physical surface — see WindowCompositor::popup_dest_rect. Pushing it HERE, beside the
+    // browser's, is what makes the first pump's sync (`browser_size_synced_`, pump_once) seed the
+    // scale as well: a window opened on a 150 % monitor that is never resized still composites its
+    // dropdowns correctly. The `resize` arm below therefore no longer calls on_resize itself — the
+    // backend has already applied the event to itself by then, so `client_size()` IS `event.size`
+    // (window.cpp / x11_window.cpp both state that contract).
+    compositor_.on_resize(physical, dpi);
     // A resize can MOVE the client origin as well (a maximize does both), and a DPI change moves it
     // in DIP terms even when the physical rect is unchanged — so the origin rides along here rather
     // than waiting for the next move event or placement poll. MARKED, not pushed: a modal resize
@@ -187,10 +201,10 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
     {
     case ShellEventKind::resize:
     {
-        compositor_.on_resize(event.size);
         // The resize protocol (03 §4): reconfigure the swapchain (compositor) AND tell the browser
         // (WasResized). Doing only the first leaves the browser painting at the old size and the
-        // composite sampling a UV sub-rect that no longer matches the window.
+        // composite sampling a UV sub-rect that no longer matches the window. Both halves live in
+        // sync_browser_size() since a2, so that the size and the scale are read together.
         sync_browser_size();
         break;
     }
@@ -198,7 +212,8 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
     {
         input_.set_dpi(event.dpi);
         // A DPI change with no size change still moves the DIP view rect, so the browser is
-        // re-informed even though the physical backbuffer may be unchanged.
+        // re-informed even though the physical backbuffer may be unchanged — and so is the
+        // compositor, whose popup conversion is scale-dependent (a2).
         sync_browser_size();
         compositor_.mark_external_damage();
         break;

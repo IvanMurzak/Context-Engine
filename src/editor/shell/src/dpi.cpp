@@ -43,12 +43,6 @@ render::Extent2D to_physical(render::Extent2D logical, DpiScale scale)
                             scale_extent(logical.height, factor)};
 }
 
-render::Extent2D osr_screen_extent(render::Extent2D logical, DpiScale scale,
-                                   bool screen_rect_is_dip)
-{
-    return screen_rect_is_dip ? logical : to_physical(logical, scale);
-}
-
 render::Extent2D to_logical(render::Extent2D physical, DpiScale scale)
 {
     const float inverse = 1.0f / scale.factor();
@@ -68,6 +62,33 @@ PointI to_physical_point(PointI logical, DpiScale scale)
     return PointI{scale_coord(logical.x, factor), scale_coord(logical.y, factor)};
 }
 
+render::Rect2D osr_popup_dest_rect(const render::Rect2D& popup_dip, render::Extent2D physical_size,
+                                   DpiScale scale)
+{
+    // to_physical_point, NOT to_physical: the origin is a COORDINATE, and this is the SAME
+    // conversion `osr_screen_point` applies to a view offset — so the place the popup is drawn and
+    // the place CEF is told the view maps to can never round differently.
+    //
+    // Honest about the difference: `to_physical`'s never-collapse clamp is UNREACHABLE here — it
+    // only fires for a non-zero value scaling below 0.5, and the low DPI clamp is 0.5x, at which no
+    // non-negative integer does that (verified over kMinDpi..kMaxDpi). So this is a contract choice,
+    // not a behavioural one, and a test asserting otherwise would be asserting nothing.
+    const PointI origin =
+        to_physical_point(PointI{static_cast<std::int32_t>(popup_dip.origin.x),
+                                 static_cast<std::int32_t>(popup_dip.origin.y)},
+                          scale);
+    render::Rect2D dest;
+    // render::Rect2D's origin is unsigned. A DIP origin is unsigned and the factor is positive, so
+    // the product cannot be negative in practice; clamping rather than casting keeps a wrapped
+    // input from addressing the far end of the surface.
+    dest.origin.x = origin.x > 0 ? static_cast<std::uint32_t>(origin.x) : 0u;
+    dest.origin.y = origin.y > 0 ? static_cast<std::uint32_t>(origin.y) : 0u;
+    // The SIZE comes from the texture, never from the DIP rect — see dpi.h for why the two are not
+    // interchangeable even after scaling.
+    dest.size = physical_size;
+    return dest;
+}
+
 PointI osr_screen_point(PointI view_dip, PointI client_origin, DpiScale scale,
                         bool screen_coords_are_dip)
 {
@@ -82,9 +103,9 @@ ScreenRect osr_root_screen_rect(PointI client_origin, render::Extent2D logical_s
                                 bool screen_coords_are_dip)
 {
     // DIP OUT, on every platform (see dpi.h). The size is already DIP and passes through
-    // UNSCALED — giving it osr_screen_extent's treatment is precisely the bug this member's
-    // wording rules out. Only the origin is converted, and only where the platform hands it to us
-    // in device pixels.
+    // UNSCALED — multiplying it by the scale factor is precisely the bug this member's wording
+    // rules out. Only the origin is converted, and only where the platform hands it to us in
+    // device pixels.
     const PointI origin_dip =
         screen_coords_are_dip ? client_origin : to_logical_point(client_origin, scale);
     return ScreenRect{origin_dip, logical_size};

@@ -1,6 +1,7 @@
 // The per-window compositor (03 §4): the extrapolated layer UV, the premultiplied CPU blend, the
-// layer ORDER, damage-driven redraw, the resize protocol, the PET_POPUP second layer, the
-// Outdated/Lost/Suboptimal acquire branches, and both present paths.
+// layer ORDER, damage-driven redraw, the resize protocol, the PET_POPUP second layer AND its
+// DIP -> physical destination at a non-integral scale (a2), the Outdated/Lost/Suboptimal acquire
+// branches, and both present paths.
 //
 // The GPU half is driven through render_test_rhi.h's fake backend — the same GPU-free fake the e03
 // present tests use — so the real composite path (pipeline, per-layer bind groups, scissors, submit,
@@ -40,6 +41,17 @@ BrowserFrame make_view_frame(std::vector<std::uint8_t>& storage, render::Extent2
     return frame;
 }
 
+// The same frame, tagged as the PET_POPUP layer. The tag is the ONE thing that makes a frame a
+// popup, so it belongs beside the construction rather than as a line every caller re-types.
+BrowserFrame make_popup_frame(std::vector<std::uint8_t>& storage, render::Extent2D coded,
+                              const render::Rect2D& visible, std::uint8_t b, std::uint8_t g,
+                              std::uint8_t r, std::uint8_t a)
+{
+    BrowserFrame frame = make_view_frame(storage, coded, visible, b, g, r, a);
+    frame.layer = BrowserLayer::popup;
+    return frame;
+}
+
 CompositorConfig software_config()
 {
     CompositorConfig config;
@@ -47,6 +59,15 @@ CompositorConfig software_config()
     // smoke and these tests both take the software path deliberately.
     config.import_options.force_software = true;
     return config;
+}
+
+// One pixel of a composed CPU surface, addressed from the surface's own extent rather than from a
+// literal stride repeated at every call site.
+[[nodiscard]] const std::uint8_t* surface_px(const std::vector<std::uint8_t>& surface,
+                                             render::Extent2D size, std::uint32_t x,
+                                             std::uint32_t y)
+{
+    return surface.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
 }
 
 // ------------------------------------------------------------------------------ compute_layer_uv
@@ -250,9 +271,8 @@ void test_layer_order_and_the_popup_scissor()
     const render::Rect2D popup_rect = shelltest::rect(120, 90, 160, 200);
     compositor.on_popup_state(true, popup_rect);
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{256, 256},
-                                         shelltest::rect(0, 0, 160, 200), 255, 255, 255, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{256, 256},
+                                          shelltest::rect(0, 0, 160, 200), 255, 255, 255, 255);
     compositor.on_browser_frame(popup);
 
     CHECK(compositor.render_frame());
@@ -276,6 +296,48 @@ void test_layer_order_and_the_popup_scissor()
     CHECK(compositor.stats().popup_frames == 1);
 }
 
+// The destination SIZE comes from the TEXTURE, never from the scaled DIP size — the second half of
+// the conversion, and one a test at 1.5 cannot see: at 1.5 every DIP extent scales to exactly what
+// CEF paints, so the two rules agree there and only the origin discriminates. CEF paints
+// ceil(DIP x scale) while a scaled DIP size rounds to NEAREST, so 1.25 is where they part.
+void test_the_popup_destination_size_comes_from_the_texture_not_the_scaled_dip_size()
+{
+    WindowCompositor compositor(software_config());
+    // 100x60 DIP at 125% == 125x75 physical.
+    compositor.attach_cpu(std::make_unique<present::MemoryBlitter>(), render::Extent2D{125, 75});
+    compositor.on_resize(render::Extent2D{125, 75}, DpiScale{120});
+
+    std::vector<std::uint8_t> view_storage;
+    compositor.on_browser_frame(make_view_frame(view_storage, render::Extent2D{125, 75},
+                                                shelltest::rect(0, 0, 125, 75), 0, 0, 0, 255));
+
+    // 21x9 DIP at (8, 4): CEF paints ceil(21 x 1.25) = ceil(26.25) = 27 by ceil(9 x 1.25) = 12,
+    // while round(21 x 1.25) = 26 and round(9 x 1.25) = 11 — one short on BOTH axes.
+    compositor.on_popup_state(true, shelltest::rect(8, 4, 21, 9));
+    std::vector<std::uint8_t> popup_storage;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{27, 12},
+                                          shelltest::rect(0, 0, 27, 12), 255, 128, 64, 255);
+    compositor.on_browser_frame(popup);
+    CHECK(compositor.render_frame());
+
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), shelltest::rect(10, 5, 27, 12)));
+
+    // THE PIXEL THAT DISTINGUISHES THE TWO RULES: the popup's far corner, at (10+27-1, 5+12-1).
+    // A "scale the DIP size" destination is 26x11 and stops one pixel short of it on each axis, so
+    // the view shows through the last column and the last row of the menu.
+    const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
+    const std::uint8_t* corner = surface_px(surface, compositor.size(), 36, 16);
+    CHECK(corner[0] == 255);
+    CHECK(corner[1] == 128);
+    CHECK(corner[2] == 64);
+    // ...and one pixel further out is still the view, so the assertion above is a boundary and not
+    // a popup that spilled.
+    const std::uint8_t* past = surface_px(surface, compositor.size(), 37, 16);
+    CHECK(past[0] == 0);
+    CHECK(past[1] == 0);
+    CHECK(past[2] == 0);
+}
+
 void test_a_hidden_popup_drops_its_layer()
 {
     rendertest::FakeDevice device;
@@ -288,9 +350,8 @@ void test_a_hidden_popup_drops_its_layer()
                                                 shelltest::rect(0, 0, 400, 300), 0, 0, 0, 255));
     compositor.on_popup_state(true, shelltest::rect(10, 10, 100, 100));
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{128, 128},
-                                         shelltest::rect(0, 0, 100, 100), 255, 0, 0, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{128, 128},
+                                          shelltest::rect(0, 0, 100, 100), 255, 0, 0, 255);
     compositor.on_browser_frame(popup);
     CHECK(compositor.render_frame());
     CHECK(compositor.stats().popup_draws == 1);
@@ -407,20 +468,168 @@ void test_resize_protocol()
     rendertest::FakeSwapchain* swapchain = surface.last_swapchain();
     CHECK(swapchain != nullptr);
 
-    compositor.on_resize(render::Extent2D{1024, 768});
+    const DpiScale one_x{kReferenceDpi};
+    compositor.on_resize(render::Extent2D{1024, 768}, one_x);
     CHECK(shelltest::extent_eq(compositor.size(), render::Extent2D{1024, 768}));
     CHECK(swapchain->resize_count() == 1);
     CHECK(compositor.damage().resize);
 
     // A minimized window reports 0x0 EVERY FRAME. Tearing the chain down and rebuilding it each
     // time would thrash; the zero extent is ignored and the last valid configuration kept.
-    compositor.on_resize(render::Extent2D{0, 0});
+    compositor.on_resize(render::Extent2D{0, 0}, one_x);
     CHECK(shelltest::extent_eq(compositor.size(), render::Extent2D{1024, 768}));
     CHECK(swapchain->resize_count() == 1);
 
     // An UNCHANGED size is a no-op: a spurious WM_SIZE must not force a reconfigure.
-    compositor.on_resize(render::Extent2D{1024, 768});
+    compositor.on_resize(render::Extent2D{1024, 768}, one_x);
     CHECK(swapchain->resize_count() == 1);
+
+    // a2: the SCALE rides the same call, and it is taken even when the SIZE is unchanged — a user
+    // changing the desktop scaling of a maximized window is exactly that shape. It must NOT
+    // reconfigure the swapchain (nothing about the backbuffer changed) and it MUST damage the frame,
+    // because the popup destination is derived from the scale per frame.
+    const DpiScale one_five{144};
+    compositor.on_resize(render::Extent2D{1024, 768}, one_five);
+    CHECK(compositor.dpi() == one_five);
+    CHECK(swapchain->resize_count() == 1);
+    CHECK(compositor.damage().popup);
+
+    // ...and it is taken even while MINIMIZED, AHEAD of the zero-extent guard: a scale dropped there
+    // would composite the next dropdown at the old factor once the window came back.
+    compositor.on_resize(render::Extent2D{0, 0}, DpiScale{192});
+    CHECK(compositor.dpi() == (DpiScale{192}));
+    CHECK(shelltest::extent_eq(compositor.size(), render::Extent2D{1024, 768}));
+    CHECK(swapchain->resize_count() == 1);
+}
+
+// ------------------------------------------------------------- a2: the popup rect is DIP, not px
+//
+// THE SET'S NAMED VACUITY GATE. `OnPopupSize` reports the popup in DIP (view coordinates) while its
+// OnPaint texture is PHYSICAL, and the compositor used the DIP rect as the physical destination. At
+// scale 1.0 the correct and the broken code are BYTE-IDENTICAL — which is exactly why this shipped
+// green through every CI leg — so the assertions that matter are the ones at 1.5. The 1.0 cases in
+// test_layer_order_and_the_popup_scissor and test_cpu_path_composites_the_popup_rather_than_
+// skipping_it are deliberately kept beside these: they pin the identity path.
+
+void test_gpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5()
+{
+    rendertest::FakeDevice device;
+    rendertest::FakeSurface surface(rendertest::fake_default_surface_caps());
+    WindowCompositor compositor(software_config());
+    // An 800x600 DIP view on a 150% monitor: 1200x900 physical.
+    CHECK(compositor.attach_gpu(device, surface, render::Extent2D{1200, 900}));
+    const DpiScale one_five{144};
+    compositor.on_resize(render::Extent2D{1200, 900}, one_five);
+
+    std::vector<std::uint8_t> view_storage;
+    compositor.on_browser_frame(make_view_frame(view_storage, render::Extent2D{2048, 2048},
+                                                shelltest::rect(0, 0, 1200, 900), 0, 0, 0, 255));
+
+    // A dropdown CEF places at 260x400 DIP, 200x120 DIP big — and paints as a 300x180 PHYSICAL
+    // texture. The two halves of the split, in one frame.
+    const render::Rect2D popup_dip = shelltest::rect(260, 400, 200, 120);
+    compositor.on_popup_state(true, popup_dip);
+    std::vector<std::uint8_t> popup_storage;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{512, 512},
+                                          shelltest::rect(0, 0, 300, 180), 255, 255, 255, 255);
+    compositor.on_browser_frame(popup);
+
+    CHECK(compositor.render_frame());
+
+    const rendertest::FakePassLog& log = device.pass_log();
+    CHECK(log.draws == 2); // the view, then the popup
+    CHECK(log.scissors.size() == 2u);
+
+    // THE ASSERTION: the popup is scissored to its PHYSICAL rect — the DIP origin scaled by 1.5,
+    // sized by the TEXTURE. (390, 600) 300x180, not the (260, 400) 200x120 CEF reported.
+    const render::Rect2D want = shelltest::rect(390, 600, 300, 180);
+    CHECK(shelltest::rect_eq(log.scissors[1], want));
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), want));
+
+    // ...and the shipped bug is a DIFFERENT rect on BOTH axes and BOTH extents, so none of the four
+    // numbers above can be right by accident.
+    CHECK(!shelltest::rect_eq(log.scissors[1], popup_dip));
+    CHECK(log.scissors[1].origin.x != popup_dip.origin.x);
+    CHECK(log.scissors[1].origin.y != popup_dip.origin.y);
+    CHECK(log.scissors[1].size.width != popup_dip.size.width);
+    CHECK(log.scissors[1].size.height != popup_dip.size.height);
+    // The RAW rect is still reported as CEF sent it — the conversion is at the DESTINATION, not at
+    // delivery, so a later DPI change re-derives instead of compounding.
+    CHECK(shelltest::rect_eq(compositor.popup_rect(), popup_dip));
+
+    // ONE TEXEL PER PIXEL over the popup too: 300 physical columns span 300/512 of the allocation.
+    // The bug squeezed the same 300-column texture into a 200-pixel destination, which resamples
+    // every glyph in the menu rather than cropping it.
+    CHECK(log.buffer_writes.size() == 2u);
+    present::CompositeUv uv;
+    std::memcpy(&uv, log.buffer_writes[1].data(), sizeof(uv));
+    const float du = (uv.u1 - uv.u0) / static_cast<float>(compositor.size().width);
+    CHECK(shelltest::near_eq(du * 300.0f, 300.0f / 512.0f));
+
+    // A DPI change with the popup ALREADY OPEN moves it, with no new callback from the browser —
+    // the reason the DIP rect is stored raw and converted per frame.
+    compositor.on_resize(render::Extent2D{1600, 1200}, DpiScale{192});
+    CHECK(compositor.render_frame());
+    CHECK(log.scissors.size() == 4u);        // view + popup again
+    CHECK(log.scissors[3].origin.x == 520u); // 260 x 2.0
+    CHECK(log.scissors[3].origin.y == 800u); // 400 x 2.0
+}
+
+void test_cpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5()
+{
+    WindowCompositor compositor(software_config());
+    // 80x60 DIP at 150% == 120x90 physical. Small enough to address per pixel below.
+    compositor.attach_cpu(std::make_unique<present::MemoryBlitter>(), render::Extent2D{120, 90});
+    compositor.on_resize(render::Extent2D{120, 90}, DpiScale{144});
+
+    std::vector<std::uint8_t> view_storage;
+    compositor.on_browser_frame(make_view_frame(view_storage, render::Extent2D{120, 90},
+                                                shelltest::rect(0, 0, 120, 90), 0, 0, 0, 255));
+
+    // 20x10 DIP at (10, 5) DIP -> 30x15 physical at (15, 8) physical (5 x 1.5 = 7.5, rounded away
+    // from zero to 8 — the same round-to-nearest every other conversion in dpi.h uses).
+    const render::Rect2D popup_dip = shelltest::rect(10, 5, 20, 10);
+    compositor.on_popup_state(true, popup_dip);
+    std::vector<std::uint8_t> popup_storage;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{30, 15},
+                                          shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
+    compositor.on_browser_frame(popup);
+
+    CHECK(compositor.render_frame());
+    CHECK(compositor.stats().popup_draws == 1);
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), shelltest::rect(15, 8, 30, 15)));
+
+    const std::vector<std::uint8_t>& surface = compositor.cpu_surface();
+    const render::Extent2D window = compositor.size();
+    const auto is_popup = [&surface, window](std::uint32_t x, std::uint32_t y) {
+        const std::uint8_t* px = surface_px(surface, window, x, y);
+        return px[0] == 255 && px[1] == 128 && px[2] == 64;
+    };
+    const auto is_view = [&surface, window](std::uint32_t x, std::uint32_t y) {
+        const std::uint8_t* px = surface_px(surface, window, x, y);
+        return px[0] == 0 && px[1] == 0 && px[2] == 0 && px[3] == 255;
+    };
+
+    // INSIDE the physical rect, on all four corners — the popup's pixels.
+    CHECK(is_popup(15, 8));  // top-left
+    CHECK(is_popup(44, 8));  // top-right    (15 + 30 - 1)
+    CHECK(is_popup(15, 22)); // bottom-left  (8 + 15 - 1)
+    CHECK(is_popup(44, 22)); // bottom-right
+    // OUTSIDE it, one pixel past each edge — the view's black. Asserting BOTH is what distinguishes
+    // a real second layer from a popup that was dropped (view everywhere) or drawn full-window
+    // (popup everywhere), the discipline docs/shell.md already records for this test.
+    CHECK(is_view(14, 8));
+    CHECK(is_view(45, 8));
+    CHECK(is_view(15, 7));
+    CHECK(is_view(15, 23));
+    CHECK(is_view(0, 0));
+
+    // THE SHIPPED BUG, sampled directly: it blitted the DIP rect (10, 5) 20x10, which put popup
+    // pixels at (10, 5) and left the true bottom-right quadrant showing the view. Both of these
+    // lines flip if the conversion is removed, and NEITHER can flip at scale 1.0 — there the DIP
+    // rect and the physical rect are the same four numbers.
+    CHECK(is_view(10, 5));   // the OLD origin is outside the popup now
+    CHECK(is_popup(40, 20)); // ...and the far corner the old 20x10 blit never reached
 }
 
 void test_outdated_and_lost_reconfigure_and_keep_the_damage()
@@ -556,13 +765,6 @@ BrowserFrame make_coordinate_view_frame(std::vector<std::uint8_t>& storage, rend
     return frame;
 }
 
-[[nodiscard]] const std::uint8_t* surface_px(const std::vector<std::uint8_t>& surface,
-                                             render::Extent2D size, std::uint32_t x,
-                                             std::uint32_t y)
-{
-    return surface.data() + (static_cast<std::size_t>(y) * size.width + x) * 4u;
-}
-
 void test_cpu_path_presents_the_view_1_to_1_cropped_to_the_window()
 {
     // THE DPI-ROUNDING SHAPE: the browser painted one pixel more than the client on both axes
@@ -675,9 +877,8 @@ void test_cpu_path_composites_the_popup_rather_than_skipping_it()
     const render::Rect2D popup_rect = shelltest::rect(10, 5, 20, 10);
     compositor.on_popup_state(true, popup_rect);
     std::vector<std::uint8_t> popup_storage;
-    BrowserFrame popup = make_view_frame(popup_storage, render::Extent2D{20, 10},
-                                         shelltest::rect(0, 0, 20, 10), 255, 128, 64, 255);
-    popup.layer = BrowserLayer::popup;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{20, 10},
+                                          shelltest::rect(0, 0, 20, 10), 255, 128, 64, 255);
     compositor.on_browser_frame(popup);
 
     CHECK(compositor.render_frame());
@@ -742,6 +943,55 @@ void test_a_malformed_producer_frame_is_refused()
     CHECK(!compositor.render_frame());
 }
 
+// A REFUSED popup frame must not move the geometry `popup_dest_rect()` is built from. The rect is
+// half DIP input and half TEXTURE extent (a2), so recording a refused frame's extent would have the
+// accessor — documented in compositor.h as describing the texture each path is holding — report a
+// menu whose pixels were never stored, and would decouple the CPU path's destination SIZE (read
+// from that pair) from its source pointer and stride (read from `cpu_popup_`). Only
+// `capture_cpu_frame`'s leading `valid = false` kept that from being an out-of-bounds source bound.
+void test_a_refused_popup_frame_leaves_the_last_good_geometry_in_place()
+{
+    WindowCompositor compositor(software_config());
+    compositor.attach_cpu(std::make_unique<present::MemoryBlitter>(), render::Extent2D{120, 90});
+    compositor.on_resize(render::Extent2D{120, 90}, DpiScale{144});
+
+    std::vector<std::uint8_t> view_storage;
+    compositor.on_browser_frame(make_view_frame(view_storage, render::Extent2D{120, 90},
+                                                shelltest::rect(0, 0, 120, 90), 0, 0, 0, 255));
+
+    // A GOOD popup first: 20x10 DIP at (10, 5) painted as a 30x15 physical texture -> (15, 8) 30x15.
+    compositor.on_popup_state(true, shelltest::rect(10, 5, 20, 10));
+    std::vector<std::uint8_t> popup_storage;
+    BrowserFrame popup = make_popup_frame(popup_storage, render::Extent2D{30, 15},
+                                          shelltest::rect(0, 0, 30, 15), 255, 128, 64, 255);
+    compositor.on_browser_frame(popup);
+    CHECK(compositor.render_frame());
+    CHECK(compositor.stats().popup_draws == 1);
+    const render::Rect2D good = shelltest::rect(15, 8, 30, 15);
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), good));
+
+    // ...then one claiming a BIGGER allocation than its buffer holds. Deliberately a different
+    // extent from the good frame on BOTH axes: recording it would make the assertion below read
+    // 60x30, so this cannot pass by accident.
+    std::vector<std::uint8_t> truncated(16, 0u);
+    BrowserFrame refused;
+    refused.layer = BrowserLayer::popup;
+    refused.frame.pixels = truncated.data();
+    refused.frame.byte_size = truncated.size();
+    refused.frame.bytes_per_row = 240;
+    refused.frame.coded_size = render::Extent2D{60, 30};
+    refused.frame.visible_rect = shelltest::rect(0, 0, 60, 30);
+    compositor.on_browser_frame(refused);
+
+    // It REACHED the popup branch — otherwise the assertion below would hold for the wrong reason
+    // (a frame refused one layer earlier never had a chance to overwrite anything).
+    CHECK(compositor.stats().popup_frames == 2);
+    CHECK(shelltest::rect_eq(compositor.popup_dest_rect(), good));
+    // ...and no popup is composited from a frame whose pixels were never stored.
+    CHECK(compositor.render_frame());
+    CHECK(compositor.stats().popup_draws == 1);
+}
+
 void test_detach_is_safe_and_idempotent()
 {
     rendertest::FakeDevice device;
@@ -775,6 +1025,9 @@ int main()
     test_premultiplied_blend_clips_at_the_destination_edges();
     test_damage_driven_redraw_skips_an_undamaged_frame();
     test_layer_order_and_the_popup_scissor();
+    test_gpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5();
+    test_cpu_path_composites_the_popup_at_its_physical_rect_at_scale_1_5();
+    test_the_popup_destination_size_comes_from_the_texture_not_the_scaled_dip_size();
     test_a_hidden_popup_drops_its_layer();
     test_a_layer_clipped_to_nothing_is_skipped_without_disturbing_the_others();
     test_a_partially_clipped_layer_is_cropped_not_squeezed();
@@ -789,6 +1042,7 @@ int main()
     test_cpu_path_composites_the_popup_rather_than_skipping_it();
     test_cpu_path_without_a_blitter_is_reported_not_silent();
     test_a_malformed_producer_frame_is_refused();
+    test_a_refused_popup_frame_leaves_the_last_good_geometry_in_place();
     test_detach_is_safe_and_idempotent();
     SHELL_TEST_MAIN_END();
 }

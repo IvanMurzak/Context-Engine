@@ -1,10 +1,12 @@
 // Per-monitor DPI for the Shell (design 03 §1) — the arithmetic that replaces the spike's DPI-1.0 pin.
 //
-// Three consumers need the SAME number and would otherwise each derive it: the swapchain (physical
-// backbuffer pixels), CEF (`device_scale_factor` + the view rect it reports in DIP), and the input
-// pump (an OS pointer position is physical; a browser mouse event is DIP). A per-monitor-v2 window
-// changes this number while running — dragged to a second monitor, or the user changing scaling —
-// so it is a live value threaded through the frame, not a boot-time constant.
+// Four consumers need the SAME number and would otherwise each derive it: the swapchain (physical
+// backbuffer pixels), CEF (`device_scale_factor` + the view rect it reports in DIP), the input
+// pump (an OS pointer position is physical; a browser mouse event is DIP), and — since a2 — the
+// compositor, which composites the one geometry CEF reports in DIP (the `OnPopupSize` popup rect,
+// see `osr_popup_dest_rect`) onto a physical surface. A per-monitor-v2 window changes this number
+// while running — dragged to a second monitor, or the user changing scaling — so it is a live value
+// threaded through the frame, not a boot-time constant.
 //
 // The DPI is the stored value and the scale factor is DERIVED from it. Storing both is the classic
 // pair that drifts: Windows hands us an integer DPI (WM_DPICHANGED), CEF wants the float, and a
@@ -69,19 +71,38 @@ struct PointI
     [[nodiscard]] bool operator==(const PointI& other) const { return x == other.x && y == other.y; }
 };
 
-// The screen extent an OSR browser should be told about, for a view of `logical` size.
-//
-// CEF reports its screen rect in DEVICE pixels on Windows/Linux but in DIP on macOS — the same split
-// it documents for GetScreenPoint. That is portable arithmetic over two plain values, so it lives
-// here, compiled and tested on all three legs, rather than behind an `#if defined(__APPLE__)` inside
-// the CEF binding: that branch is the ONE the local gate cannot build AND that no CI job executes
-// (the live CEF smoke is Windows/Linux only), so a wrong choice there would surface as a whole-UI
-// mis-scale found by a human on a Mac. The caller passes which convention its platform uses.
-[[nodiscard]] render::Extent2D osr_screen_extent(render::Extent2D logical, DpiScale scale,
-                                                 bool screen_rect_is_dip);
-
 [[nodiscard]] PointI to_logical_point(PointI physical, DpiScale scale);
 [[nodiscard]] PointI to_physical_point(PointI logical, DpiScale scale);
+
+// ------------------------------------------------------------------ the OSR popup rect (a2)
+//
+// WHERE THE `PET_POPUP` LAYER IS COMPOSITED. Read verbatim from the pinned `cef_render_handler.h`
+// (`tools/cef-prebuilt.json` -> CEF 149.0.6+g0d0eeb6+chromium-149.0.7827.201), the two members that
+// describe the popup, which do NOT share a unit:
+//
+//   * `OnPopupSize` (:124-130) — "|rect| contains the new location and size in view coordinates" —
+//     and `GetViewRect` (:80-85) defines view coordinates as DIP.
+//   * `OnPaint` (:132-142) — "Pixel values passed to this method are scaled relative to view
+//     coordinates based on the value of CefScreenInfo.device_scale_factor" — so the popup's own
+//     TEXTURE is PHYSICAL, exactly like the view layer's.
+//
+// Compositing the DIP rect as if it were the physical destination is what put a 150 % `<select>` up
+// and left of where it was drawn, at two thirds the size (cropped on the CPU path, squeezed on the
+// GPU one) — and, because CEF hit-tests the TRUE DIP rect, made a click on the drawn popup land
+// outside it and dismiss the menu. Like every bug in this family it is invisible at 1.0, where the
+// two units coincide.
+//
+// THE ASYMMETRY IS THE FIX, and it is why this takes a size rather than deriving one:
+//
+//   * the ORIGIN is converted DIP -> physical, because it addresses the same surface the physical
+//     view frame is composited into;
+//   * the SIZE is NOT converted. `physical_size` is the popup TEXTURE's own visible extent. CEF
+//     paints ceil(DIP x scale) pixels for a DIP rect, which round(DIP x scale) does not always
+//     reproduce (1 DIP at 1.25x is 2 pixels painted and 1 rounded), and a destination one pixel off
+//     the texture crops a column of the dropdown or resamples the whole thing. The texture is the
+//     ground truth for HOW BIG the popup is; the DIP rect is the ground truth for WHERE it is.
+[[nodiscard]] render::Rect2D osr_popup_dest_rect(const render::Rect2D& popup_dip,
+                                                 render::Extent2D physical_size, DpiScale scale);
 
 // ------------------------------------------------------- the OSR screen mapping (a1, audit D12)
 //
@@ -92,16 +113,17 @@ struct PointI
 //
 //   * `GetScreenPoint` (:87-100) — "the translation from view DIP coordinates to screen
 //     coordinates. Windows/Linux should provide screen device (pixel) coordinates and MacOS should
-//     provide screen DIP coordinates" — the SAME per-platform split `osr_screen_extent` encodes.
+//     provide screen DIP coordinates" — the ONE member that carries the per-platform split.
 //   * `GetRootScreenRect` (:70-78) — "the root window rectangle in screen DIP coordinates" —
 //     DIP on EVERY platform, no split.
 //
 // APPLYING THE SPLIT TO BOTH IS THE MISTAKE THIS PAIR EXISTS TO PREVENT: it multiplies the root
 // rect by the scale factor on Windows/Linux, and — like every other bug in this family — is
-// invisible at scale 1.0, where the two conventions coincide.
+// invisible at scale 1.0, where the two conventions coincide. (a2 removed the third caller of that
+// split, `GetScreenInfo::rect`, for the same reason — see `cef_shell.cpp`'s `GetScreenInfo`.)
 //
-// Both take the window's CLIENT origin on screen, in the platform's own screen convention (the
-// same predicate as `screen_rect_is_dip` above: device pixels on Windows/Linux, DIP on macOS).
+// Both take the window's CLIENT origin on screen, in the platform's own screen convention — device
+// pixels on Windows/Linux, DIP on macOS — as the `screen_coords_are_dip` argument they share.
 // THE CLIENT ORIGIN, NEVER THE WINDOW RECT: a frameless window's client is inset from its window
 // rect (`win32_frameless_client_insets` in window.h), and feeding the window origin here puts
 // every context menu that inset away from the cursor. `IWindowBackend::client_origin()` is the one
@@ -134,8 +156,8 @@ struct ScreenRect
 //
 // Note the asymmetry, which is the whole point: the OUTPUT never scales (`logical_size` is already
 // DIP and is returned as-is), while the INPUT origin is converted DOWN to DIP on the platforms
-// whose screen coordinates are device pixels. Multiplying the size by the scale factor — i.e.
-// giving this member `osr_screen_extent`'s treatment — is the error the header's wording rules out.
+// whose screen coordinates are device pixels. Multiplying the size by the scale factor is the error
+// the header's wording rules out.
 //
 // The rect reported is the CLIENT rect on screen rather than the outer window rect: the header
 // defines `GetViewRect` as this member's fallback ("if this method returns false the rectangle

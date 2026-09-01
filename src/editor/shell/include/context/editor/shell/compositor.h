@@ -10,7 +10,11 @@
 //      rects transparent (alpha 0) so native content shows through — the "transparent hole"
 //      contract, which is what makes CEF chrome (menus, drag ghosts) draw OVER a viewport for free;
 //   4. draw the PET_POPUP layer — a SECOND OSR layer confined to the popup rect. Required for
-//      production: every dropdown and <select> depends on it, and the spike explicitly skipped it;
+//      production: every dropdown and <select> depends on it, and the spike explicitly skipped it.
+//      Its rect is the ONE geometry CEF hands over in DIP (OnPopupSize is documented in "view
+//      coordinates") while its texture is physical like every other frame, so it is converted here
+//      through the compositor's `dpi_` seam — see `popup_dest_rect()` and dpi.h's
+//      `osr_popup_dest_rect`;
 //   5. present.
 //
 // TWO PRESENT PATHS, chosen once at attach:
@@ -184,17 +188,32 @@ public:
     void on_popup_state(bool visible, const render::Rect2D& rect) override;
 
     // --- window lifecycle -----------------------------------------------------------------------
-    // A new PHYSICAL client size. Reconfigures the swapchain and damages the frame. A zero extent is
-    // ignored (a minimized window reports one every frame); an unchanged size is a no-op so a
-    // spurious WM_SIZE does not force a reconfigure.
-    void on_resize(render::Extent2D physical_size);
+    // A new PHYSICAL client size, plus the monitor scale that size was measured at. Reconfigures the
+    // swapchain and damages the frame. A zero extent is ignored (a minimized window reports one every
+    // frame); an unchanged size is a no-op so a spurious WM_SIZE does not force a reconfigure.
+    //
+    // THE SCALE IS THE COMPOSITOR'S ONE DPI SEAM (a2) — see the `dpi_` member. It rides here rather
+    // than arriving through its own setter for the same reason `IBrowserHost::resize(logical_size,
+    // DpiScale)` carries it: size and scale are ONE geometry fact and a window that changes monitor
+    // changes both, so a consumer that could take them from two calls could take them from two
+    // different moments. `EditorWindow::sync_browser_size` pushes to both in one place.
+    void on_resize(render::Extent2D physical_size, DpiScale dpi);
 
     // Draw + present one frame if anything is damaged. Returns true when it presented.
     bool render_frame();
 
     [[nodiscard]] const CompositorStats& stats() const { return stats_; }
+    [[nodiscard]] DpiScale dpi() const { return dpi_; }
     [[nodiscard]] bool popup_visible() const { return popup_visible_; }
+    // The popup rect AS CEF REPORTED IT: DIP, view coordinates (`OnPopupSize`). This is the raw
+    // input, not the destination — read `popup_dest_rect()` for where the layer actually lands.
     [[nodiscard]] const render::Rect2D& popup_rect() const { return popup_rect_; }
+    // Where the PET_POPUP layer is composited, in PHYSICAL pixels: the DIP origin scaled by `dpi_`,
+    // sized by the popup TEXTURE's visible extent (a2 — see `osr_popup_dest_rect` in dpi.h for why
+    // the size is not the scaled DIP size). Empty until a popup frame has arrived, which is what
+    // both present paths already gate the layer on. Equal to `popup_rect()` at scale 1.0 whenever
+    // the texture matches — which is exactly why a test at 1.0 cannot tell the two apart.
+    [[nodiscard]] render::Rect2D popup_dest_rect() const;
     [[nodiscard]] const render::present::OsrTextureImporter& view_importer() const
     {
         return view_importer_;
@@ -225,6 +244,11 @@ private:
                                   render::ITextureView& view, const render::Rect2D& visible_rect,
                                   render::Extent2D coded_size, std::size_t slot);
     void reconfigure();
+    // The popup TEXTURE's visible rect inside its own allocation — the source half of the popup
+    // composite, and the half `popup_dest_rect()` takes its SIZE from. One definition, because the
+    // GPU path reads it for the draw's source rect and the accessor reads it for the destination
+    // extent: two spellings of the same intersection could drift apart and mis-sample the menu.
+    [[nodiscard]] render::Rect2D popup_source_rect() const;
     // Copy a producer frame into CPU storage (the fallback path presents it later, after the
     // callback's pointer is gone).
     static void capture_cpu_frame(CpuFrame& out, const render::present::OsrFrame& frame);
@@ -265,7 +289,15 @@ private:
 
     std::vector<ViewportLayer> viewports_;
     bool popup_visible_ = false;
+    // DIP, as `OnPopupSize` reports it — converted per frame rather than at delivery, so a DPI
+    // change MOVES an already-open popup instead of leaving a rect stamped at the old scale.
     render::Rect2D popup_rect_{};
+    // THE COMPOSITOR'S ONE DPI SEAM (a2). Everything else the compositor holds is already physical
+    // (`ViewportLayer::content_rect`, `size_`, every OSR frame); the popup rect is the single input
+    // that arrives in DIP, so this is the scale that converts it and nothing else. Whoever needs a
+    // scale here next — e3's viewport rects — takes THIS one: a second DPI source beside it is the
+    // failure mode this seam was chosen to avoid.
+    DpiScale dpi_{};
 
     Damage damage_;
     CompositorStats stats_;
