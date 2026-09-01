@@ -1,0 +1,49 @@
+src/editor/webui/core/src/menu.ts
+  s_782aa603d2bdb2::t_2f745e6859a953 241-390,404,406-484
+  s_782aa603d2bdb2::t_9882afd90ced98 657-661,669,672-679,696-712,727
+  s_782aa603d2bdb2::t_3aa01e93fe74cf 1352-1354,1358-1359
+  s_782aa603d2bdb2::t_f841c03ad067bd 126-144
+  s_782aa603d2bdb2::t_b9415dd964c1e1 581-587
+  s_782aa603d2bdb2::t_335fbb11a131b1 1566-1569
+  s_782aa603d2bdb2::t_cf4fc84c497a64 194-197
+  s_782aa603d2bdb2::t_b0a2df67eb230a 1125-1140,1154-1160
+  s_782aa603d2bdb2::t_b3109162a8063b 1622-1633
+  s_782aa603d2bdb2::t_c169ee5902053d 1253-1351,1355-1357,1360-1428,1434-1477
+  s_782aa603d2bdb2::t_6930364fc097df 1429-1433
+  s_782aa603d2bdb2::t_2b5007957221a3 43,51-52
+  s_782aa603d2bdb2::t_1fa11a5a483ac9 391-403,405
+src/editor/webui/core/src/boot.ts
+  s_782aa603d2bdb2::t_2466aa7a7c3de4 1643-1646
+  s_782aa603d2bdb2::t_4bedb28972d079 949-954,956
+  s_782aa603d2bdb2::t_f8ce535ef012c9 1043-1046
+  s_782aa603d2bdb2::t_5e2f054135a8dd 1606-1612
+  s_782aa603d2bdb2::t_58bb6ac1a27157 83-84
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_2bd38f4f11bcdd 1753-1757,1759
+src/editor/webui/core/src/test/menu.test.ts
+  s_782aa603d2bdb2::t_be0606b3659f5a 1213,1219,1233-1235,1237
+  s_782aa603d2bdb2::t_bd0454fbdf97b9 1261,1277-1279,1282,1287-1291
+  s_782aa603d2bdb2::t_6d1eca35d5520f 276-278,302
+  s_782aa603d2bdb2::t_0211ed9d00edc6 168-235
+  s_782aa603d2bdb2::t_95ac7968d353ef 926-1127,1131-1133,1138-1212,1214-1218,1220-1232,1236,1238-1260,1262-1276,1280-1281,1283-1286,1292-1296
+  s_782aa603d2bdb2::t_fb892dda71eaae 36-40,51,56,63-65,67,69-70,76,90,92
+  s_782aa603d2bdb2::t_f5605c89f1b0be 1128-1130,1134-1137
+src/editor/webui/app/app.css
+  s_782aa603d2bdb2::t_216e49ef6a5162 417-505
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "22ba22a7f42326e56c939f514dbc060eb93b2e76",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
