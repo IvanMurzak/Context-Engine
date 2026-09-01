@@ -1,0 +1,39 @@
+src/editor/assetdb/src/asset_database.cpp
+  s_782aa603d2bdb2::t_14d76fc135b132 807
+  s_782aa603d2bdb2::t_3d2cc982aa6eec 888
+  s_782aa603d2bdb2::t_8ed65e63ffc52f 849-850
+  s_782aa603d2bdb2::t_8f707b0b73f07d 804-806
+  s_782aa603d2bdb2::t_c37288a9e1c3f3 808-810
+  s_782aa603d2bdb2::t_87fb666a95f14a 846-848
+  s_782aa603d2bdb2::t_8f12d84dfd42b7 851-853
+  s_782aa603d2bdb2::t_ccd33b6fcbca4a 889-891
+  s_1ca474eba1c72a::t_a555e81c57ad3a 793-802,811-815,843-845,854-857,892-901
+docs/asset-delete-and-restore.md
+  s_782aa603d2bdb2::t_e21894f6012eea 101-102
+src/editor/assetdb/tests/test_delete_restore.cpp
+  s_782aa603d2bdb2::t_a145b3c5ed0283 23,123-169,511-627
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "d30c3b91105416df13fa38aae9ba44538564c3f7",
+  "prompts": {},
+  "sessions": {
+    "s_1ca474eba1c72a": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-afa52760def8df62d",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
