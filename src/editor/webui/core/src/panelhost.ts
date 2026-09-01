@@ -702,7 +702,13 @@ class UitreePanelRenderer implements PanelRenderer {
     readonly #runtime: HydrationRuntime;
     #suspended = false;
 
-    constructor(panelId: string, instanceId: string, client: PanelClient, gestures: boolean) {
+    constructor(
+        panelId: string,
+        instanceId: string,
+        client: PanelClient,
+        gestures: boolean,
+        panelTitle: string,
+    ) {
         this.element = document.createElement("div");
         this.element.className = "ctx-panel-body";
         // The panel's DOM slot is a labelled landmark in its own right, so a screen reader announces
@@ -713,6 +719,8 @@ class UitreePanelRenderer implements PanelRenderer {
             // THE COPY, and therefore also this runtime's DOM-id scope — two instances of one kind
             // in one document would otherwise both mint `<panelId>::root` (hydration.ts states it).
             instanceId,
+            // a4 (07-ui-states.md §5): hides a heading that duplicates THIS title, never guessed.
+            panelTitle,
             // A dispatch changed the model, so pull the new render immediately rather than waiting
             // for the next poll — this is what makes a click feel instant instead of eventually
             // consistent.
@@ -1701,6 +1709,7 @@ export class PanelHost {
                     instanceId,
                     this.#client,
                     manifest.gestures,
+                    manifest.title,
                 );
             default:
                 return new UnavailablePanelRenderer(panelId, instanceId);

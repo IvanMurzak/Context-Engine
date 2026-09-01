@@ -44,7 +44,7 @@
 // ─────────────────────────────────────────────────────────────────────────────────────────────────
 
 import type { GestureVerb, PanelClient, PanelRender } from "./panels.js";
-import { WIDGET_CLASSES, widgetClassForRole } from "../../kit/src/index.js";
+import { VISUALLY_HIDDEN_CLASS, WIDGET_CLASSES, widgetClassForRole } from "../../kit/src/index.js";
 
 /**
  * The presentation-only widget classes, keyed by node ROLE (04 §4 step 4).
@@ -246,6 +246,19 @@ export interface HydrationOptions {
      * keeps the document valid once a kind can exist twice.
      */
     readonly instanceId?: string;
+    /**
+     * The panel's roster title (`manifest.title`), used ONLY to detect and visually hide a duplicated
+     * heading (a4, editor-UX `07-ui-states.md` §5): eight of the nine C++ panel models emit a
+     * `Role::heading` as the first child of the panel root with text equal to their roster title, and
+     * Dockview separately renders the SAME title into the tab — so it prints twice. When the panel's
+     * mounted root's first child is a heading whose rendered text equals this string, `#normalise`
+     * marks it `VISUALLY_HIDDEN_CLASS` (present in the accessibility tree, absent from the picture).
+     *
+     * Absent or empty means no heading is ever hidden — never guessed from the DOM. Matched on
+     * RENDERED TEXT, never on a node id: ids differ per panel and a package panel will have its own,
+     * so keying on one would be the special-casing `kit.css`'s header forbids.
+     */
+    readonly panelTitle?: string;
 }
 
 /**
@@ -273,6 +286,8 @@ export class HydrationRuntime {
     readonly #idScope: string;
     readonly #gesturesEnabled: boolean;
     readonly #onDispatched: ((revision: number) => void) | undefined;
+    /** See `HydrationOptions.panelTitle`. `""` means "never hide a heading". */
+    readonly #panelTitle: string;
 
     #focusOrder: readonly string[] = [];
     #commands: ReadonlySet<string> = new Set();
@@ -349,6 +364,7 @@ export class HydrationRuntime {
         this.#idScope = this.#instanceId === "" ? panelId : this.#instanceId;
         this.#gesturesEnabled = options.gestures;
         this.#onDispatched = options.onDispatched;
+        this.#panelTitle = options.panelTitle ?? "";
         this.#bindInteractions();
     }
 
@@ -806,6 +822,7 @@ export class HydrationRuntime {
         const template = document.createElement("template");
         template.innerHTML = html;
         this.#normalise(template.content);
+        this.#hideDuplicateHeading(template.content);
         return template;
     }
 
@@ -835,6 +852,40 @@ export class HydrationRuntime {
             if (widgetClass !== undefined) {
                 element.classList.add(widgetClass);
             }
+        }
+    }
+
+    /**
+     * Hide a panel's OWN duplicated title (a4, `07-ui-states.md` §5, `HydrationOptions.panelTitle`).
+     *
+     * Eight of the nine C++ panel models emit a `Role::heading` as the FIRST CHILD of the panel root
+     * with text equal to their roster title, and Dockview separately renders the same title into the
+     * tab — so the title prints twice. When that shape is found, the heading is marked
+     * `VISUALLY_HIDDEN_CLASS`: present in the accessibility tree (the model still owns an `aria-label`
+     * — `role_requires_name(Role::heading)` is true on the C++ side), absent from the picture.
+     *
+     * STRUCTURAL, not panel-specific, exactly like the rest of this file (see the header): the match
+     * is "panel root's first child is a heading whose TEXT equals `#panelTitle`", never a node id.
+     * Tilemap Painter's heading carries a label but no text (`tilemap_paint_panel.cpp`), so its text
+     * never equals the title and this correctly leaves it alone; a heading that is not the panel's
+     * first child, or whose text differs, is likewise correctly left visible.
+     *
+     * Runs on EVERY `#parse` — a full mount and a patched re-render both carry the panel's complete
+     * markup (`render.html` is never a partial diff) — so a reused element's `class` attribute stays
+     * consistent across renders via `#syncAttributes` (`class` is a SYNCED_ATTRIBUTE).
+     */
+    #hideDuplicateHeading(root: ParentNode): void {
+        if (this.#panelTitle === "") {
+            return;
+        }
+        const panelRoot = root.firstElementChild;
+        const firstChild = panelRoot?.firstElementChild ?? null;
+        if (
+            firstChild !== null &&
+            firstChild.getAttribute("role") === "heading" &&
+            (firstChild.textContent ?? "") === this.#panelTitle
+        ) {
+            firstChild.classList.add(VISUALLY_HIDDEN_CLASS);
         }
     }
 

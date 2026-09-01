@@ -51,6 +51,30 @@
     letter-spacing: var(--ctx-typography-tracking);
 }
 
+/* --- visually hidden (a4, 07-ui-states.md §5) ---------------------------------------------------- *
+ *
+ * The standard clip-rect pattern: removed from the PAINT, kept in the accessibility tree. The
+ * hydration runtime applies this to a panel's own duplicated title heading (`hydration.ts`
+ * `#hideDuplicateHeading`) — Dockview already prints the panel's title in the tab, so the panel's own
+ * heading would repeat it visually while still being the accessible landmark screen readers expect.
+ *
+ * `display: none` / `visibility: hidden` are NOT usable here — both pull the element out of the
+ * accessibility tree, which is the one thing this class exists to preserve. Every value below is
+ * outside the token lint's jurisdiction by construction: none of `width`/`height`/`padding`/`margin`/
+ * `overflow`/`clip`/`white-space`/`position` is a tokenised property family (fonts/colours/shape/
+ * motion), and `border: 0` is a unitless literal, so `webui-kit-tokens-only` has nothing to flag. */
+.ctx-visually-hidden {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    margin: -1px;
+    padding: 0;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+    border: 0;
+}
+
 /* --- status (`<output>`) — a live status region, e.g. the Problems count ------------------------ *
  *
  * The de-emphasis is the `muted` INK STEP, not an `opacity: 0.75` as it was in app.css. That matters
