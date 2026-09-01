@@ -1,0 +1,26 @@
+src/editor/shell/src/panel_host.cpp
+  s_782aa603d2bdb2::t_1c456f2ccfcbde 284-288
+  s_782aa603d2bdb2::t_980355c602ccb3 62-66
+  s_782aa603d2bdb2::t_3b84001d78e9e4 578-582
+  s_782aa603d2bdb2::t_7a3fb5a3b5ddbf 18
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_6f13ae6dddf15e 1299-1303,1306
+src/editor/shell/include/context/editor/shell/panel_host.h
+  s_782aa603d2bdb2::t_9cc6575dac123d 432-435,441-445
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "4f337dcb813a766d06a42307f21afa5fc0e7b879",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
