@@ -1,0 +1,43 @@
+src/editor/webui/tokens/src/schema.ts
+  s_782aa603d2bdb2::t_45f01430aaaf66 162-168
+src/editor/webui/kit/styles/kit.css
+  s_782aa603d2bdb2::t_dc3e78097c58b5 99-108
+  s_782aa603d2bdb2::t_409a89c2b92c50 129-133
+  s_782aa603d2bdb2::t_16afe39452b8bd 162-214
+src/editor/webui/tokens/themes/high-contrast-light.theme.json
+  s_782aa603d2bdb2::t_2a6254f97e5257 11
+src/editor/webui/core/src/test/theme_dom.test.ts
+  s_782aa603d2bdb2::t_380223afd7ff3f 37
+  s_782aa603d2bdb2::t_08aed81c127642 267-357
+src/editor/webui/tokens/themes/light.theme.json
+  s_782aa603d2bdb2::t_7716bfa86fdb3d 11
+src/editor/webui/tokens/themes/high-contrast-dark.theme.json
+  s_782aa603d2bdb2::t_1cd9bee71b22ce 11
+src/editor/webui/tokens/themes/dark.theme.json
+  s_782aa603d2bdb2::t_16f0f91a4c7d96 11
+src/editor/webui/app/app.css
+  s_782aa603d2bdb2::t_79bd57466082bc 683-713
+src/editor/webui/core/src/test/kit.test.ts
+  s_782aa603d2bdb2::t_22333177292d3d 379-423,433-437,454,465-469
+  s_782aa603d2bdb2::t_728f491493e6be 424-432,438-453,455-464
+docs/shell.md
+  s_782aa603d2bdb2::t_f99c543a8e8275 1182
+src/editor/webui/tokens/theme.schema.json
+  s_782aa603d2bdb2::t_69722fd6f13308 42-45,116
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c1efad7792908b3730918e3f35ba1482deb63736",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
