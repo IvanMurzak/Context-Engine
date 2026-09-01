@@ -28,7 +28,8 @@ This file is the directory map.
 | `include/.../window.h`, `src/window.cpp` | The `IWindowBackend` seam, the headless backend, the PURE Win32 **and X11** message decoders, and `make_window_backend` — the platform choice itself (relocated here in e12a, when a second real backend made `win32_window.cpp`'s `#else` the wrong home for it). |
 | `src/win32_window.cpp` | The Windows OS calls only (`RegisterClassExW`/`CreateWindowExW`/WndProc/per-monitor-v2 DPI), behind `make_win32_window_backend` — which returns `nullptr` off Windows, like every other per-platform factory. |
 | `src/x11_window.cpp` | e12a: the Linux X11/XWayland OS calls only (`XCreateWindow`, the non-blocking pump, EWMH placement/activation/maximize, `WM_DELETE_WINDOW` + `_NET_WM_PING`, XIM text, `Xft.dpi`), behind `make_x11_window_backend`. One `Display` serves N windows, dispatched by `xany.window`. Compiles to an honest refusal without the X11 development headers. |
-| `include/.../browser.h`, `src/browser.cpp` | The CEF-free browser seam + the scripted host the smoke and tests drive. |
+| `include/.../browser.h`, `src/browser.cpp` | The CEF-free browser seam + the scripted host the smoke and tests drive. Since b1 it also carries the drag seam: `IBrowserDragObserver` (what the browser reports `StartDragging` / `UpdateDragCursor` to) and `IBrowserHost::inject_drag`. |
+| `include/.../osr_drag.h`, `src/osr_drag.cpp` | b1 (D11): the OSR DRAG PROTOCOL — the `cef_drag_operations_mask_t` mirror and the state machine that turns a pointer gesture into the six windowless-only `CefBrowserHost` drag calls, in CEF's own required order. All the judgement of the drag lives here rather than in the binding, so it is compiled and executed on all three default `build` legs (`editor-shell-test_osr_drag`). Also the `DragCursor` vocabulary, which exists because CEF's `DRAG_OPERATION_NONE` means two different things depending on when it arrives. |
 | `include/.../compositor.h`, `src/compositor.cpp` | The layer stack, damage, the resize protocol, `PET_POPUP`, and both present paths (03 §4). |
 | `include/.../shell.h`, `src/shell.cpp` | `WindowManager` / `EditorWindow` / the owner loop, and the D10 authenticated attach. |
 | `include/.../panel_host.h`, `src/panel_host.cpp` | e05d1: the PANEL-AGNOSTIC `panel.*` bridge surface over the e05b roster — render, command, gesture verbs, the D6 state pair (04 §3-§4). Knows no panel id. |
@@ -37,7 +38,7 @@ This file is the directory map.
 | `app/editor_main.cpp` | `context_editor`'s entry point. |
 | `smoke/shell_smoke_main.cpp` | The **Session-0-safe** smoke — e04's blocking CI requirement. Opens no window, by design. |
 | `smoke/shell_x11_smoke_main.cpp` | e12a: the CEF-free **live windowed Linux** smoke — a real X11 window, the real X11 present blitter, the real e05d1 panel roster, and a server-driven Expose + ConfigureNotify. Registered as `editor-shell-x11-window` with `SKIP_RETURN_CODE 77`; run non-vacuously in `editor-cef-smoke` as a direct EXE under xvfb with `--require-x11 --require-display`. |
-| `cef/` | The windowed-OSR CEF binding + its live boot smoke. |
+| `cef/` | The windowed-OSR CEF binding + the eleven live `editor-cef-smoke-shell*` scenarios. Two of those are about DRAG and are DIFFERENT mechanisms: `-drag` (e10c) is the Shell-mediated CROSS-WINDOW panel drag, `-osrdrag` (b1) is HTML5 drag-and-drop inside one document. They are layered, not alternatives — see `docs/shell.md` § 8. |
 | `tests/` | The `editor-shell-*` ctest family. |
 
 ## Working on this locally

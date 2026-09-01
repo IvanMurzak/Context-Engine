@@ -128,6 +128,7 @@ inline constexpr std::uint64_t kMkMButton = 0x0010;
 // WM owns the frame), cocoa until c1. win32 and headless override both.
 void IWindowBackend::set_chrome_regions(const std::vector<ShellRegion>& /*regions*/) {}
 void IWindowBackend::set_appearance(bool /*dark*/) {}
+void IWindowBackend::set_drag_cursor(DragCursor /*cursor*/) {}
 
 // ------------------------------------------------------------------- HeadlessWindowBackend
 

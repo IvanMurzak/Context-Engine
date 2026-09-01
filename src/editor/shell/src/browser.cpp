@@ -94,6 +94,39 @@ void ScriptedBrowserHost::set_focus(bool focused)
     focused_ = focused;
 }
 
+void ScriptedBrowserHost::set_drag_observer(IBrowserDragObserver* observer)
+{
+    drag_observer_ = observer;
+}
+
+void ScriptedBrowserHost::inject_drag(const OsrDragInjection& injection)
+{
+    // RECORDED IN ORDER — see `drag_injections()` in browser.h for why the order, not the count, is
+    // the observable. Nothing is interpreted here: this host has no view to drag over, so replaying
+    // the step would be inventing a renderer's answer.
+    drag_injections_.push_back(injection);
+}
+
+bool ScriptedBrowserHost::script_start_dragging(DragOperationMask allowed, PointI start_view_dip)
+{
+    if (drag_observer_ == nullptr)
+    {
+        // No observer bound is exactly what a browser with no window above it would face, and CEF's
+        // own answer for "nobody will drive this drag" is false — the abort. Reporting the same
+        // thing keeps the scripted host's contract identical to the binding's.
+        return false;
+    }
+    return drag_observer_->on_start_dragging(allowed, start_view_dip);
+}
+
+void ScriptedBrowserHost::script_update_drag_cursor(DragOperation operation)
+{
+    if (drag_observer_ != nullptr)
+    {
+        drag_observer_->on_update_drag_cursor(operation);
+    }
+}
+
 void ScriptedBrowserHost::execute_script(std::string_view source)
 {
     // RECORDED, never run: this host has no JavaScript engine. Silently dropping the call would let

@@ -428,6 +428,224 @@ void test_focus_events_reach_the_browser_and_drop_a_live_drag()
     CHECK(harness.window->focused());
 }
 
+// ------------------------------------------------------ b1: the OSR drag protocol through the loop
+//
+// `editor-shell-test_osr_drag` proves the state machine in isolation. These prove the WIRING: that
+// the shipping owner loop really binds the observer, really routes its pointer stream into the
+// session, really applies the injections to the browser, and really pushes the drag cursor down to
+// the OS backend. Every one of those edges is un-runnable on the Windows CI leg (Session 0, no
+// gesture) and lives in the TU the local gate cannot build — so this is where they are pinned.
+
+namespace
+{
+
+// Post one pointer sample with the left button held, the state a drag is always in.
+void post_drag_sample(Harness& harness, PointerAction action, PointI position)
+{
+    ShellEvent event;
+    event.kind = ShellEventKind::pointer;
+    event.pointer.action = action;
+    event.pointer.position = position;
+    event.pointer.modifiers.left_button_down = action != PointerAction::up;
+    if (action == PointerAction::down || action == PointerAction::up)
+    {
+        event.pointer.button = MouseButton::left;
+    }
+    harness.backend->post(event);
+}
+
+[[nodiscard]] std::vector<OsrDragInjectionKind> injected_kinds(const ScriptedBrowserHost& browser)
+{
+    std::vector<OsrDragInjectionKind> out;
+    for (const OsrDragInjection& injection : browser.drag_injections())
+    {
+        out.push_back(injection.kind);
+    }
+    return out;
+}
+
+} // namespace
+
+void test_a_web_view_drag_runs_end_to_end_through_the_owner_loop()
+{
+    Harness harness;
+    // The observer is bound at CONSTRUCTION — every composition gets production wiring, so a drag
+    // is never dead on some paths and live on others.
+    CHECK(harness.browser->has_drag_observer());
+
+    // The renderer starts a drag. TRUE is the whole of b1: the unimplemented `StartDragging`
+    // returned false, which the header defines as "abort the drag operation".
+    const DragOperationMask allowed =
+        drag_operation_bit(DragOperation::copy) | drag_operation_bit(DragOperation::move);
+    CHECK(harness.browser->script_start_dragging(allowed, PointI{100, 80}));
+    CHECK(harness.window->drag().active());
+
+    const std::size_t pointers_before = harness.browser->pointers().size();
+
+    post_drag_sample(harness, PointerAction::move, PointI{140, 100});
+    post_drag_sample(harness, PointerAction::move, PointI{180, 130});
+    CHECK(harness.window->pump_once(1000));
+    CHECK(injected_kinds(*harness.browser) ==
+          (std::vector<OsrDragInjectionKind>{OsrDragInjectionKind::target_enter,
+                                             OsrDragInjectionKind::target_over}));
+    // THE DRAG REPLACES THE MOUSE STREAM. Not one ordinary `SendMouseMoveEvent` went out beside the
+    // injections — a second, contradictory description of where the pointer is is exactly what
+    // makes a drop land on the element the drag passed over rather than the one it ended on.
+    CHECK(harness.browser->pointers().size() == pointers_before);
+
+    // The view answers what this drop would do; the OS cursor follows it.
+    harness.browser->script_update_drag_cursor(DragOperation::move);
+    CHECK(harness.backend->drag_cursor() == DragCursor::move);
+
+    post_drag_sample(harness, PointerAction::up, PointI{200, 150});
+    CHECK(harness.window->pump_once(2000));
+    CHECK(injected_kinds(*harness.browser) ==
+          (std::vector<OsrDragInjectionKind>{
+              OsrDragInjectionKind::target_enter, OsrDragInjectionKind::target_over,
+              OsrDragInjectionKind::target_drop, OsrDragInjectionKind::source_ended,
+              OsrDragInjectionKind::source_system_ended}));
+    // The drop reported the operation the VIEW chose, in the VIEW's own coordinates.
+    const OsrDragInjection& ended = harness.browser->drag_injections()[3];
+    CHECK(ended.operation == DragOperation::move);
+    CHECK(ended.view_dip == (PointI{200, 150}));
+
+    CHECK(!harness.window->drag().active());
+    CHECK(harness.window->drag().end_reason() == OsrDragEndReason::dropped);
+    CHECK(harness.window->drag().drags_begun() == harness.window->drag().drags_ended());
+    // AND THE CURSOR IS PUT BACK. CEF sends no final `UpdateDragCursor(none)` of its own, so a
+    // feedback cursor left standing would outlive the gesture.
+    CHECK(harness.backend->drag_cursor() == DragCursor::none);
+
+    // The ordinary mouse stream resumes once the drag is over.
+    post_drag_sample(harness, PointerAction::move, PointI{210, 160});
+    CHECK(harness.window->pump_once(3000));
+    CHECK(harness.browser->pointers().size() == pointers_before + 1);
+}
+
+void test_a_drag_leaving_and_re_entering_the_view_is_told_both_times()
+{
+    Harness harness; // 800x600 physical client
+    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
+
+    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
+    // PAST THE RIGHT EDGE of an 800-wide client: the membership test is against the backend's own
+    // `client_size()`, in the physical pixels every ShellEvent position is in.
+    post_drag_sample(harness, PointerAction::move, PointI{900, 100});
+    post_drag_sample(harness, PointerAction::move, PointI{950, 120});
+    post_drag_sample(harness, PointerAction::move, PointI{400, 300});
+    CHECK(harness.window->pump_once(1000));
+    CHECK(injected_kinds(*harness.browser) ==
+          (std::vector<OsrDragInjectionKind>{OsrDragInjectionKind::target_enter,
+                                             OsrDragInjectionKind::target_leave,
+                                             OsrDragInjectionKind::target_enter}));
+    // Still live throughout: leaving the view is not leaving the drag.
+    CHECK(harness.window->drag().active());
+    CHECK(harness.window->drag().entered());
+
+    // An explicit `leave` sample (the pointer left the WINDOW) is a leave whatever its position
+    // says — it is the OS telling us so, and a position inside the client would otherwise read as
+    // "still inside".
+    post_drag_sample(harness, PointerAction::leave, PointI{400, 300});
+    CHECK(harness.window->pump_once(2000));
+    CHECK(!harness.window->drag().entered());
+    CHECK(harness.window->drag().active());
+}
+
+void test_escape_cancels_a_live_drag_and_is_not_forwarded()
+{
+    Harness harness;
+    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
+    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
+    CHECK(harness.window->pump_once(1000));
+    harness.browser->script_update_drag_cursor(DragOperation::copy);
+
+    const std::size_t keys_before = harness.browser->keys().size();
+    ShellEvent escape;
+    escape.kind = ShellEventKind::key;
+    escape.key.action = KeyAction::raw_key_down;
+    escape.key.windows_key_code = 0x1B; // VK_ESCAPE
+    harness.backend->post(escape);
+    CHECK(harness.window->pump_once(2000));
+
+    CHECK(injected_kinds(*harness.browser) ==
+          (std::vector<OsrDragInjectionKind>{OsrDragInjectionKind::target_enter,
+                                             OsrDragInjectionKind::target_leave,
+                                             OsrDragInjectionKind::source_ended,
+                                             OsrDragInjectionKind::source_system_ended}));
+    // NOTHING WAS PERFORMED, even though the view had answered "copy" a moment earlier.
+    CHECK(harness.browser->drag_injections()[2].operation == DragOperation::none);
+    CHECK(harness.window->drag().end_reason() == OsrDragEndReason::escaped);
+    CHECK(harness.backend->drag_cursor() == DragCursor::none);
+    // CONSUMED, not forwarded: the renderer has no drag loop of its own to escape from — the Shell
+    // owns the loop — so delivering the key as well would reach the document as an ordinary Escape.
+    CHECK(harness.browser->keys().size() == keys_before);
+
+    // With no drag live it is an ordinary key again, and it does reach the browser.
+    harness.backend->post(escape);
+    CHECK(harness.window->pump_once(3000));
+    CHECK(harness.browser->keys().size() == keys_before + 1);
+}
+
+void test_losing_focus_ends_a_live_drag_through_the_protocol()
+{
+    Harness harness;
+    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
+    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
+    CHECK(harness.window->pump_once(1000));
+
+    ShellEvent focus_lost;
+    focus_lost.kind = ShellEventKind::focus_lost;
+    harness.backend->post(focus_lost);
+    CHECK(harness.window->pump_once(2000));
+
+    // The release that would have completed this drag is going to a DIFFERENT window now, so it can
+    // never arrive — the same reasoning that drops the pointer capture beside it. Ended THROUGH the
+    // protocol, because the browser is alive and it is the thing that must be told: a renderer that
+    // still believes a drag is running keeps its drop targets armed forever.
+    CHECK(!harness.window->drag().active());
+    CHECK(harness.window->drag().end_reason() == OsrDragEndReason::focus_lost);
+    CHECK(injected_kinds(*harness.browser) ==
+          (std::vector<OsrDragInjectionKind>{OsrDragInjectionKind::target_enter,
+                                             OsrDragInjectionKind::target_leave,
+                                             OsrDragInjectionKind::source_ended,
+                                             OsrDragInjectionKind::source_system_ended}));
+}
+
+void test_closing_the_window_ends_a_live_drag_without_injecting()
+{
+    Harness harness;
+    CHECK(harness.browser->script_start_dragging(kDragOperationEvery, PointI{10, 10}));
+    post_drag_sample(harness, PointerAction::move, PointI{100, 100});
+    CHECK(harness.window->pump_once(1000));
+    const std::size_t injections_before = harness.browser->drag_injections().size();
+
+    harness.window->close();
+
+    // ENDED — `drags_begun()`/`drags_ended()` stay balanced on every path, which is what makes "no
+    // drag ever dangled" assertable rather than hoped for...
+    CHECK(!harness.window->drag().active());
+    CHECK(harness.window->drag().end_reason() == OsrDragEndReason::window_closed);
+    CHECK(harness.window->drag().drags_begun() == harness.window->drag().drags_ended());
+    // ...but NOT injected: the host is one line from its own close, so a `DragTarget*` call here
+    // would be a message to something already tearing down.
+    CHECK(harness.browser->drag_injections().size() == injections_before);
+    // The cursor still goes back, through the backend, which outlives the browser.
+    CHECK(harness.backend->drag_cursor() == DragCursor::none);
+}
+
+void test_a_second_drag_is_refused_while_one_is_live()
+{
+    Harness harness;
+    CHECK(harness.browser->script_start_dragging(drag_operation_bit(DragOperation::copy),
+                                                 PointI{10, 10}));
+    // FALSE is what `StartDragging` returns, which aborts the second drag — and the FIRST one is
+    // untouched, still carrying its own mask.
+    CHECK(!harness.browser->script_start_dragging(kDragOperationEvery, PointI{99, 99}));
+    CHECK(harness.window->drag().active());
+    CHECK(harness.window->drag().allowed_ops() == drag_operation_bit(DragOperation::copy));
+    CHECK(harness.window->drag().drags_begun() == 1);
+}
+
 void test_a_browser_paint_presents_and_an_idle_pump_does_not()
 {
     Harness harness;
@@ -777,6 +995,12 @@ int main()
     test_caption_samples_are_suppressed_and_control_samples_reach_the_browser();
     test_pump_pushes_republished_chrome_regions_down_to_the_backend();
     test_focus_events_reach_the_browser_and_drop_a_live_drag();
+    test_a_web_view_drag_runs_end_to_end_through_the_owner_loop();
+    test_a_drag_leaving_and_re_entering_the_view_is_told_both_times();
+    test_escape_cancels_a_live_drag_and_is_not_forwarded();
+    test_losing_focus_ends_a_live_drag_through_the_protocol();
+    test_closing_the_window_ends_a_live_drag_without_injecting();
+    test_a_second_drag_is_refused_while_one_is_live();
     test_a_browser_paint_presents_and_an_idle_pump_does_not();
     test_a_popup_composites_through_the_loop();
     test_a_popup_composites_at_the_physical_rect_on_a_scaled_monitor();

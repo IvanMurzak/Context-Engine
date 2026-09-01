@@ -48,6 +48,7 @@ add_library(context_editor_shell STATIC
     src/cocoa_window.cpp  # e12b: the OFF-macOS half of the Cocoa backend (.mm is APPLE-only below)
     src/cocoa_chrome.cpp  # editor-window-chrome c1: the PURE macOS hybrid-chrome decisions (all legs)
     src/browser.cpp       # the CEF-free browser seam + the scripted host
+    src/osr_drag.cpp      # b1: the OSR drag protocol's state machine + the operations-mask mirror (D11)
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
     src/ext_scheme.cpp    # e13a-1: context-ext://<pkg>/ deny-by-default resolution + CSP (04 §5 / 08)
@@ -270,6 +271,9 @@ set(_context_shell_tests
     test_window_registry  # e10a: N windows by id, create/destroy, the retired-session lifetime rule
     test_window_bridge # e10b: the window.* relay - tear-out/move/seed/rehome parse + the loud-fail path
     test_cross_window_drag  # e10c: the drag session - capture RELEASED on every path + the drag.* relay
+    test_osr_drag      # b1: the OSR drag protocol - the operations-mask mirror, CEF's two ordering
+                       #     rules as SEQUENCES, the implicit enter, the leave/re-enter cycle, and
+                       #     that every terminal path ends the session exactly once (D11)
     test_ui_mirror     # e10d: the editor.ui cross-window mirror relay - broadcast-to-all incl. sender
     test_write_notice  # e09b-3: the LOUD write-notice relay - envelope shape, broadcast, the
                        #         never-a-window-id origin, and the honest unbound/throwing-provider paths
@@ -784,6 +788,7 @@ set(_ctx_cef_shell_executables
     context_editor_shell_drag_smoke
     context_editor_shell_uimirror_smoke
     context_editor_shell_iframe_smoke
+    context_editor_shell_osrdrag_smoke
     context_editor_shell_inspector_fanout_smoke)
 
 # --- DERIVING that roster from the real build graph, literal list as a FLOOR (M9 x11) -------------

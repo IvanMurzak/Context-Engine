@@ -84,6 +84,13 @@ public:
     void send_pointer(const PointerDispatch&, const PointerEvent&) override {}
     void send_key(const KeyEvent&) override {}
     void set_focus(bool) override {}
+    // b1: this suite is about LIFETIMES, and it never begins a drag — but the two members are pure
+    // (browser.h says why a defaulted no-op would be the bug), so they are stated here rather than
+    // inherited. Recording the observer is what keeps that honest: `EditorWindow` binds one at
+    // construction, so a registry test that destroys windows is also, incidentally, the place a
+    // dangling observer would first show up.
+    void set_drag_observer(IBrowserDragObserver* observer) override { drag_observer_ = observer; }
+    void inject_drag(const OsrDragInjection&) override { ++drag_injections_; }
     bool pump(IBrowserFrameSink&) override { return alive_flag_; }
     void execute_script(std::string_view source) override { scripts_.emplace_back(source); }
     void close() override
@@ -97,11 +104,15 @@ public:
     void detach() override { ++deaths_.detaches; }
 
     [[nodiscard]] const std::vector<std::string>& scripts() const { return scripts_; }
+    [[nodiscard]] bool has_drag_observer() const { return drag_observer_ != nullptr; }
+    [[nodiscard]] int drag_injections() const { return drag_injections_; }
 
 private:
     Deaths& deaths_;
     int* alive_ = nullptr;
     std::vector<std::string> scripts_;
+    IBrowserDragObserver* drag_observer_ = nullptr;
+    int drag_injections_ = 0;
     bool alive_flag_ = true;
 };
 

@@ -364,6 +364,30 @@ context_configure_shell_cef_smoke(
 # bags; the .cpp header states exactly what this one adds. TWO sequential live boots plus the daemon
 # spawn, the DOM round trips and the settle waits — 420, the three-boot budget, because the daemon
 # spawn + the six DOM drives cost about as much as a third boot.
+# --- the LIVE HTML5 DRAG-AND-DROP smoke (ctest editor-cef-smoke-shell-osrdrag) --------------------
+# M9 b1 (D11): the DoD line no other tier can reach — a REAL renderer's `dragstart` reaches
+# `CefRenderHandler::StartDragging` (the member whose unimplemented default returned false, which the
+# pinned header defines as "abort the drag operation" — every HTML5 drag in the editor was actively
+# refused), the Shell's `DragTarget*` injections are ACCEPTED by CEF (proven because CEF answers them
+# with `UpdateDragCursor`, which nothing on our side of the process boundary can produce), and a real
+# `drop` event is dispatched in the live document (proven per-pixel: the smoke's own full-window
+# fixture repaints itself a colour nothing else in the editor uses). Its CEF-free siblings are
+# `editor-shell-test_osr_drag` (the protocol's ordering rules as sequences) and the b1 cases in
+# `editor-shell-test_shell` (the owner loop's wiring), both on all three default legs. ONE live boot
+# plus the gesture's own round trips — 240, the `-iframe` budget, for the same reason: the extra time
+# is renderer round trips rather than a second browser.
+#
+# ⚠ On the Linux leg the shared `_ctx_smoke_window_args` gives this `--real-window`, so its pointer
+# samples go through the X SERVER and back in through the shipping decoder (e12a-x11-legs). That is
+# what makes the Linux arm a genuine end-to-end gesture rather than a queue the smoke wrote itself.
+add_executable(context_editor_shell_osrdrag_smoke src/cef_shell_osrdrag_smoke.cpp)
+SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_osrdrag_smoke)
+context_configure_shell_cef_smoke(
+    TARGET context_editor_shell_osrdrag_smoke
+    TEST editor-cef-smoke-shell-osrdrag
+    TIMEOUT 240
+    BUNDLE_ID "dev.context.editor.shell.osrdrag.smoke")
+
 add_executable(context_editor_shell_inspector_fanout_smoke src/cef_shell_inspector_fanout_smoke.cpp)
 SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_inspector_fanout_smoke)
 context_configure_shell_cef_smoke(
@@ -402,5 +426,6 @@ if(OS_WINDOWS OR OS_LINUX)
     add_dependencies(context_editor_shell_drag_smoke context_editor_cef_stage)
     add_dependencies(context_editor_shell_uimirror_smoke context_editor_cef_stage)
     add_dependencies(context_editor_shell_iframe_smoke context_editor_cef_stage)
+    add_dependencies(context_editor_shell_osrdrag_smoke context_editor_cef_stage)
     add_dependencies(context_editor_shell_inspector_fanout_smoke context_editor_cef_stage)
 endif()

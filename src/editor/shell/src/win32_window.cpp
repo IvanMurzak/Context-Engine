@@ -371,6 +371,30 @@ public:
         apply_dark_mode();
     }
 
+    // b1 (D11): the drag-feedback cursor — the OS half of `CefRenderHandler::UpdateDragCursor`.
+    //
+    // ⚠ THE `SetCursor` CALL ALONE WOULD NOT STICK, and that is the whole reason this is two
+    // pieces rather than one line. Windows re-asks for the cursor on EVERY pointer move over the
+    // client area (WM_SETCURSOR), and `DefWindowProc` answers it with the WINDOW CLASS's cursor —
+    // so a cursor set here would be visible for exactly as long as the pointer stayed still, which
+    // during a drag is never. `drag_cursor_` is therefore recorded and the WM_SETCURSOR arm in
+    // `handle()` re-applies it; the immediate `SetCursor` is what makes the change visible without
+    // waiting for the next move.
+    void set_drag_cursor(DragCursor cursor) override
+    {
+        drag_cursor_ = win32_drag_cursor(cursor);
+        if (drag_cursor_ != nullptr)
+        {
+            ::SetCursor(drag_cursor_);
+        }
+        else if (hwnd_ != nullptr)
+        {
+            // Back to the class cursor. Asking Windows rather than remembering one keeps this
+            // correct if the class cursor ever changes.
+            ::SetCursor(::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW)));
+        }
+    }
+
     [[nodiscard]] WindowPlacement placement() const override;
     [[nodiscard]] PointI client_origin() const override;
     void apply_placement(const WindowPlacement& placement) override;
@@ -398,7 +422,35 @@ private:
         }
     }
 
+    // b1: the stock cursor a `DragCursor` shows, or null for "no drag in flight — use the class
+    // cursor". A SHARED handle in every case (`LoadCursorW` on a system IDC_*), so nothing here
+    // owns or destroys anything: a shared cursor must NOT be passed to `DestroyCursor`.
+    //
+    // ⚠ THE POSITIVE CASES ARE A DELIBERATE FLOOR, not an oversight. The drag cursors a Windows
+    // user recognises — the copy plus-badge, the link shortcut-arrow — are NOT in the IDC_* stock
+    // set: Windows draws them from OLE's own resources during `DoDragDrop`, the modal loop this
+    // Shell deliberately does not enter (osr_drag.h § THE SHELL OWNS THE DRAG LOOP). What IS stock
+    // is `IDC_NO`, and that is the one that carries real information: it says a drop HERE will do
+    // nothing, which is the difference between a user who knows to keep moving and one who lets go
+    // over dead space. `docs/shell.md` § 11 records the badge as a named gap rather than pretending.
+    [[nodiscard]] static HCURSOR win32_drag_cursor(DragCursor cursor)
+    {
+        switch (cursor)
+        {
+        case DragCursor::refused:
+            return ::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_NO));
+        case DragCursor::copy:
+        case DragCursor::link:
+        case DragCursor::move:
+            return ::LoadCursorW(nullptr, reinterpret_cast<LPCWSTR>(IDC_ARROW));
+        case DragCursor::none:
+        default:
+            return nullptr;
+        }
+    }
+
     HWND hwnd_ = nullptr;
+    HCURSOR drag_cursor_ = nullptr;
     std::vector<ShellEvent> pending_;
     render::Extent2D size_{};
     DpiScale dpi_;
@@ -668,6 +720,23 @@ LRESULT Win32WindowBackend::handle(HWND hwnd, UINT message, WPARAM wparam, LPARA
     case WM_ERASEBKGND:
         // Claim the erase so Windows does not flash the class background between frames.
         return 1;
+    case WM_SETCURSOR:
+        // b1 (D11): re-apply the DRAG cursor while one is set, and only over the CLIENT area.
+        //
+        // Windows re-asks on every pointer move, and `DefWindowProc` answers with the window
+        // CLASS's cursor — so without this arm a `SetCursor` from `set_drag_cursor` would survive
+        // exactly until the pointer next moved, which during a drag is immediately.
+        //
+        // GATED ON HTTEST == HTCLIENT, which is load-bearing rather than defensive: the low word of
+        // `lparam` is the hit-test code, and over the frame (a resize border, the caption strip)
+        // the OS is asking for the SIZING cursors. Answering "the drag cursor" there would replace
+        // the resize arrows on a frameless window whose whole border is a chrome region.
+        if (drag_cursor_ != nullptr && LOWORD(lparam) == HTCLIENT)
+        {
+            ::SetCursor(drag_cursor_);
+            return TRUE; // TRUE == "handled; do not let DefWindowProc set the class cursor"
+        }
+        break;
     case WM_CLOSE:
         ::DestroyWindow(hwnd);
         return 0;

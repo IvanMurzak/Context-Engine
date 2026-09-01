@@ -118,6 +118,15 @@ public:
     // which is also every headless window.
     [[nodiscard]] bool focused() const { return focused_; }
     [[nodiscard]] const std::string& diagnostic() const { return diagnostic_; }
+
+    // --- b1: the OSR drag protocol (D11; osr_drag.h, docs/shell.md § 16) --------------------------
+    //
+    // The window is where the drag lives, because the window is what owns the two things a drag
+    // needs and nothing else has: the OS POINTER STREAM (the browser cannot see it — it is
+    // off-screen) and the VIEW RECT to hit-test that stream against. Exposed read-only so a test and
+    // the live smoke can assert the SAME session the shipping owner loop drives, rather than a
+    // parallel one built for the assertion.
+    [[nodiscard]] const OsrDragSession& drag() const { return drag_; }
     // True once the placement changed since the last time the manager persisted it.
     [[nodiscard]] bool placement_dirty() const { return placement_dirty_; }
     [[nodiscard]] const WindowPlacement& last_placement() const { return last_placement_; }
@@ -153,7 +162,37 @@ public:
     void finish_close();
 
 private:
+    // --- b1: the browser's drag observer -----------------------------------------------------------
+    //
+    // A MEMBER ADAPTER rather than a base of `EditorWindow`, deliberately: the window's public
+    // surface is what the app, the smokes and the bridge handlers all program against, and growing
+    // it by an interface CEF calls INTO would let any of them call `on_start_dragging` — which is a
+    // report from the renderer, never a command. Non-copyable for the same reason `EditorWindow` is:
+    // it holds a back-pointer to the one window that owns it.
+    class DragObserver final : public IBrowserDragObserver
+    {
+    public:
+        explicit DragObserver(EditorWindow& owner) : owner_(&owner) {}
+
+        [[nodiscard]] bool on_start_dragging(DragOperationMask allowed,
+                                             PointI start_view_dip) override;
+        void on_update_drag_cursor(DragOperation operation) override;
+
+    private:
+        EditorWindow* owner_ = nullptr;
+    };
+
     void handle_event(const ShellEvent& event, std::uint64_t now_us);
+    // Feed one pointer sample into the live drag and apply whatever injections it emits. Called
+    // INSTEAD of `send_pointer` for the whole duration of a drag — see the pointer arm in
+    // `handle_event` for why the drag REPLACES the mouse stream rather than riding beside it.
+    void drive_drag(const PointerDispatch& dispatch, const PointerEvent& event);
+    // Apply an emitted sequence to the browser, in order, and reset the drag cursor once the
+    // session has ended. The ONE place injections reach `IBrowserHost`.
+    void apply_drag(const OsrDragInjections& injections);
+    // End a live drag because the WINDOW is going away or losing the gesture. `inject` is false on
+    // the teardown paths, where the browser is already closing and there is nothing left to tell.
+    void end_drag(OsrDragEndReason reason, bool inject);
     void sync_browser_size();
     // Push the window's CLIENT origin on screen down to the browser (a1) — the half of the OSR
     // geometry contract `sync_browser_size` does not carry. Deliberately separate: a move is not a
@@ -165,6 +204,13 @@ private:
     void sync_browser_origin();
     void poll_placement(std::uint64_t now_us);
 
+    // b1: DECLARED BEFORE `browser_` ON PURPOSE — members are destroyed in reverse declaration
+    // order, so anything declared AFTER the host would be gone while `~CefBrowserHostImpl` still
+    // runs its close drain. The host also unbinds the observer in its own close path (the same
+    // belt-and-braces the frame sink gets), so this ordering is the second of two independent
+    // guarantees rather than the only one.
+    OsrDragSession drag_;
+    DragObserver drag_observer_{*this};
     std::unique_ptr<IWindowBackend> backend_;
     std::unique_ptr<IBrowserHost> browser_;
     EditorWindowConfig config_;

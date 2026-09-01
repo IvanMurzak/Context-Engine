@@ -80,6 +80,42 @@ static_assert(kSchemeOptionCspBypassing == static_cast<unsigned>(CEF_SCHEME_OPTI
 static_assert(kSchemeOptionFetchEnabled == static_cast<unsigned>(CEF_SCHEME_OPTION_FETCH_ENABLED),
               "CEF renumbered CEF_SCHEME_OPTION_FETCH_ENABLED — update the mirror in ext_scheme.h");
 
+// THE SAME DISCIPLINE FOR THE DRAG OPERATIONS MASK (M9 b1, D11).
+//
+// osr_drag.h pins `cef_drag_operations_mask_t` with its own `DragOperation` enumerators so the
+// protocol state machine is asserted by `editor-shell-test_osr_drag` on all three default `build`
+// legs — where CEF does not exist. These are the comparison that keeps the mirror from becoming a
+// comment: a CEF bump that renumbered the mask fails THIS build loudly, instead of quietly turning
+// every "move" drop into a "link" one and every `DragSourceEndedAt` report into a different verb.
+//
+// ALL SEVEN, not just the ones the Shell reads. `generic` / `private` / `delete` are never chosen by
+// this Shell — but they are what a renderer's `allowed_ops` mask can CONTAIN, and a wrong value
+// there silently changes which operations `DragTargetDragOver` says are permitted. `EVERY` is
+// checked as the full-width mask it actually is (`UINT_MAX`), not as an OR of the named bits.
+static_assert(drag_operation_bit(DragOperation::none) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_NONE),
+              "CEF renumbered DRAG_OPERATION_NONE — update the mirror in osr_drag.h");
+static_assert(drag_operation_bit(DragOperation::copy) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_COPY),
+              "CEF renumbered DRAG_OPERATION_COPY — update the mirror in osr_drag.h");
+static_assert(drag_operation_bit(DragOperation::link) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_LINK),
+              "CEF renumbered DRAG_OPERATION_LINK — update the mirror in osr_drag.h");
+static_assert(drag_operation_bit(DragOperation::generic) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_GENERIC),
+              "CEF renumbered DRAG_OPERATION_GENERIC — update the mirror in osr_drag.h");
+static_assert(drag_operation_bit(DragOperation::private_op) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_PRIVATE),
+              "CEF renumbered DRAG_OPERATION_PRIVATE — update the mirror in osr_drag.h");
+static_assert(drag_operation_bit(DragOperation::move) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_MOVE),
+              "CEF renumbered DRAG_OPERATION_MOVE — update the mirror in osr_drag.h");
+static_assert(drag_operation_bit(DragOperation::erase) ==
+                  static_cast<DragOperationMask>(DRAG_OPERATION_DELETE),
+              "CEF renumbered DRAG_OPERATION_DELETE — update the mirror in osr_drag.h");
+static_assert(kDragOperationEvery == static_cast<DragOperationMask>(DRAG_OPERATION_EVERY),
+              "CEF redefined DRAG_OPERATION_EVERY — update the mirror in osr_drag.h");
+
 namespace
 {
 
@@ -917,6 +953,62 @@ public:
         sink_->on_browser_frame(frame);
     }
 
+    // b1 (D11, audit rows in docs/shell.md § 16): the two drag members. UNIMPLEMENTED, the default
+    // `StartDragging` returns false — which the pinned header defines as "abort the drag operation"
+    // — so every HTML5 drag in the editor was ACTIVELY REFUSED at its first `dragstart`. That is
+    // the dead Dockview tab drag (owner item #3), and nothing in editor-core had to change to fix
+    // it. All the judgement lives in the CEF-free `OsrDragSession` (osr_drag.h); these two are the
+    // translation, and `inject_drag` below is the other direction of the same seam.
+    bool StartDragging(CefRefPtr<CefBrowser>, CefRefPtr<CefDragData> drag_data,
+                       DragOperationsMask allowed_ops, int x, int y) override
+    {
+        if (drag_observer_ == nullptr)
+        {
+            // Nobody is driving this window's drags (a browser with no `EditorWindow` above it —
+            // every CEF-free composition and the boot window before wiring). Refuse EXACTLY as the
+            // default did, because that is the honest report and because the header forbids any
+            // `DragSource*Ended*` call after a false.
+            return false;
+        }
+        // The header's `(x, y)` is the drag start in SCREEN coordinates, and every injection that
+        // answers it takes VIEW coordinates — so the conversion happens HERE, where the platform's
+        // screen convention is already known (`kScreenCoordsAreDip`, the same predicate
+        // `GetScreenPoint` takes), through the arithmetic dpi.h owns and all three legs test.
+        const PointI start_view =
+            osr_view_point(PointI{x, y}, client_origin_, dpi_, kScreenCoordsAreDip);
+        // QUALIFIED, and not for tidiness: inside this class `DragOperationsMask` and
+        // `DragOperation` are CefRenderHandler's own typedefs for `cef_drag_operations_mask_t`,
+        // while the Shell's mirror types differ by ONE letter (`DragOperationMask`). Spelling the
+        // Shell's with `shell::` is what keeps the two readable side by side.
+        if (!drag_observer_->on_start_dragging(
+                static_cast<shell::DragOperationMask>(allowed_ops), start_view))
+        {
+            return false;
+        }
+        // HELD FOR `DragTargetDragEnter`, which takes the SAME `drag_data` back (cef_browser.h:897).
+        // CLONED, and the clone's FILE CONTENTS RESET, because the header says so in as many words:
+        // "|drag_data| should not contain file contents as this type of data is not allowed to be
+        // dragged into the web view. File contents can be removed using CefDragData::ResetFileContents
+        // (for example, if |drag_data| comes from CefRenderHandler::StartDragging)"
+        // (cef_browser.h:890-893). Cloning rather than mutating the argument keeps the renderer's own
+        // copy — the one the drag SOURCE still reads — intact.
+        pending_drag_data_ = drag_data != nullptr ? drag_data->Clone() : nullptr;
+        if (pending_drag_data_ != nullptr)
+        {
+            pending_drag_data_->ResetFileContents();
+        }
+        return true;
+    }
+
+    void UpdateDragCursor(CefRefPtr<CefBrowser>, DragOperation operation) override
+    {
+        if (drag_observer_ != nullptr)
+        {
+            drag_observer_->on_update_drag_cursor(
+                static_cast<shell::DragOperation>(static_cast<std::uint32_t>(operation)));
+        }
+    }
+
     // OnAcceleratedPaint is deliberately NOT overridden: the accelerated path is unreachable by
     // policy (owner ruling 2026-07-19 — see cef_shell.h) and shared_texture_enabled is left off, so
     // CEF never calls it. Overriding it to do nothing would advertise a path that does not exist.
@@ -1034,8 +1126,31 @@ public:
     void begin_close()
     {
         sink_ = nullptr;
+        // b1: and the drag observer, for the identical reason. `EditorWindow` also outlives its own
+        // host by declaration order (shell.h), so this is the second of two independent guarantees —
+        // the one that holds even for a host somebody else owns. A `StartDragging` dispatched during
+        // the close drain then gets the honest "nobody is driving drags here" refusal instead of a
+        // call into a window that is going away.
+        drag_observer_ = nullptr;
+        pending_drag_data_ = nullptr;
         closing_ = true;
     }
+
+    // b1: bind (or unbind) the window that drives this browser's drags. Refused once closing, on
+    // exactly the `set_sink` reasoning next door: a stray re-bind after `begin_close()` would re-arm
+    // a pointer into a window that is being torn down.
+    void set_drag_observer(IBrowserDragObserver* observer)
+    {
+        if (closing_)
+        {
+            return;
+        }
+        drag_observer_ = observer;
+    }
+
+    // b1: the drag data `StartDragging` handed us, held for the `DragTargetDragEnter` that answers
+    // it (cef_browser.h:897 takes the same object back). Null outside a live drag.
+    [[nodiscard]] CefRefPtr<CefDragData> pending_drag_data() const { return pending_drag_data_; }
     void set_view(render::Extent2D logical_size, DpiScale dpi)
     {
         logical_size_ = logical_size;
@@ -1073,6 +1188,11 @@ private:
     }
 
     IBrowserFrameSink* sink_ = nullptr;
+    // b1: the window driving this browser's drags, and the drag data of the run in flight. Both
+    // null outside a live drag / an unbound window — which is the state in which `StartDragging`
+    // returns the same false the unimplemented default did.
+    IBrowserDragObserver* drag_observer_ = nullptr;
+    CefRefPtr<CefDragData> pending_drag_data_;
     CefRefPtr<CefBrowser> browser_;
     render::Extent2D logical_size_;
     DpiScale dpi_;
@@ -1400,6 +1520,62 @@ public:
         if (browser != nullptr)
         {
             browser->GetHost()->SetFocus(focused);
+        }
+    }
+
+    // --- b1: the OSR drag protocol (D11; osr_drag.h, docs/shell.md § 16) --------------------------
+
+    void set_drag_observer(IBrowserDragObserver* observer) override
+    {
+        client_->set_drag_observer(observer);
+    }
+
+    void inject_drag(const OsrDragInjection& injection) override
+    {
+        CefRefPtr<CefBrowser> browser = client_->browser();
+        if (browser == nullptr)
+        {
+            return;
+        }
+        CefRefPtr<CefBrowserHost> host = browser->GetHost();
+        // DIP, exactly as `send_pointer` builds it: the three `DragTarget*` members that take a
+        // `CefMouseEvent` take it in VIEW coordinates, which are DIP (`GetViewRect`).
+        CefMouseEvent mouse;
+        mouse.x = injection.view_dip.x;
+        mouse.y = injection.view_dip.y;
+        mouse.modifiers = to_cef_modifiers(injection.modifiers);
+
+        // A PURE TRANSLATION — no branch here decides anything. Which member, in what order, with
+        // which operation is entirely `OsrDragSession`'s, so this switch has no `if` of its own and
+        // nothing to get wrong in the one TU no local gate compiles.
+        switch (injection.kind)
+        {
+        case OsrDragInjectionKind::target_enter:
+            host->DragTargetDragEnter(client_->pending_drag_data(), mouse,
+                                      static_cast<cef_drag_operations_mask_t>(
+                                          injection.allowed_ops));
+            break;
+        case OsrDragInjectionKind::target_over:
+            host->DragTargetDragOver(mouse, static_cast<cef_drag_operations_mask_t>(
+                                                injection.allowed_ops));
+            break;
+        case OsrDragInjectionKind::target_leave:
+            host->DragTargetDragLeave();
+            break;
+        case OsrDragInjectionKind::target_drop:
+            host->DragTargetDrop(mouse);
+            break;
+        case OsrDragInjectionKind::source_ended:
+            // NOT a CefMouseEvent: this member takes bare ints, in the same view space
+            // ("mouse coordinates relative to the upper-left corner of the view",
+            // cef_browser.h:932-933).
+            host->DragSourceEndedAt(injection.view_dip.x, injection.view_dip.y,
+                                    static_cast<cef_drag_operations_mask_t>(
+                                        drag_operation_bit(injection.operation)));
+            break;
+        case OsrDragInjectionKind::source_system_ended:
+            host->DragSourceSystemDragEnded();
+            break;
         }
     }
 
