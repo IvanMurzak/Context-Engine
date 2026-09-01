@@ -2,10 +2,14 @@
 
 #include "context/editor/assetdb/ref_heal.h"
 
+#include "context/editor/assetdb/meta.h"
+#include "context/editor/filesync/file_store.h"
 #include "context/editor/schema/json_access.h"
 #include "context/editor/schema/vocabulary.h"
 #include "context/editor/serializer/canonical.h"
+#include "context/editor/serializer/json_parse.h"
 
+#include <optional>
 #include <string>
 #include <utility>
 
@@ -239,6 +243,56 @@ RefHealResult heal_document_refs(JsonValue& root, const schema::SchemaSet& schem
                   }
               });
     return result;
+}
+
+std::vector<Referrer> find_referrers(const filesync::FileStore& fs,
+                                    const std::vector<std::string>& listed_paths,
+                                    const schema::SchemaSet& schemas, std::string_view guid,
+                                    std::string_view asset_path)
+{
+    std::vector<Referrer> referrers;
+    if (guid.empty() && asset_path.empty())
+        return referrers;
+
+    for (const std::string& path : listed_paths)
+    {
+        // Only authored JSON documents can hold a reference, and a sidecar/dot-tree/temp path is
+        // never one: the same candidate filter the index applies, so the sweep and the asset domain
+        // agree on what a document IS.
+        if (!is_asset_candidate(path) || !path.ends_with(".json"))
+            continue;
+        if (path == asset_path)
+            continue; // an asset does not block its own deletion by referring to itself
+        const std::optional<std::string> bytes = fs.read(path);
+        if (!bytes.has_value())
+            continue;
+        const serializer::ParseResult parsed = serializer::parse_json(*bytes);
+        if (!parsed.ok)
+            continue; // a malformed document is the validator's finding, not a delete blocker
+        const schema::KindSchema* kind = schema_for(parsed.root, schemas);
+        if (kind == nullptr)
+            continue; // unbound/unregistered kinds carry no schema-declared reference fields
+
+        walk_refs(parsed.root, kind->doc, "",
+                  [&](const JsonValue& value, const std::string& /*declared_kind*/,
+                      const std::string& pointer)
+                  {
+                      const RefShape shape = triage(value);
+                      if (shape.entity || !shape.cross_file_like)
+                          return;
+                      const bool by_guid = !guid.empty() && shape.guid != nullptr &&
+                                           shape.guid->string_value == guid;
+                      // L-34's path-only form is a REFERENCE awaiting resolution, not a weaker
+                      // hint: honouring it here is what stops a delete racing the resolution pass
+                      // and dangling a reference that was about to become authoritative.
+                      const bool by_path = !asset_path.empty() && shape.guid == nullptr &&
+                                           shape.path != nullptr &&
+                                           shape.path->string_value == asset_path;
+                      if (by_guid || by_path)
+                          referrers.push_back({path, pointer});
+                  });
+    }
+    return referrers;
 }
 
 bool is_entity_ref(const JsonValue& value) noexcept

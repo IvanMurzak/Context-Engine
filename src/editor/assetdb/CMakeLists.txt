@@ -24,15 +24,17 @@ target_link_libraries(context_assetdb PRIVATE context_warnings)
 # The repo has no C++ test framework (adding one would pull a vcpkg dep + a license-allowlist
 # entry); each test is a plain assertion-bearing executable registered with ctest (the sibling
 # module pattern; tests/assetdb_test.h is the tiny CHECK() harness). Coverage spans the happy path
-# (scan/index/resolve, tool moves, raw-move healing, ref healing), edge cases (kindless assets,
-# meta-less moves, hint enrichment, id-path shapes), and failure/crash paths (duplicate GUIDs,
-# orphaned/malformed sidecars, dangling refs, ambiguous healing refusal, and the R-QA-010 crash
-# windows around the meta-first write order via the fault-injectable MemoryFileStore).
+# (scan/index/resolve, tool moves, raw-move healing, ref healing, the M9 e2 quarantine-backed
+# delete/restore), edge cases (kindless assets, meta-less moves + meta-less deletes, hint
+# enrichment, id-path shapes), and failure/crash paths (duplicate GUIDs, orphaned/malformed
+# sidecars, dangling refs, ambiguous healing refusal, the referenced-asset delete refusal, and the
+# R-QA-010 crash windows around the meta-first write order via the fault-injectable MemoryFileStore).
 set(_context_assetdb_tests
     test_guid
     test_meta
     test_asset_database
     test_move_heal
+    test_delete_restore
     test_ref_heal)
 
 # Self-contained GCC runtime for the ctest executables: keeps the local MinGW ctest gate immune to

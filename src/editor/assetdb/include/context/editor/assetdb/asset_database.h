@@ -1,5 +1,6 @@
 // The asset database (M2, L-36 / R-ASSET-002): the bounded GUID index, the real RefTargetResolver
-// meta lookup, and the meta-first move/rename + raw-move-healing operations (R-FILE-003/004).
+// meta lookup, the meta-first move/rename + raw-move-healing operations (R-FILE-003/004), and
+// (M9 e2, D10 write half) the quarantine-backed DELETE/RESTORE pair the Files panel authors through.
 
 #pragma once
 
@@ -72,6 +73,67 @@ struct MoveResult
     std::vector<AssetDiagnostic> diagnostics;
 };
 
+// --- M9 e2 (D10 write half): DELETE, and the quarantine that makes it reversible -----------------
+//
+// WHY DELETE IS A QUARANTINE MOVE RATHER THAN AN `fs.remove` PAIR. e2's contract requires that undo
+// of a delete restore the asset AND its sidecar BYTE-IDENTICALLY. The two mechanisms available were
+// a journaled payload (the bytes travel in the undo checkpoint) and a quarantine-aside (the bytes
+// stay on the filesystem and the checkpoint carries a handle). Quarantine wins on three counts that
+// are not close:
+//
+//   * BINARY SAFETY. The undo journal serializes to canonical JSON and the editor's write path
+//     crosses a JSON wire; an arbitrary asset (a .png) has no byte-safe JSON string form without
+//     inventing an encoding this repo does not have. A handle is 32 hex characters.
+//   * BYTE-IDENTITY IS STRUCTURAL, not asserted. The bytes are never read, re-encoded or re-written
+//     by the undo path -- `restore_asset` moves the SAME bytes back -- so "byte-identical" cannot
+//     regress under a serializer change.
+//   * NO SIZE CAP. A journaled payload forces a policy question (refuse to delete a large asset, or
+//     silently make it unrecoverable) on the one operation where a silent failure is worst.
+//
+// WHERE. `.editor/trash/<token>/` -- the daemon's existing gitignored control directory
+// (R-FILE-006), whose dot-prefixed segment makes `is_asset_candidate` false: quarantined bytes are
+// invisible to scan(), ensure_metas() and heal_moves(), so a deleted asset can never be re-indexed,
+// re-keyed, or healed back by a later pass. `<token>` is the asset's GUID when it has a sidecar
+// (deterministic, so a crashed delete's re-run reuses the SAME entry instead of leaking a second
+// one) and a freshly minted GUID for a meta-less asset (accepted residual: a crash before the source
+// removal leaves one stray quarantine directory -- bytes on disk, no correctness loss, nothing
+// references it).
+//
+// LIFETIME, STATED HONESTLY: a quarantine entry is removed when its restore lands, and otherwise
+// persists. There is no GC pass in v1; `.editor/trash/` is gitignored session state a human may
+// delete wholesale, at the cost of the undo steps still pointing at it -- which then refuse with
+// asset.restore_missing rather than restoring something wrong.
+
+// Where a deleted asset's bytes are quarantined (project-relative; the dot segment is what keeps it
+// out of the asset domain).
+inline constexpr std::string_view kTrashRoot = ".editor/trash";
+
+// The quarantine entry paths for one restore token. Exposed so the daemon, the undo path and the
+// tests all name them through ONE function instead of re-spelling the layout.
+[[nodiscard]] std::string trash_asset_path(std::string_view token);
+[[nodiscard]] std::string trash_meta_path(std::string_view token);
+[[nodiscard]] std::string trash_entry_path(std::string_view token);
+
+struct DeleteResult
+{
+    bool ok = false;
+    std::string guid;           // the deleted asset's identity (minted at delete time when absent)
+    std::string restore_token;  // the quarantine handle undo restores through ("" when nothing moved)
+    bool removed_asset = false; // the asset file was removed by THIS call
+    bool removed_meta = false;  // the sidecar was removed by THIS call
+    std::vector<AssetDiagnostic> diagnostics;
+};
+
+struct RestoreResult
+{
+    bool ok = false;
+    std::string guid;
+    std::string path;            // where the asset came back (project-relative)
+    bool restored_asset = false; // the asset file was written back by THIS call
+    bool restored_meta = false;  // the sidecar was written back by THIS call
+    std::vector<AssetDiagnostic> diagnostics;
+};
+
 // The asset database. Paths are project-relative over the filesync FileStore seam, like the rest
 // of the file-sync layer; absolute-path/`..` jailing is the daemon/CLI boundary's job (R-SEC-008,
 // filesync/path_jail.h) and is NOT re-checked here.
@@ -138,6 +200,48 @@ public:
     // re-keying the asset or discarding the unparseable bytes. Both endpoints must be asset
     // candidates (not sidecar/temp/dot-tree paths — asset.move_invalid).
     MoveResult move_asset(filesync::FileStore& fs, std::string_view from, std::string_view to);
+
+    // The tool DELETE engine operation (M9 e2, served by the `editor file-delete` verb). Per-file
+    // atomic, in the R-FILE-004 dependency-safe order -- quarantine copy, quarantine sidecar, the
+    // entry record, THEN the source asset, THEN the source sidecar -- and idempotent + re-runnable
+    // under partial apply, exactly like move_asset:
+    //
+    //   * A crash before the source removal leaves the project UNCHANGED; a re-run redoes the whole
+    //     order into the same quarantine entry.
+    //   * A crash between the two source removals leaves an ORPHANED SIDECAR -- the state scan()
+    //     already reports as asset.meta_orphaned, `context validate --fix` already cleans, and
+    //     heal_moves() already calls residue of an interrupted move. A re-run of the delete enters
+    //     that resume arm and COMPLETES it by removing the sidecar. This is why the asset file goes
+    //     first and the identity-bearing sidecar last: the reverse order would leave a meta-LESS
+    //     asset, which the very next ensure_metas() pass would silently re-key with a fresh GUID --
+    //     resurrecting the asset under a new identity and dangling every reference to the old one.
+    //   * Both already gone is the CONVERGED state: ok, with removed_asset/removed_meta both false.
+    //
+    // REFERENCES ARE REFUSED, NEVER CLOBBERED. `root` + `schemas` drive a one-shot referrer sweep
+    // over the schema-bound documents under `root` (find_referrers, ref_heal.h). The operation does
+    // its OWN walk rather than taking a caller-supplied listing (the shape scan()'s second overload
+    // offers) precisely because a delete must not be able to run against an under-fed listing and
+    // report a clean refusal-free result it never earned. Any document holding a $ref to
+    // this asset's GUID -- or a path-only L-34 reference naming its path -- refuses the delete with
+    // asset.delete_referenced, whose diagnostics name the referring file and pointer. What that
+    // sweep CANNOT see (a reference from a document bound to no registered kind schema, or from a
+    // non-JSON payload) is out of its reach by construction, and deleting past it leaves a dangling
+    // reference the existing asset.ref_dangling finding surfaces on the next `context validate` --
+    // stated plainly rather than papered over.
+    //
+    // The sweep is a transient read of payload bytes, the same discipline sniff_kind() already
+    // applies: nothing is retained, so the bounded-index guarantee (R-FILE-011(e)) is untouched.
+    DeleteResult delete_asset(filesync::FileStore& fs, std::string_view root,
+                              std::string_view path, const schema::SchemaSet& schemas);
+
+    // The inverse of delete_asset (M9 e2, served by `editor file-restore`, which undo replays
+    // through): move the quarantined bytes back to the path the entry records, sidecar included,
+    // byte for byte. Dependency-safe and idempotent in the same way -- asset file, then sidecar,
+    // then the quarantine entry is cleared -- so a crashed restore re-runs to the same result.
+    // REFUSES rather than overwrites when a DIFFERENT asset now occupies the original path
+    // (asset.restore_destination_exists), and refuses with asset.restore_missing when the entry is
+    // gone (a human cleared `.editor/trash/`).
+    RestoreResult restore_asset(filesync::FileStore& fs, std::string_view restore_token);
 
 private:
     [[nodiscard]] std::string mint_unique_guid();

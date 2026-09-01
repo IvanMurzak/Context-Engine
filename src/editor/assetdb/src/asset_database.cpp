@@ -1,9 +1,12 @@
-// The asset database: GUID index, meta lookup, move/rename + raw-move healing (see asset_database.h).
+// The asset database: GUID index, meta lookup, move/rename + raw-move healing, and the M9 e2
+// quarantine-backed delete/restore pair (see asset_database.h).
 
 #include "context/editor/assetdb/asset_database.h"
 
+#include "context/editor/assetdb/ref_heal.h"
 #include "context/editor/filesync/atomic_io.h"
 #include "context/editor/filesync/file_store.h"
+#include "context/editor/schema/json_access.h"
 #include "context/editor/serializer/canonical.h"
 #include "context/editor/serializer/json_parse.h"
 
@@ -58,6 +61,69 @@ namespace
     d.other_path = std::move(other_path);
     d.guid = std::move(guid);
     return d;
+}
+
+// --- M9 e2: the quarantine ENTRY record --------------------------------------------------------
+//
+// The one thing `restore_asset` cannot re-derive from the quarantined bytes is WHERE they came from
+// (and whether the asset had a sidecar at all -- restoring one that never existed would not be a
+// byte-identical restore). This tiny canonical-JSON record carries exactly that, beside the bytes,
+// so the handle in an undo checkpoint stays 32 hex characters.
+inline constexpr std::string_view kTrashEntryKind = "ctx:trash-entry";
+
+struct TrashEntry
+{
+    std::string asset_path;
+    std::string guid;
+    bool has_meta = false;
+};
+
+[[nodiscard]] std::string serialize_trash_entry(const TrashEntry& entry)
+{
+    serializer::JsonValue root;
+    root.type = serializer::JsonValue::Type::object;
+    auto add_string = [&root](std::string_view key, std::string_view value)
+    {
+        serializer::JsonMember m;
+        m.key = std::string(key);
+        m.value.type = serializer::JsonValue::Type::string;
+        m.value.string_value = std::string(value);
+        root.members.push_back(std::move(m));
+    };
+    add_string("$schema", kTrashEntryKind);
+    add_string("assetPath", entry.asset_path);
+    add_string("guid", entry.guid);
+    serializer::JsonMember has_meta;
+    has_meta.key = "hasMeta";
+    has_meta.value.type = serializer::JsonValue::Type::boolean;
+    has_meta.value.boolean_value = entry.has_meta;
+    root.members.push_back(std::move(has_meta));
+
+    std::string out;
+    const bool ok = serializer::serialize_canonical(root, out);
+    (void)ok; // strings + booleans only -- always serializable
+    return out;
+}
+
+[[nodiscard]] std::optional<TrashEntry> parse_trash_entry(std::string_view bytes)
+{
+    const serializer::ParseResult parsed = serializer::parse_json(bytes);
+    if (!parsed.ok || parsed.root.type != serializer::JsonValue::Type::object)
+        return std::nullopt;
+    const serializer::JsonValue* asset_path = schema::find_member(parsed.root, "assetPath");
+    const serializer::JsonValue* guid = schema::find_member(parsed.root, "guid");
+    if (asset_path == nullptr || asset_path->type != serializer::JsonValue::Type::string ||
+        asset_path->string_value.empty() || guid == nullptr ||
+        guid->type != serializer::JsonValue::Type::string)
+        return std::nullopt;
+    TrashEntry entry;
+    entry.asset_path = asset_path->string_value;
+    entry.guid = guid->string_value;
+    if (const serializer::JsonValue* has_meta = schema::find_member(parsed.root, "hasMeta");
+        has_meta != nullptr)
+        entry.has_meta = has_meta->type == serializer::JsonValue::Type::boolean &&
+                         has_meta->boolean_value;
+    return entry;
 }
 
 // One parsed sidecar observed on disk during a pass.
@@ -597,6 +663,250 @@ MoveResult AssetDatabase::move_asset(filesync::FileStore& fs, std::string_view f
     index_record({to_s, guid, kind});
     result.ok = true;
     result.guid = guid;
+    return result;
+}
+
+
+std::string trash_asset_path(std::string_view token)
+{
+    return std::string(kTrashRoot) + "/" + std::string(token) + "/asset";
+}
+
+std::string trash_meta_path(std::string_view token)
+{
+    return meta_path_for(trash_asset_path(token));
+}
+
+std::string trash_entry_path(std::string_view token)
+{
+    return std::string(kTrashRoot) + "/" + std::string(token) + "/entry.json";
+}
+
+DeleteResult AssetDatabase::delete_asset(filesync::FileStore& fs, std::string_view root,
+                                         std::string_view path, const schema::SchemaSet& schemas)
+{
+    DeleteResult result;
+    const std::string path_s(path);
+    const std::string meta = meta_path_for(path);
+
+    // The move path's endpoint check, verbatim in spirit: a sidecar, a dot-tree internal or
+    // atomic-write residue is not an ASSET, and letting one through would either strand identity
+    // (deleting a sidecar out from under a live asset) or race the temp-residue sweep.
+    if (path.empty() || !is_asset_candidate(path))
+    {
+        result.diagnostics.push_back(make_diag(
+            "asset.delete_invalid",
+            "delete operates on ASSET paths (not sidecars, dot-tree internals, or temp residue); "
+            "a sidecar is deleted with its asset, never on its own",
+            path_s));
+        return result;
+    }
+
+    const bool asset_exists = fs.exists(path_s);
+    std::vector<std::string> problems;
+    const std::optional<std::string> meta_bytes = fs.read(meta);
+    std::optional<AssetMeta> meta_parsed;
+    if (meta_bytes.has_value())
+        meta_parsed = parse_meta(*meta_bytes, problems);
+
+    if (meta_bytes.has_value() && !meta_parsed.has_value())
+    {
+        // The malformed-sidecar refusal move_asset already makes, for the same reason and with the
+        // same code: those bytes may hold identity + import settings recoverable by hand or from
+        // git, and quarantining a sidecar we cannot even read the GUID out of would file it under a
+        // token nothing can name. Repair (or remove) it first -- R-FILE-003: no unasked destructive
+        // fixes.
+        result.diagnostics.push_back(make_diag(
+            "asset.meta_invalid",
+            "the asset's meta sidecar is malformed; repair it (or remove it) before deleting",
+            meta, path_s));
+        return result;
+    }
+
+    // --- convergence / resume detection (R-FILE-004) ---------------------------------------------
+    if (!asset_exists)
+    {
+        if (!meta_bytes.has_value())
+        {
+            // Fully converged. Deliberately ok=true with both removed_* false, so a caller can tell
+            // "this call deleted something" from "the requested end state already held" -- and so a
+            // re-run after a COMPLETED delete answers the same as a re-run after a partial one.
+            // KNOWN AMBIGUITY (accepted, the same shape move_asset documents): bytes alone cannot
+            // tell our own completed delete from a path that never existed; distinguishing them
+            // would need a persisted intent record.
+            drop_path(path);
+            result.ok = true;
+            return result;
+        }
+        // An ORPHANED SIDECAR is the residue of an interrupted delete (asset removed, sidecar not
+        // yet) -- exactly the state scan() reports as asset.meta_orphaned and heal_moves() treats as
+        // interrupted-move residue. COMPLETE it.
+        result.guid = meta_parsed->guid;
+        // The restore handle is offered only when the quarantine entry actually EXISTS. When the
+        // orphan came from a hand-deleted file rather than from us there is nothing quarantined, and
+        // synthesizing a half entry (a sidecar with no asset bytes) would restore something that was
+        // never deleted.
+        if (fs.exists(trash_entry_path(meta_parsed->guid)))
+            result.restore_token = meta_parsed->guid;
+        fs.remove(meta);
+        drop_path(path);
+        result.removed_meta = true;
+        result.ok = true;
+        return result;
+    }
+
+    // --- REFUSE on visible referrers, before a single byte moves ---------------------------------
+    const std::string existing_guid = meta_parsed.has_value() ? meta_parsed->guid : std::string();
+    const std::vector<Referrer> referrers =
+        find_referrers(fs, fs.list(root), schemas, existing_guid, path_s);
+    if (!referrers.empty())
+    {
+        for (const Referrer& referrer : referrers)
+            result.diagnostics.push_back(make_diag(
+                "asset.delete_referenced",
+                "`" + referrer.path + "` references this asset at `" +
+                    (referrer.pointer.empty() ? std::string("/") : referrer.pointer) +
+                    "`; delete refuses rather than leaving a dangling reference",
+                path_s, referrer.path, existing_guid));
+        return result;
+    }
+
+    // --- identity: the quarantine token ----------------------------------------------------------
+    // A sidecar-bearing asset files under its OWN GUID, which makes the token deterministic: a
+    // crashed delete's re-run lands in the SAME entry rather than leaking a second copy. A meta-less
+    // asset has no identity to file under, so one is minted purely as a handle -- it is never
+    // written as a sidecar, so restoring brings back exactly the meta-less file that was deleted.
+    const std::string token = meta_parsed.has_value() ? meta_parsed->guid : mint_unique_guid();
+
+    const std::optional<std::string> asset_bytes = fs.read(path_s);
+    if (!asset_bytes.has_value())
+    {
+        result.diagnostics.push_back(
+            make_diag("asset.delete_source_missing", "the asset raced away mid-delete", path_s));
+        return result;
+    }
+
+    // --- the R-FILE-004 dependency-safe write order ----------------------------------------------
+    // Quarantine FIRST (the bytes exist in two places before they exist in one), then the source
+    // asset, then the identity-bearing sidecar LAST -- see the header for why the reverse order
+    // would let ensure_metas() re-key a half-deleted asset.
+    filesync::atomic_write(fs, trash_asset_path(token), *asset_bytes, "assetdb-delete");
+    if (meta_parsed.has_value())
+        filesync::atomic_write(fs, trash_meta_path(token), *meta_bytes, "assetdb-delete");
+    filesync::atomic_write(fs, trash_entry_path(token),
+                           serialize_trash_entry({path_s, token, meta_parsed.has_value()}),
+                           "assetdb-delete");
+
+    fs.remove(path_s);
+    result.removed_asset = true;
+    if (meta_bytes.has_value())
+    {
+        fs.remove(meta);
+        result.removed_meta = true;
+    }
+
+    drop_path(path);
+    result.guid = token;
+    result.restore_token = token;
+    result.ok = true;
+    return result;
+}
+
+RestoreResult AssetDatabase::restore_asset(filesync::FileStore& fs, std::string_view restore_token)
+{
+    RestoreResult result;
+    const std::string token(restore_token);
+    if (token.empty())
+    {
+        result.diagnostics.push_back(
+            make_diag("asset.restore_missing", "no restore token was supplied", ""));
+        return result;
+    }
+
+    const std::string entry_path = trash_entry_path(token);
+    const std::optional<std::string> entry_bytes = fs.read(entry_path);
+    const std::optional<TrashEntry> entry =
+        entry_bytes.has_value() ? parse_trash_entry(*entry_bytes) : std::nullopt;
+    const std::optional<std::string> asset_bytes = fs.read(trash_asset_path(token));
+    if (!entry.has_value() || !asset_bytes.has_value())
+    {
+        // The honest answer for BOTH "a human cleared .editor/trash/" and "this restore already
+        // completed": there is nothing quarantined under this token. Never a silent success --
+        // reporting ok here would tell the human their file came back when it did not.
+        result.diagnostics.push_back(make_diag(
+            "asset.restore_missing",
+            "no quarantined asset is filed under this restore token; `.editor/trash/` may have been "
+            "cleared, or the restore already completed",
+            entry_path));
+        return result;
+    }
+    if (!is_asset_candidate(entry->asset_path))
+    {
+        result.diagnostics.push_back(make_diag(
+            "asset.restore_invalid",
+            "the quarantine entry names a path outside the asset domain; refusing to write there",
+            entry->asset_path));
+        return result;
+    }
+
+    const std::string dest = entry->asset_path;
+    const std::string dest_meta = meta_path_for(dest);
+    const std::optional<std::string> quarantined_meta =
+        entry->has_meta ? fs.read(trash_meta_path(token)) : std::nullopt;
+
+    // CAS-honesty, the occupied-destination rule move_asset states: something else may have taken
+    // this path since the delete. Identical bytes are our own interrupted restore (fall through and
+    // re-run the order); anything else refuses rather than overwrites.
+    if (fs.exists(dest) && fs.read(dest) != asset_bytes)
+    {
+        result.diagnostics.push_back(make_diag(
+            "asset.restore_destination_exists",
+            "a different file now occupies the deleted asset's path; restore never overwrites",
+            dest));
+        return result;
+    }
+    if (const std::optional<std::string> occupying_meta = fs.read(dest_meta);
+        occupying_meta.has_value())
+    {
+        std::vector<std::string> problems;
+        const std::optional<AssetMeta> parsed = parse_meta(*occupying_meta, problems);
+        if (!parsed.has_value() || parsed->guid != entry->guid)
+        {
+            result.diagnostics.push_back(make_diag(
+                "asset.restore_destination_exists",
+                "a sidecar holding a different identity occupies the deleted asset's path; restore "
+                "never overwrites",
+                dest_meta, dest, entry->guid));
+            return result;
+        }
+    }
+
+    // The inverse dependency-safe order: the asset file lands first, then the sidecar re-attaches
+    // identity to it, then the quarantine entry is cleared. A crash anywhere re-runs to the same
+    // result; a crash before the entry is cleared simply leaves a re-runnable restore.
+    filesync::atomic_write(fs, dest, *asset_bytes, "assetdb-restore");
+    result.restored_asset = true;
+    std::string kind;
+    if (quarantined_meta.has_value())
+    {
+        filesync::atomic_write(fs, dest_meta, *quarantined_meta, "assetdb-restore");
+        result.restored_meta = true;
+        std::vector<std::string> problems;
+        if (const std::optional<AssetMeta> parsed = parse_meta(*quarantined_meta, problems);
+            parsed.has_value())
+            kind = parsed->kind;
+    }
+
+    fs.remove(trash_asset_path(token));
+    if (entry->has_meta)
+        fs.remove(trash_meta_path(token));
+    fs.remove(entry_path);
+
+    result.guid = entry->guid;
+    result.path = dest;
+    result.ok = true;
+    if (result.restored_meta)
+        index_record({dest, entry->guid, kind});
     return result;
 }
 
