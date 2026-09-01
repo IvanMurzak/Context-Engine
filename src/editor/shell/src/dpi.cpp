@@ -111,4 +111,14 @@ ScreenRect osr_root_screen_rect(PointI client_origin, render::Extent2D logical_s
     return ScreenRect{origin_dip, logical_size};
 }
 
+PointI osr_view_point(PointI screen, PointI client_origin, DpiScale scale,
+                      bool screen_coords_are_dip)
+{
+    // SUBTRACT IN THE SCREEN'S OWN CONVENTION, CONVERT THE OFFSET (see dpi.h). Both operands are in
+    // the platform's screen units here, so the difference is too; converting `screen` first would
+    // also convert the origin, which is the double application this pair exists to avoid.
+    const PointI offset{screen.x - client_origin.x, screen.y - client_origin.y};
+    return screen_coords_are_dip ? offset : to_logical_point(offset, scale);
+}
+
 } // namespace context::editor::shell

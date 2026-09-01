@@ -17,6 +17,7 @@
 
 #include "context/editor/shell/dpi.h"
 #include "context/editor/shell/input.h"
+#include "context/editor/shell/osr_drag.h"
 #include "context/render/present/osr_import.h"
 #include "context/render/rhi.h"
 
@@ -70,6 +71,41 @@ public:
     virtual void on_popup_state(bool visible, const render::Rect2D& rect) = 0;
 };
 
+// What the SHELL implements so an OSR browser can report the two drag callbacks up (b1, D11 —
+// osr_drag.h for the protocol, docs/shell.md § 16 for the audit rows this closes).
+//
+// SEPARATE FROM `IBrowserFrameSink` on purpose. The frame sink is the COMPOSITOR — it consumes
+// pixels and popup geometry and knows nothing about input. A drag is an INPUT gesture the WINDOW
+// owns: the window is what has the pointer stream, the view rect to hit-test against, and the
+// `OsrDragSession` whose injections go back through `IBrowserHost::inject_drag`. Routing
+// `StartDragging` through the compositor would put the one decision in the one object with no way
+// to make it.
+//
+// Bound ONCE (`set_drag_observer`) rather than passed per `pump()` like the sink, because
+// `StartDragging` fires from inside CEF's own pump, with no argument of ours to carry it in.
+class IBrowserDragObserver
+{
+public:
+    virtual ~IBrowserDragObserver() = default;
+
+    // `CefRenderHandler::StartDragging` (cef_render_handler.h:208). `allowed` is the operations
+    // mask the renderer will accept; `start_view_dip` is the header's SCREEN start point ALREADY
+    // converted to view DIP by the binding (`osr_view_point`, dpi.h) — the conversion happens where
+    // the platform's screen convention is known, exactly as `GetScreenPoint` does.
+    //
+    // RETURNS WHAT `StartDragging` RETURNS: true to drive the drag, false to ABORT it. The
+    // unimplemented default returned false, and the header defines that as "abort the drag
+    // operation" — which is why every HTML5 drag in the editor was dead rather than merely
+    // unhandled.
+    [[nodiscard]] virtual bool on_start_dragging(DragOperationMask allowed,
+                                                 PointI start_view_dip) = 0;
+
+    // `CefRenderHandler::UpdateDragCursor` (cef_render_handler.h:222): the operation the view would
+    // perform at the current position — the drag feedback, and what `DragSourceEndedAt` reports as
+    // the operation a drop actually performed.
+    virtual void on_update_drag_cursor(DragOperation operation) = 0;
+};
+
 // One OSR browser bound to one window. Not thread-safe: driven from the single shell-owned pump
 // (03 §1 — `multi_threaded_message_loop=false`, the single-threaded owner loop).
 class IBrowserHost
@@ -101,6 +137,26 @@ public:
     virtual void send_pointer(const PointerDispatch& dispatch, const PointerEvent& event) = 0;
     virtual void send_key(const KeyEvent& event) = 0;
     virtual void set_focus(bool focused) = 0;
+
+    // --- b1: the OSR drag protocol (D11; osr_drag.h) ---------------------------------------------
+
+    // Bind (or unbind, with nullptr) the observer this browser reports `StartDragging` /
+    // `UpdateDragCursor` to. The observer must outlive the binding; `EditorWindow` satisfies that by
+    // construction — the observer is one of its own members and the host is its `browser_` member,
+    // so nothing can pump the browser between the two destructions.
+    virtual void set_drag_observer(IBrowserDragObserver* observer) = 0;
+
+    // Apply ONE step of the protocol — the six windowless-only `CefBrowserHost` drag members
+    // (`cef_browser.h:897-951`), as the value `OsrDragSession` emits. ONE method rather than six,
+    // because the session has ALREADY decided which member and in what order: six entry points
+    // would let a caller re-decide that, which is exactly the judgement this design keeps out of
+    // the CEF translation unit.
+    //
+    // PURE, like `resize` / `set_client_origin` and for the identical reason: a defaulted no-op is
+    // not a neutral fallback here, it IS the bug — a host that silently swallowed the injections
+    // would leave `StartDragging` returning true and the renderer stuck mid-drag forever, which is
+    // strictly worse than the honest refusal b1 replaces.
+    virtual void inject_drag(const OsrDragInjection& injection) = 0;
 
     // Drive one slice of the browser's work and deliver whatever frames it produced into `sink`.
     // Returns false once the browser is gone. For the CEF host this is where CefDoMessageLoopWork
@@ -234,6 +290,8 @@ public:
     void send_pointer(const PointerDispatch& dispatch, const PointerEvent& event) override;
     void send_key(const KeyEvent& event) override;
     void set_focus(bool focused) override;
+    void set_drag_observer(IBrowserDragObserver* observer) override;
+    void inject_drag(const OsrDragInjection& injection) override;
     bool pump(IBrowserFrameSink& sink) override;
     void execute_script(std::string_view source) override;
     void close() override { alive_ = false; }
@@ -257,6 +315,22 @@ public:
     // Queue a popup visibility change (delivered in order with the frames).
     void queue_popup_state(bool visible, const render::Rect2D& rect);
 
+    // --- b1: raising the two drag callbacks a real browser raises ---------------------------------
+    //
+    // THE SCRIPTED HOST HAS NO RENDERER, so it can never start a drag of its own — and a window
+    // whose drag wiring is exercised only through CEF is a window whose drag wiring is exercised by
+    // ONE CI job, in the one translation unit the local gate cannot build. These two are the drag
+    // half's equivalent of `queue_frame`: they raise exactly the callbacks `ShellCefClient` raises,
+    // at a moment the caller chooses, so the REAL `EditorWindow` routing — pointer sample ->
+    // `OsrDragSession` -> `inject_drag` — runs on all three default `build` legs.
+    //
+    // Delivered SYNCHRONOUSLY rather than queued for the next `pump()`, unlike the frames above,
+    // and that difference is the point: a frame is data the compositor consumes, while
+    // `StartDragging`'s return value is an ANSWER the caller acts on — the binding returns it to
+    // CEF, so a test that could not see it would be asserting a different thing.
+    [[nodiscard]] bool script_start_dragging(DragOperationMask allowed, PointI start_view_dip);
+    void script_update_drag_cursor(DragOperation operation);
+
     // --- what it recorded ------------------------------------------------------------------------
     [[nodiscard]] const std::vector<PointerEvent>& pointers() const { return pointers_; }
     [[nodiscard]] const std::vector<KeyEvent>& keys() const { return keys_; }
@@ -271,6 +345,14 @@ public:
     [[nodiscard]] PointI last_client_origin() const { return last_client_origin_; }
     [[nodiscard]] int client_origin_pushes() const { return client_origin_pushes_; }
     [[nodiscard]] bool focused() const { return focused_; }
+    // Every drag step the window applied, IN ORDER — the b1 observable. The order is the assertion
+    // that matters: CEF's two ordering rules (an `over` only after an `enter`; all `DragTarget*`
+    // before all `DragSource*`) are claims about a SEQUENCE, which a count could never express.
+    [[nodiscard]] const std::vector<OsrDragInjection>& drag_injections() const
+    {
+        return drag_injections_;
+    }
+    [[nodiscard]] bool has_drag_observer() const { return drag_observer_ != nullptr; }
     [[nodiscard]] bool alive() const { return alive_; }
 
 private:
@@ -293,6 +375,8 @@ private:
     std::vector<PointerEvent> pointers_;
     std::vector<KeyEvent> keys_;
     std::vector<std::string> scripts_;
+    std::vector<OsrDragInjection> drag_injections_;
+    IBrowserDragObserver* drag_observer_ = nullptr;
     render::Extent2D last_logical_size_{};
     DpiScale last_dpi_;
     PointI last_client_origin_{};

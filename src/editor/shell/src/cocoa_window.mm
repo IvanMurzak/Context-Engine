@@ -540,6 +540,44 @@ public:
         }
     }
 
+    // b1 (D11): the drag-feedback cursor — the OS half of `CefRenderHandler::UpdateDragCursor`.
+    //
+    // `[NSCursor set]` rather than a cursor-rect / `resetCursorRects` dance, and that choice follows
+    // from where the drag lives: AppKit recomputes cursor rects when the pointer crosses a view
+    // boundary, which for a single full-window OSR view is never during a drag. A direct `set` is
+    // therefore stable for the whole gesture and needs no view subclass override — and `none` is
+    // spelled with `arrowCursor` for the same reason `XUndefineCursor` is used on X11: it is the
+    // documented "back to the ordinary pointer", not a guessed theme cursor.
+    //
+    // ⚠ THE STOCK SET IS THE HONEST CEILING HERE, exactly as on Win32. `+[NSCursor
+    // dragCopyCursor]` / `dragLinkCursor` / `operationNotAllowedCursor` ARE public AppKit API — so
+    // macOS is the ONE platform where the feedback badge a user recognises is reachable without
+    // entering the OS's modal drag loop, and all three are used.
+    void set_drag_cursor(DragCursor cursor) override
+    {
+        switch (cursor)
+        {
+        case DragCursor::refused:
+            [[NSCursor operationNotAllowedCursor] set];
+            break;
+        case DragCursor::copy:
+            [[NSCursor dragCopyCursor] set];
+            break;
+        case DragCursor::link:
+            [[NSCursor dragLinkCursor] set];
+            break;
+        case DragCursor::move:
+            // AppKit ships no "drag move" cursor: a move is the DEFAULT drag, drawn as the ordinary
+            // pointer with the dragging image following it. The arrow is what macOS itself shows.
+            [[NSCursor arrowCursor] set];
+            break;
+        case DragCursor::none:
+        default:
+            [[NSCursor arrowCursor] set];
+            break;
+        }
+    }
+
     [[nodiscard]] WindowPlacement placement() const override;
 
     // AN HONEST ZERO, deliberately not a guessed conversion (a1).

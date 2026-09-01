@@ -354,8 +354,57 @@ void test_the_screen_mapping_lands_on_the_client_origin_not_the_window_rect()
     }
 }
 
+// b1 (D11): the OSR drag's own direction — SCREEN back to view DIP.
+//
+// The drag is the one part of the OSR contract that needs the mapping BACKWARDS: `StartDragging`
+// reports its start point in screen coordinates while every injection that answers it takes view
+// ones (osr_drag.h). The property that matters is that the two functions are genuinely inverse —
+// not that each is separately plausible — so this asserts the ROUND TRIP, on both platform
+// conventions, at a scale where they differ.
+void test_osr_view_point_is_the_inverse_of_the_screen_mapping()
+{
+    const DpiScale one_five{144};
+    const PointI client_device{300, 150}; // Windows/Linux: the client origin in DEVICE pixels
+    const PointI client_dip{200, 100};    // macOS: the same window, in screen DIP
+
+    // Round-trip at a scale where DIP and device pixels differ. Every sample is an EVEN DIP offset
+    // so 1.5x lands on an integer — a round trip through a rounding pair is only exactly invertible
+    // where the intermediate is representable, and asserting otherwise would be asserting the FPU.
+    const PointI views[] = {PointI{0, 0}, PointI{40, 20}, PointI{2, 100}, PointI{800, 600}};
+    for (const PointI view : views)
+    {
+        const PointI screen = osr_screen_point(view, client_device, one_five, false);
+        CHECK(osr_view_point(screen, client_device, one_five, false) == view);
+        const PointI screen_dip = osr_screen_point(view, client_dip, one_five, true);
+        CHECK(osr_view_point(screen_dip, client_dip, one_five, true) == view);
+    }
+
+    // THE ORIGIN IS SUBTRACTED FIRST, and only the OFFSET is scaled. The bug this rules out is
+    // converting the whole screen point and then subtracting: at 1.5x with a client origin of
+    // {300, 150} device px, that spelling would answer {200, 100} - {300, 150} = {-100, -50} for
+    // the view origin instead of {0, 0}, i.e. the client origin scaled a second time.
+    CHECK(osr_view_point(client_device, client_device, one_five, false) == (PointI{0, 0}));
+    CHECK(osr_view_point(client_dip, client_dip, one_five, true) == (PointI{0, 0}));
+    CHECK(osr_view_point(client_device, client_device, one_five, false) !=
+          to_logical_point(client_device, one_five));
+
+    // A pointer that has left the view to the LEFT/ABOVE is an ordinary drag state (the gesture
+    // travels past the window edge), so the answer is legitimately NEGATIVE rather than clamped —
+    // the same reason `PointI` is signed at all.
+    const PointI outside = osr_view_point(PointI{270, 120}, client_device, one_five, false);
+    CHECK(outside.x == -20); // (270 - 300) / 1.5
+    CHECK(outside.y == -20); // (120 - 150) / 1.5
+
+    // At 1.0 the two conventions coincide, which is exactly why every bug in this family is
+    // invisible on an unscaled monitor — pinned so the suite cannot be read as proving otherwise.
+    const DpiScale one{96};
+    CHECK(osr_view_point(PointI{330, 170}, client_device, one, false) ==
+          osr_view_point(PointI{330, 170}, client_device, one, true));
+}
+
 int main()
 {
+    test_osr_view_point_is_the_inverse_of_the_screen_mapping();
     test_osr_popup_dest_rect_scales_the_origin_and_takes_the_texture_size();
     test_osr_popup_dest_rect_size_is_not_the_rounded_dip_size();
     test_osr_popup_dest_rect_origin_rounds_to_nearest_like_the_screen_mapping();

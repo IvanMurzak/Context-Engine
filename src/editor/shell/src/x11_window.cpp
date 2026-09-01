@@ -31,6 +31,9 @@
 #include <X11/Xlib.h>
 #include <X11/Xresource.h>
 #include <X11/Xutil.h>
+// b1: the standard `cursor` font's XC_* shape ids — the drag-feedback cursors. Header-only and part
+// of libx11-dev, so this adds no package to the Linux CI leg.
+#include <X11/cursorfont.h>
 
 #include <clocale>
 #include <cstdlib>
@@ -313,6 +316,9 @@ public:
     void minimize() override;
     void set_maximized(bool maximized) override;
 
+    // b1 (D11): the drag-feedback cursor — the OS half of `CefRenderHandler::UpdateDragCursor`.
+    void set_drag_cursor(DragCursor cursor) override;
+
     [[nodiscard]] WindowPlacement placement() const override;
     [[nodiscard]] PointI client_origin() const override;
     void apply_placement(const WindowPlacement& placement) override;
@@ -338,6 +344,13 @@ private:
 
     Window window_ = 0;
     XIC input_context_ = nullptr;
+    // b1: the server-side cursor currently defined on this window, and which `DragCursor` it is
+    // for. OWNED — `XCreateFontCursor` allocates a server resource, so the previous one is freed
+    // before a new one replaces it and the last one is freed in `destroy()`. Cached by kind because
+    // `UpdateDragCursor` re-fires on every change and a per-change round trip that recreated an
+    // identical cursor would leak one resource per pointer move over a boundary.
+    Cursor drag_cursor_ = 0;
+    DragCursor drag_cursor_kind_ = DragCursor::none;
     std::vector<ShellEvent> pending_;
     DpiScale dpi_;
     X11WindowGeometry geometry_;
@@ -481,11 +494,86 @@ void X11WindowBackend::destroy()
     }
     if (conn.display != nullptr)
     {
+        // b1: the drag cursor is a SERVER RESOURCE this backend allocated, so it is freed before the
+        // window it was defined on goes away. Freed BEFORE XDestroyWindow rather than after, so the
+        // free is issued while the connection is certainly still usable.
+        if (drag_cursor_ != 0)
+        {
+            ::XFreeCursor(conn.display, drag_cursor_);
+            drag_cursor_ = 0;
+            drag_cursor_kind_ = DragCursor::none;
+        }
         ::XDestroyWindow(conn.display, window_);
         ::XFlush(conn.display);
     }
     window_ = 0;
     x11_release();
+}
+
+void X11WindowBackend::set_drag_cursor(DragCursor cursor)
+{
+    X11Connection& conn = x11_connection();
+    if (window_ == 0 || conn.display == nullptr || cursor == drag_cursor_kind_)
+    {
+        // The kind gate is not an optimisation: `UpdateDragCursor` fires on every change of the
+        // view's answer, and re-creating an identical server cursor each time would allocate one
+        // resource per boundary crossing for the life of the drag.
+        return;
+    }
+    drag_cursor_kind_ = cursor;
+    if (drag_cursor_ != 0)
+    {
+        ::XFreeCursor(conn.display, drag_cursor_);
+        drag_cursor_ = 0;
+    }
+    if (cursor == DragCursor::none)
+    {
+        // Back to the PARENT's cursor. `XUndefineCursor` is the honest "this window states nothing"
+        // — setting an explicit left-pointer instead would override whatever theme cursor the
+        // desktop inherits, permanently, after the first drag.
+        ::XUndefineCursor(conn.display, window_);
+        ::XFlush(conn.display);
+        return;
+    }
+    // Shapes from the standard `cursor` font, which every X server ships — so this needs no cursor
+    // THEME, no Xcursor library and no new CI package (the `editor-cef-smoke` Linux leg installs
+    // libx11-dev only). A themed lookup would be prettier and would also be a new dependency on a
+    // leg whose whole value is that it runs under bare xvfb.
+    unsigned int shape = XC_left_ptr;
+    switch (cursor)
+    {
+    case DragCursor::refused:
+        shape = XC_X_cursor; // the closest stock "you cannot drop here"
+        break;
+    case DragCursor::move:
+        shape = XC_fleur;
+        break;
+    case DragCursor::copy:
+        shape = XC_plus;
+        break;
+    case DragCursor::link:
+        shape = XC_hand2;
+        break;
+    case DragCursor::none:
+    default:
+        break;
+    }
+    drag_cursor_ = ::XCreateFontCursor(conn.display, shape);
+    if (drag_cursor_ == 0)
+    {
+        // The server refused the allocation. Nothing to define, and nothing to report: a missing
+        // drag cursor is cosmetic, and the drag itself is unaffected. UNDEFINE first, though: the
+        // cursor freed above is still the one the window DISPLAYS (`XFreeCursor` drops our id, not
+        // the window's reference), and the kind is being reset to `none` — so without this the next
+        // `set_drag_cursor(none)` would take the `cursor == drag_cursor_kind_` early return and the
+        // stale drag cursor would stay on the window for the rest of the session.
+        ::XUndefineCursor(conn.display, window_);
+        ::XFlush(conn.display);
+        drag_cursor_kind_ = DragCursor::none;
+        return;
+    }
+    ::XDefineCursor(conn.display, window_, drag_cursor_);
+    ::XFlush(conn.display);
 }
 
 void X11WindowBackend::set_title(std::string_view title)

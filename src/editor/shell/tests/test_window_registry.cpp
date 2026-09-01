@@ -84,6 +84,13 @@ public:
     void send_pointer(const PointerDispatch&, const PointerEvent&) override {}
     void send_key(const KeyEvent&) override {}
     void set_focus(bool) override {}
+    // b1: this suite is about LIFETIMES, and it never begins a drag — but the two members are pure
+    // (browser.h says why a defaulted no-op would be the bug), so they are stated here rather than
+    // inherited. Recording the observer is what keeps that honest: `EditorWindow` binds one at
+    // construction, so a registry test that destroys windows is also, incidentally, the place a
+    // dangling observer would first show up.
+    void set_drag_observer(IBrowserDragObserver* observer) override { drag_observer_ = observer; }
+    void inject_drag(const OsrDragInjection&) override { ++drag_injections_; }
     bool pump(IBrowserFrameSink&) override { return alive_flag_; }
     void execute_script(std::string_view source) override { scripts_.emplace_back(source); }
     void close() override
@@ -97,11 +104,15 @@ public:
     void detach() override { ++deaths_.detaches; }
 
     [[nodiscard]] const std::vector<std::string>& scripts() const { return scripts_; }
+    [[nodiscard]] bool has_drag_observer() const { return drag_observer_ != nullptr; }
+    [[nodiscard]] int drag_injections() const { return drag_injections_; }
 
 private:
     Deaths& deaths_;
     int* alive_ = nullptr;
     std::vector<std::string> scripts_;
+    IBrowserDragObserver* drag_observer_ = nullptr;
+    int drag_injections_ = 0;
     bool alive_flag_ = true;
 };
 
@@ -905,6 +916,43 @@ void test_the_script_seam_is_recorded_by_the_scripted_host()
     CHECK(shelltest::mentions(host.scripts()[0], "window.open"));
 }
 
+// ------------------------------------------------------- 7. the drag observer's binding (b1)
+
+void test_every_window_binds_its_drag_observer_at_construction()
+{
+    // b1 (D11): `EditorWindow` binds the observer in its CONSTRUCTOR, so the binding is not a
+    // property of any one code path — a window whose observer was bound only on some paths is a
+    // window where every HTML5 drag is dead on the others, and `StartDragging`'s unimplemented
+    // default returns false, which the CEF header defines as "abort the drag operation". That is
+    // the exact bug b1 fixed, so the binding is asserted rather than assumed.
+    //
+    // ASSERTED HERE, in the LIFETIME suite, deliberately: the observer points back INTO the window
+    // that owns the host and is never unbound, so what keeps it from dangling is member
+    // declaration order (`drag_`/`drag_observer_` before `browser_` in shell.h — the browser dies
+    // first). This suite is the one that destroys windows, so it is where a reordering that broke
+    // that would first have somewhere to show up.
+    Deaths deaths;
+    int browsers_alive = 0;
+    WindowDesc desc;
+    auto backend = std::make_unique<HeadlessWindowBackend>(desc);
+    auto browser = std::make_unique<CountingBrowserHost>(deaths, &browsers_alive);
+    CountingBrowserHost* host = browser.get();
+    CHECK(!host->has_drag_observer()); // nothing bound before the window exists
+
+    EditorWindowConfig config;
+    config.compositor.import_options.force_software = true;
+    config.placement_poll_us = 0;
+    auto window = std::make_unique<EditorWindow>(std::move(backend), std::move(browser), config);
+
+    CHECK(host->has_drag_observer());
+    // ...and binding an observer is not itself a drag: nothing is injected until a real
+    // `StartDragging` arrives, which this suite never scripts.
+    CHECK(host->drag_injections() == 0);
+
+    window.reset();
+    CHECK(deaths.browsers == 1); // the host went with the window, not before it
+}
+
 } // namespace
 
 int main()
@@ -932,5 +980,6 @@ int main()
     test_each_window_reports_its_own_origin();
     test_a_window_that_owns_a_connection_answers_from_it_not_from_what_it_was_told();
     test_the_script_seam_is_recorded_by_the_scripted_host();
+    test_every_window_binds_its_drag_observer_at_construction();
     SHELL_TEST_MAIN_END();
 }

@@ -168,6 +168,36 @@ struct ScreenRect
 [[nodiscard]] ScreenRect osr_root_screen_rect(PointI client_origin, render::Extent2D logical_size,
                                               DpiScale scale, bool screen_coords_are_dip);
 
+// ------------------------------------------------- the OSR drag mapping (b1, D11, audit D12)
+
+// SCREEN -> view DIP: the exact inverse of `osr_screen_point` above, and the one conversion the OSR
+// DRAG protocol needs (b1; `osr_drag.h` for the state machine that consumes it).
+//
+// WHY THE DRAG NEEDS A DIRECTION THE REST OF THE CONTRACT DOES NOT. The drag's two ends speak
+// different units, and the pinned headers say so verbatim:
+//
+//   * `CefRenderHandler::StartDragging` (cef_render_handler.h:193-212) — "(|x|, |y|) is the drag
+//     start location in SCREEN coordinates", i.e. the same convention `GetScreenPoint` answers in,
+//     device pixels on Windows/Linux and DIP on macOS;
+//   * every injection that answers it takes VIEW coordinates —
+//     `DragTargetDragEnter` / `DragTargetDragOver` / `DragTargetDrop` (cef_browser.h:897, :908,
+//     :927) take a `CefMouseEvent`, and `DragSourceEndedAt` (:939) spells it out: "|x| and |y| are
+//     mouse coordinates relative to the upper-left corner of the view".
+//
+// A drag that skipped this conversion would place every `dragover` at the SCREEN position — the
+// same class of defect the missing `GetScreenPoint` was (the offset context menu, a1), and equally
+// invisible for a window sitting at the screen origin on a 100 % monitor.
+//
+// THE ASYMMETRY MIRRORS `osr_screen_point` EXACTLY, and it is the half a caller would get wrong:
+// the client origin is SUBTRACTED FIRST, in the platform's own screen convention, and only the
+// resulting OFFSET is converted down to DIP. Converting the screen point before subtracting scales
+// the origin as well — the double application `osr_root_screen_rect`'s own comment rules out.
+//
+// Round-trip: `osr_view_point(osr_screen_point(p, o, s, d), o, s, d) == p` for every p, up to the
+// one-pixel rounding `to_logical_point`/`to_physical_point` introduce at non-integral scales.
+[[nodiscard]] PointI osr_view_point(PointI screen, PointI client_origin, DpiScale scale,
+                                    bool screen_coords_are_dip);
+
 #if defined(_WIN32)
 
 // The resolution state of the dynamically-loaded user32 DPI entry points (win32_window.cpp).

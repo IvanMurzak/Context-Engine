@@ -99,6 +99,48 @@ EditorWindow::EditorWindow(std::unique_ptr<IWindowBackend> backend,
     // member of this same object and the backend reads the pointer only inside pump(), which never
     // runs during destruction.
     cocoa_bind_caption_arbiter(*backend_, &input_);
+    // b1 (D11): the browser reports `StartDragging` / `UpdateDragCursor` HERE, so an HTML5 drag is
+    // driven instead of refused. Bound unconditionally at construction, exactly like the caption
+    // arbiter above and for the same reason — every composition (the app, the smokes, a test) gets
+    // production wiring, and a window whose drag observer was bound only on some paths is a window
+    // where the drag is dead on the others.
+    browser_->set_drag_observer(&drag_observer_);
+}
+
+// --- b1: the browser's drag observer -------------------------------------------------------------
+
+bool EditorWindow::DragObserver::on_start_dragging(DragOperationMask allowed, PointI start_view_dip)
+{
+    // The window's answer IS `StartDragging`'s return value. `begin()` refuses only a SECOND
+    // overlapping drag (osr_drag.h), so the ordinary case is true — which is the whole of the fix:
+    // the unimplemented default returned false, and the pinned header defines that as "abort the
+    // drag operation".
+    return owner_->drag_.begin(allowed, start_view_dip);
+}
+
+void EditorWindow::DragObserver::on_update_drag_cursor(DragOperation operation)
+{
+    // ⚠ ONLY WHILE A DRAG IS LIVE, and that gate is load-bearing rather than defensive. CEF keeps
+    // dispatching this callback for a beat AFTER the drag is over — the `DragTargetDrop` /
+    // `DragSourceEndedAt` the Shell just injected are answered on a later `CefDoMessageLoopWork`,
+    // typically with `DRAG_OPERATION_NONE`, which arrives after `apply_drag` has already restored
+    // the ordinary cursor. Without this early return that late `none` would be read as "the thing
+    // under the pointer refuses the drop" (the disambiguation below) and leave the editor showing
+    // the NO-DROP cursor for good: nothing resets it until the NEXT drag ends. Same story on the
+    // `escaped` / `focus_lost` cancels, which end the session while the renderer is still talking.
+    // The session-state half was already gated — `set_operation` no-ops when inactive — so this
+    // only brings the OS half into line with it.
+    if (!owner_->drag_.active())
+    {
+        return;
+    }
+    owner_->drag_.set_operation(operation);
+    // Straight through to the OS: this callback is the ONLY source of drag feedback, and CEF sends
+    // it only when the answer CHANGES, so pushing it down here is one OS call per change rather
+    // than one per pointer sample. THROUGH `drag_cursor_for`, which is where CEF's overloaded
+    // `DRAG_OPERATION_NONE` is disambiguated — during a drag it means "this will not take the
+    // drop", never "there is no drag" (osr_drag.h § the feedback cursor).
+    owner_->push_drag_cursor(drag_cursor_for(operation));
 }
 
 PresentPath EditorWindow::attach_present(render::IRhi& rhi)
@@ -195,6 +237,109 @@ void EditorWindow::sync_browser_origin()
     browser_->set_client_origin(backend_->client_origin());
 }
 
+namespace
+{
+
+// VK_ESCAPE, the cancel gesture of every drag protocol on every one of the three platforms. Named
+// rather than spelled `0x1B` at the comparison, matching the decoder tables in window.cpp that
+// PRODUCE it (their own `kVkEscape`); this is the consuming side of the same constant.
+constexpr std::int32_t kVkEscape = 0x1B;
+
+// Is a PHYSICAL client-pixel sample inside the browser's view?
+//
+// PHYSICAL, not DIP, and against the backend's own `client_size()`: that is the unit every
+// `ShellEvent` position is in (input.h), so no rounding enters the membership test. The DIP point
+// the injection carries is converted separately by the arbiter — a test done in DIP would disagree
+// with the arbiter's rounding at the one-pixel border, and "did the pointer leave the view" is
+// exactly the question a one-pixel disagreement makes flap.
+[[nodiscard]] bool inside_client(PointI position, render::Extent2D client)
+{
+    return position.x >= 0 && position.y >= 0 &&
+           position.x < static_cast<std::int32_t>(client.width) &&
+           position.y < static_cast<std::int32_t>(client.height);
+}
+
+} // namespace
+
+void EditorWindow::apply_drag(const OsrDragInjections& injections)
+{
+    for (const OsrDragInjection& injection : injections)
+    {
+        browser_->inject_drag(injection);
+    }
+    if (!drag_.active() && !injections.empty())
+    {
+        // The drag ENDED in this batch: put the ordinary cursor back. CEF sends no final
+        // `UpdateDragCursor(none)` of its own, so a feedback cursor left standing would outlive the
+        // gesture — the cosmetic cousin of the leaked cursor capture `cross_window_drag.h` guards
+        // against, and equally invisible to anything but a human.
+        push_drag_cursor(DragCursor::none);
+    }
+}
+
+// ONE PUSH PER CHANGE — see shell.h. Deliberately NOT gated on `drag_.active()`: the end-of-drag
+// reset runs precisely when the session has already gone inactive.
+void EditorWindow::push_drag_cursor(DragCursor cursor)
+{
+    if (cursor == last_drag_cursor_)
+    {
+        return;
+    }
+    last_drag_cursor_ = cursor;
+    backend_->set_drag_cursor(cursor);
+}
+
+void EditorWindow::drive_drag(const PointerDispatch& dispatch, const PointerEvent& event)
+{
+    const bool inside = event.action != PointerAction::leave &&
+                        inside_client(event.position, backend_->client_size());
+    switch (event.action)
+    {
+    case PointerAction::up:
+        // A DRAG ENDS ON ITS OWN BUTTON, not on any button: a right-click released mid-drag is not
+        // a drop, and treating it as one would commit a rehome the user never asked for. CEF starts
+        // the drag from a left-button gesture, so that is the one that ends it.
+        if (event.button == MouseButton::left)
+        {
+            apply_drag(drag_.release(dispatch.logical_position, event.modifiers, inside));
+            break;
+        }
+        apply_drag(drag_.move(dispatch.logical_position, event.modifiers, inside));
+        break;
+    case PointerAction::wheel:
+        // A wheel sample carries no position change worth reporting and has no meaning inside the
+        // drag protocol — CEF exposes no `DragTarget*` wheel member at all. Swallowed rather than
+        // forwarded: `SendMouseWheelEvent` during a drag is precisely the stray ordinary mouse
+        // event the protocol replaces.
+        break;
+    case PointerAction::move:
+    case PointerAction::down:
+    case PointerAction::leave:
+    default:
+        apply_drag(drag_.move(dispatch.logical_position, event.modifiers, inside));
+        break;
+    }
+}
+
+void EditorWindow::end_drag(OsrDragEndReason reason, bool inject)
+{
+    if (!drag_.active())
+    {
+        return;
+    }
+    const OsrDragInjections injections = drag_.cancel(reason);
+    if (inject)
+    {
+        apply_drag(injections);
+        return;
+    }
+    // TEARDOWN: the browser is closing (or already gone), so the injections have no reader. The
+    // session is still ENDED rather than left active — `drags_begun()`/`drags_ended()` is the pair
+    // that says a drag never dangled, and a window torn down mid-drag must not be the one case
+    // where they disagree. The cursor is restored through the backend, which outlives the browser.
+    push_drag_cursor(DragCursor::none);
+}
+
 void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
 {
     switch (event.kind)
@@ -240,10 +385,29 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
         browser_->set_focus(false);
         // The pointer-up that would have released a live drag is going to a different window now.
         input_.cancel_pointer_capture();
+        // b1: and for the SAME reason, the OSR drag can never be completed — its release will be
+        // delivered somewhere else entirely. Ended here rather than left hanging, because a drag
+        // the renderer believes is still running keeps its drop targets armed forever. The
+        // injections DO go out: the browser is alive and it is the thing that must be told.
+        end_drag(OsrDragEndReason::focus_lost, /*inject*/ true);
         break;
     case ShellEventKind::pointer:
     {
         const PointerDispatch dispatch = input_.route_pointer(event.pointer, now_us);
+        if (drag_.active())
+        {
+            // THE DRAG REPLACES THE MOUSE STREAM, it does not ride beside it. While a drag runs
+            // CEF's own contract is that the view is fed through `DragTarget*`
+            // (cef_browser.h:897-927); an ordinary `SendMouseMoveEvent` delivered in the same
+            // window is a second, contradictory description of where the pointer is, and it is what
+            // makes a drop land on the element the drag passed OVER rather than the one it ended
+            // on. Routed unconditionally rather than only for `InputTarget::browser`: a drag can
+            // only have begun from browser content in the first place, and a mid-drag region claim
+            // (a caption strip the cursor happens to cross) must not silently split the gesture
+            // between two consumers.
+            drive_drag(dispatch, event.pointer);
+            break;
+        }
         switch (dispatch.target)
         {
         case InputTarget::browser:
@@ -273,6 +437,18 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
     }
     case ShellEventKind::key:
     {
+        // b1: ESCAPE CANCELS A LIVE DRAG, and it is consumed rather than forwarded. The renderer
+        // has no drag loop of its own to escape from — the Shell owns the loop (osr_drag.h) — so a
+        // key event delivered here instead would reach the document as an ordinary Escape while the
+        // drag went on running. Ahead of `route_key` on purpose: a cancel must not depend on where
+        // editor-core says focus is (`FocusClass`), because a drag in flight is exactly when a
+        // stuck gesture is least recoverable.
+        if (drag_.active() && event.key.windows_key_code == kVkEscape &&
+            (event.key.action == KeyAction::raw_key_down || event.key.action == KeyAction::key_down))
+        {
+            end_drag(OsrDragEndReason::escaped, /*inject*/ true);
+            break;
+        }
         const KeyDispatch dispatch = input_.route_key(event.key, now_us);
         if (dispatch.target == InputTarget::browser)
         {
@@ -282,6 +458,9 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
         break;
     }
     case ShellEventKind::close_requested:
+        // b1: the window is going away, but the browser is still live and still pumping this
+        // iteration — so the drag is ended THROUGH the protocol rather than abandoned.
+        end_drag(OsrDragEndReason::window_closed, /*inject*/ true);
         alive_ = false;
         break;
     case ShellEventKind::none:
@@ -383,6 +562,11 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
 
 void EditorWindow::close()
 {
+    // b1: end a live drag BEFORE the browser goes, without injecting — the host is one line from
+    // its own close, so a `DragTarget*` call here would be a message to something that is already
+    // tearing down. Ending it anyway keeps `drags_begun()`/`drags_ended()` balanced on every path,
+    // which is what makes "no drag ever dangled" an assertable property rather than a hope.
+    end_drag(OsrDragEndReason::window_closed, /*inject*/ false);
     if (browser_ != nullptr)
     {
         browser_->close();
@@ -401,6 +585,7 @@ void EditorWindow::begin_close()
     // drives ONE shared drain for every closing window (browser.h § teardown). The compositor and
     // backend stay attached until finish_close(): the browser's sink is already unbound here, so no
     // frame reaches the compositor during the drain that follows.
+    end_drag(OsrDragEndReason::window_closed, /*inject*/ false); // b1 — see close() for why not
     if (browser_ != nullptr)
     {
         browser_->request_close();
@@ -417,6 +602,7 @@ void EditorWindow::detach_browser()
     // Mid-process retire: unbind the browser's frame sink so it stops painting into a compositor that
     // is about to go away, but do NOT close the browser — its CEF teardown is deferred to the shared
     // all-closing shutdown() drain (browser.h § IBrowserHost::detach; the e10a `!in_dtor_` fix).
+    end_drag(OsrDragEndReason::window_closed, /*inject*/ false); // b1 — see close() for why not
     if (browser_ != nullptr)
     {
         browser_->detach();

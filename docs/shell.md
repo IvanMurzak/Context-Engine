@@ -108,18 +108,18 @@ and injects `contextEditorQuery` from `OnContextCreated` — so the Shell's help
 app object, and without it no handshake exists and every live smoke fails.
 e12c-1 proved that hosting model on **two** smokes and **e12c-2** fanned it out to all **nine**, so the
 macOS leg now builds and runs the whole `editor-cef-smoke-shell*` family out of real `.app` bundles —
-**eleven** bundles counting `context_editor`, each with its five helpers and its own embedded framework
+**twelve** bundles counting `context_editor`, each with its five helpers and its own embedded framework
 (309 MB apiece ⇒ **3.1 GB** for `editor/shell/Release`, inside a whole CEF-ON `src/build/dev` of
 **8.0 GB**, both MEASURED on an arm64 macOS host at **ten** bundles — against the ~14 GB free that
 GitHub's `macos-latest` runner-image spec publishes, an upstream figure this repo does not own, so
 re-check it there rather than trusting this line). ⚠ **That list HAS grown since the measurement** —
-e09e-3's `-inspector-fanout` is the eleventh bundle, so the same 309 MB apiece puts
-`editor/shell/Release` near **3.4 GB** today. The figure is a re-measurement waiting to happen, and it
+e09e-3's `-inspector-fanout` and b1's `-osrdrag` are the eleventh and twelfth bundles, so the same 309 MB apiece puts
+`editor/shell/Release` near **3.7 GB** today. The figure is a re-measurement waiting to happen, and it
 is the one this document asks to be re-checked before the list grows again.
 What e12c-1 deliberately did NOT bring is a WINDOW: macOS's CEF smokes are HEADLESS, exactly as
 Windows' are, and they still are. The live windowed macOS proof landed with **e12c-3** (#442) as a
 CEF-FREE smoke instead — deliberately, so the windowed claim does not depend on the CEF keychain
-class (#437) and rides the plain build legs; taking the ten CEF smokes through real NSWindows is
+class (#437) and rides the plain build legs; taking the eleven CEF smokes through real NSWindows is
 tracked separately (§ 11). e12c-1 also did not RUN its two smokes on the
 macOS leg — both ctests were registered `DISABLED` because `CefShutdown()` never returned there. That is
 FIXED: the cause was neither the pump configuration nor macOS 26, but a machine-global keychain item
@@ -133,7 +133,7 @@ prompt. Four Cocoa
 shapes have no Win32 or
 X11 analogue and are therefore decoded by PURE functions in `window.cpp`, executed by
 `editor-shell-test_window` on all three legs — which matters more here than anywhere else in this
-document, because until M9 e12c-3 no CI job ran a windowed macOS test at all, and the ten live CEF
+document, because until M9 e12c-3 no CI job ran a windowed macOS test at all, and the eleven live CEF
 smokes still do not (#443): `editor-shell-cocoa-window` is the ONE windowed macOS leg, so the
 pure-function split is still what gives these four shapes coverage on ubuntu and windows too:
 
@@ -361,7 +361,7 @@ without touching the user's real setting.
 
 **The macOS native menu (editor-window-chrome d3, menu structure 03).** editor-core publishes its
 ONE declarative menu model over `menu.publish` (`window_bridge.h` — installed on every window that
-installs `window.*`, so the ten-smoke rule holds structurally), the composition root parses it
+installs `window.*`, so the eleven-smoke rule holds structurally), the composition root parses it
 fail-closed (`menu_model.h`, all-legs tested) and asks the Cocoa backend to build the global
 `NSMenu` bar from it (`cocoa_menu.h` — real in `cocoa_window.mm`, an honest false everywhere else,
 which is exactly the `accepted:false` a Windows/Linux publish degrades to: the web menubar in the
@@ -680,6 +680,9 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-cef-keychain` | #437: the source gate that every CEF smoke isolates Chromium's OSCrypt key from the MACHINE keychain — each source constructing a `CefShellOptions` under `src/editor/shell/cef/src/` sets `use_mock_keychain`, each source defining `OnBeforeCommandLineProcessing` under `src/editor/` names the switch, and the option is still declared/latched/appended (`tools/check_cef_keychain_isolation.py`). Needs no CEF build, so it runs on the CEF-OFF legs too — see `docs/cef-keychain-isolation.md` |
 | `editor-shell-test_window_registry` | e10a: the registry — window 0 primary, ids minted in order and NEVER reused, all four create-failure classes reported once with the source window (and the registry still usable after four in a row), the live-window cap, per-window `origin` reporting, and the CE #319 lifetime rule in both directions: a destroyed window's browser dies NOW while its session is retired until the manager does, across 25 create/destroy cycles and across `shutdown()` with windows still open. Since the close-button fix it also carries the `window.close` POLICY: the primary's close is the app quit and reaches EVERY window, a secondary's destroys only it, `destroy_window` still refuses the primary, and a stale primary id (window 0 already dead, a secondary still up) is `unknown-window`, never a quit |
 | `editor-cef-smoke-shell-multiwindow` | e10a, the LIVE half a fake cannot reach: a SECOND real CEF browser booting its OWN editor-core instance (two DIFFERENT round-tripped handshake nonces), a REAL renderer `window.open` refused by `OnBeforePopup` with NO browser created, and a MID-PROCESS destroy followed by another create (`editor-cef-smoke` job, all three OSes since e12c-2) |
+| `editor-shell-test_osr_drag` | b1 (D11): the OSR drag protocol as a state machine — the `cef_drag_operations_mask_t` mirror (all seven enumerators, plus that `EVERY` is `UINT_MAX` and NOT the OR of the named bits, plus that `none` is permitted by no mask), and CEF's two normative ordering rules asserted as SEQUENCES rather than counts: `enter` exactly once per entry then `over`, the leave/re-enter cycle, the IMPLICIT enter a drop with no prior move needs, all `DragTarget*` before all `DragSource*`, `DRAG_OPERATION_NONE` on every cancel and on a release outside the view, an inactive session emitting NOTHING (which is what makes "no `DragSource*Ended*` after a false `StartDragging`" structural), and `drags_begun() == drags_ended()` on every terminal path |
+| `editor-shell-test_shell` (b1 cases) | The owner loop's drag WIRING, on the legs where no browser exists: the observer bound at construction, the pointer stream routed into the session INSTEAD of `send_pointer` for the drag's whole duration (asserted by the browser receiving no ordinary pointer sample), the view-membership test against the backend's own `client_size()`, Escape CONSUMED (not forwarded) only while a drag is live, focus loss ending the drag through the protocol, `close()` ending it WITHOUT injecting, and the drag cursor pushed down and reset |
+| `editor-cef-smoke-shell-osrdrag` | b1 (D11), the LIVE half nothing else can reach: a REAL renderer's `dragstart` reaches `CefRenderHandler::StartDragging` (the member whose unimplemented default aborted every drag), CEF answers the Shell's `DragTarget*` injections with `UpdateDragCursor(COPY)` — an event nothing on our side of the process boundary can produce — and a real `drop` fires in the live document, asserted PER-PIXEL against a full-window fixture that repaints itself a colour the editor never uses (with the "not that colour yet" negative taken first, so the verdict cannot be vacuous). On the Linux leg the gesture goes through the X SERVER (`--real-window`, e12a-x11-legs) (`editor-cef-smoke` job, all three OSes) |
 
 All `editor-shell-*` tests are a plain (non-gate) family: the `build` job's general ctest step runs
 them on all three OS legs and `--preset dev` builds them, so **no `ci.yml` `--target` bookkeeping**.
@@ -687,13 +690,22 @@ That covers `context_editor_panels`' tests too — they register in the same fam
 itself is built transitively by the jobs that build `context_editor` / the CEF smoke, so e05d1 needed
 **no `ci.yml` change at all**.
 `editor-cef-smoke-shell` is the exception and IS on the `editor-cef-smoke` job's hand-maintained
-`--target` list — the "Not Run = RED" tripwire. So are **all nine** of its siblings:
+`--target` list — the "Not Run = RED" tripwire. So are **all ten** of its siblings:
 `editor-cef-smoke-shell-restore` (e05d4), `-palette` (e07d), `-settings` (e06d),
-`-multiwindow` (e10a), `-tearout` (e10b), `-drag` (e10c), `-uimirror` (e10d), `-iframe` (e13a) and
-`-inspector-fanout` (e09e-3) — **ten** registrations in total, which is the number every statement
+`-multiwindow` (e10a), `-tearout` (e10b), `-drag` (e10c), `-uimirror` (e10d), `-iframe` (e13a),
+`-osrdrag` (b1) and
+`-inspector-fanout` (e09e-3) — **eleven** registrations in total, which is the number every statement
 about this family must use (the same miscount §11 corrects, and the one that once left the parent's
-configure-time staging roster two targets short). The roster itself therefore names **eleven**
-targets: `context_editor` plus those ten.
+configure-time staging roster two targets short). The roster itself therefore names **twelve**
+targets: `context_editor` plus those eleven.
+
+⚠ **`-drag` AND `-osrdrag` ARE TWO DIFFERENT MECHANISMS, not a rename.** `-drag` (e10c) is the
+Shell-mediated CROSS-WINDOW drag: a panel moved between two Shell windows, over the global OS cursor
+capture, with the drop zone answered by the TARGET window's editor-core across the D6 relay.
+`-osrdrag` (b1) is HTML5 drag-and-drop INSIDE one document: `CefRenderHandler::StartDragging` and the
+six windowless-only `CefBrowserHost` drag members, which is what Dockview's own DnD consumes. They are
+LAYERED, not alternatives — `drag.ts`'s own fact 2 states the split from the JS side and it stays
+true — so a change that made one displace the other would be a regression in both.
 **e12c-1** had made that list **PER-OS** (Windows/Linux all nine, macOS the two whose `.app` hosting
 model it ported) because the other seven were declared only under `if(OS_WINDOWS OR OS_LINUX)` and a
 shared list would have failed the macOS build outright. **e12c-2** fanned the recipe out to all nine, so
@@ -704,6 +716,8 @@ Windows-only. No new ctest NAME was involved on macOS in either task, so the "No
 bites only on the `--target` side.
 Two things deliberately stay spelled out per target at the call sites rather than moving inside that
 function: `SET_EXECUTABLE_TARGET_PROPERTIES(<exe>)` and `add_dependencies(<exe> context_editor_cef_stage)`.
+(b1's `-osrdrag` is the first smoke added since that function landed, and it needed exactly those two
+lines plus one `context_configure_shell_cef_smoke()` call — which is the function doing its job.)
 `tools/check_cef_staging.py` reads both from the SOURCES with the executable named LITERALLY; it resolves
 a `${var}` through file-local `set()` but a function PARAMETER is unresolvable by construction, and the
 lint correctly refuses to skip a name it cannot resolve — it reports the stage dependency as UNVERIFIED
@@ -730,7 +744,7 @@ tiers now close it, because neither is sufficient alone:
   tier exists; and the claim that this repo declares exactly one non-empty roster is asserted in
   `tools/tests/test_cef_staging.py`, so a RENAMED roster cannot become how check 5 passes.
 The two macOS registrations e12c-1 landed were `DISABLED TRUE` until issue **#437** was fixed at its
-cause; all ten now RUN there. ⚠ A `DISABLED` ctest reports `Not Run (Disabled)` and leaves ctest's
+cause; all eleven now RUN there. ⚠ A `DISABLED` ctest reports `Not Run (Disabled)` and leaves ctest's
 exit code at
 **0**, so for as long as the property was there the CE #319 `cef_shutdown_returned` assertion could not
 fail on this leg — which is what makes `DISABLED` the strongest possible form of a vacuous gate, and why
@@ -952,7 +966,7 @@ a platform that renders stock chrome; `window.h` states the split). A maximize c
 poll that already detects the flip publishes it as the **`editor.ui.chrome` fact** (`chrome_facts.h`,
 UNICAST to the affected window, `shell` origin, the eighth built-in `editor.ui` topic), which
 editor-core drains on its existing `ui.mirror-poll`. Being a boot-time surface, every one of these
-is installed in ALL TEN live CEF smokes in the PR that introduced it (the ten-smoke rule,
+is installed in ALL ELEVEN live CEF smokes in the PR that introduced it (the eleven-smoke rule,
 `window_bridge.h`) — a1 for `chrome.state` + the three verbs, d1 for `session.control`, d3 for
 `menu.publish`.
 
@@ -1113,7 +1127,7 @@ call time, so the report can never again outrun the behaviour.
 
 | Claim | Pinned by |
 |---|---|
-| `chrome.state` shape, the three verbs, honest unbound degrade, `window.focus` `windowId` refusal | `editor-shell-test_window_bridge`; the read + verbs asserted with `bridge.refused() == 0` in all ten CEF smokes |
+| `chrome.state` shape, the three verbs, honest unbound degrade, `window.focus` `windowId` refusal | `editor-shell-test_window_bridge`; the read + verbs asserted with `bridge.refused() == 0` in all eleven CEF smokes |
 | The two backend chrome verbs on every backend; the headless recorder for the push-down | `editor-shell-test_window` (the `headless_backend_chrome_*` cases), `editor-shell-test_shell` (the generation-gated push) |
 | The `maximized` fact: envelope, unicast, no phantom boot fact at the real poll interval | `editor-shell-test_chrome_facts`, `editor-shell-test_shell` |
 | Four caption tokens in all four mirror sites, unknown kind refused | `editor-shell-test_editor_state_bridge`, `webui-panel-contract`, `webui-ts-unit` (`editorstate.test.ts`) |
@@ -1200,7 +1214,7 @@ cmake --build --preset dev --target context_editor    # from src/
 | Dockview tab-strip hover (a3, 07 §4) | Hovering an inactive tab, or either tab of an unfocused group, steps its background to the theme's `colors.panel2` — the same surface step the kit's buttons/rows use; the active tab of the FOCUSED group is unchanged (already the pressed/selected step). `theme_dom.test.ts` pins that the served rule targets the right three `--dv-*` variables and that setting them really does drive dockview's own background-color rule to `colors.panel2` on a live element; genuine `:hover` cannot be triggered from the `webui-ts-unit` harness (no CDP access from in-page script), so this row is the pixel confirmation. |
 | Wheel | The page scrolls, and in the direction the wheel turned. |
 | Keyboard | Typing into a text field inserts the characters, including a non-ASCII one; Tab moves DOM focus. |
-| Drag | Press inside the window, drag past the window edge and release: the gesture stays with where it started and ends on the release. |
+| Drag (pointer CAPTURE, not HTML5 DnD) | Press inside the window, drag past the window edge and release: the gesture stays with where it started and ends on the release. HTML5 drag-and-drop is a different mechanism with its own table below (`b1`). |
 | `PET_POPUP` | Open a `<select>` / dropdown: the popup renders over the page, clipped to its own rect, and closes cleanly with no ghost of it left behind. **On a non-100 % monitor** the menu must appear under the control it belongs to, at full size, and a CLICK on it must select — the `a2` symptoms. Note `a2` now covers the placement half automatically (`editor-shell-test_compositor` at scale 1.5 and 1.25, `editor-shell-test_shell` end to end); `f2` reconciles this row. |
 | Live resize | Drag the window edge: content re-lays out and the window does not tear, flash black, or lag more than a couple of CEF paints behind. |
 | Live DPI change | Drag the window between monitors at different scale factors (or change scaling while it is open): the window keeps its APPARENT size and the UI re-renders crisp, not scaled-up. |
@@ -1210,6 +1224,28 @@ cmake --build --preset dev --target context_editor    # from src/
 
 Automating this needs an interactive runner, which the design's gate table still tracks as
 unprovisioned — **every row of the table above is still manual, on all three OSes.**
+
+### Still manual — HTML5 drag-and-drop (b1, D11)
+
+What CI reaches here is more than it reaches for most of the table above, so the split is worth being
+precise about. `editor-cef-smoke-shell-osrdrag` drives a REAL gesture into a LIVE browser and asserts
+the whole protocol end to end — and on the **Linux** leg those pointer samples go through the **X
+server** and back in through the shipping `translate_x11_event` decoder (`--real-window`,
+e12a-x11-legs), so that leg is a genuine end-to-end proof rather than a queue the smoke wrote itself.
+Windows CI is Session 0 (no interactive desktop, so no gesture can be driven there at all) and macOS
+runs the smoke headless, which is why both keep rows here. Every row names what CI DOES pin, so
+"manual" never reads as "unverified".
+
+| Step | Expected observation | What CI already pins |
+|---|---|---|
+| All OSes: drag a Dockview tab within one window | The tab lifts, drop-to-split highlights appear on every edge, and releasing re-docks the panel where the highlight said it would go — **with no `panelhost.ts` change**, because Dockview's own DnD handlers were always there and only the events were missing | The PROTOCOL end to end against a live renderer (`editor-cef-smoke-shell-osrdrag`: a real `dragstart` reaches `StartDragging`, CEF answers our `DragTarget*` injections with `UpdateDragCursor(COPY)`, and a real `drop` repaints the fixture — asserted per-pixel). Dockview's own handler set is a fact of the pinned `dockview-core@7.0.2` bundle, not of our code |
+| All OSes: press Escape mid-drag | The drag aborts, nothing is dropped, and the ordinary cursor comes back | `editor-shell-test_shell` (the Escape arm cancels, emits `leave → source_ended(none) → system_ended`, resets the cursor, and does NOT forward the key); `editor-shell-test_osr_drag` (the same sequence at the protocol level) |
+| All OSes: drag past the window edge and back | The drop highlight disappears when the pointer leaves the view and re-appears when it returns; releasing outside drops nothing | `editor-shell-test_shell` (leave/re-enter emits `leave` then a fresh `enter`, never a second `enter`); `editor-shell-test_osr_drag` (release-outside emits no `DragTargetDrop` and reports `DRAG_OPERATION_NONE`) |
+| **Windows**: the drag-feedback cursor | Over a valid drop target the pointer stays ordinary; over dead space it becomes the no-drop cursor; after the release the ordinary cursor returns | The Win32 arm is pure OS calls (`SetCursor` + the `WM_SETCURSOR` re-apply gated on `HTCLIENT`) that **no CI job can execute** — Session 0 delivers no pointer. What IS pinned is everything upstream: `drag_cursor_for` maps CEF's overloaded `DRAG_OPERATION_NONE` to `refused` (`editor-shell-test_osr_drag`), and the push-down wiring — one call per change, `none` on every drag end — is asserted through the recording headless backend on all three legs (`editor-shell-test_shell`) |
+| **Windows**: dragging over the frameless window's border | The resize cursors still appear over the chrome regions during a drag | The `HTCLIENT` gate is one line in `win32_window.cpp`'s `WM_SETCURSOR` arm; the NC hit-test half it defers to is pinned by `hit_test_frame`'s sweep corpus (`editor-shell-test_window`) |
+| **macOS**: the drag-feedback cursor | The real AppKit drag badges — `dragCopyCursor` for a copy, `dragLinkCursor` for a link, `operationNotAllowedCursor` over dead space | macOS is the one platform whose badge cursors are public API, so the mapping is real rather than a floor — but `editor-cef-smoke-shell-osrdrag` runs HEADLESS on macOS (no window server interaction), so the `[NSCursor …] set` calls themselves are executed by nothing in CI. The mapping that chooses them is `editor-shell-test_osr_drag`'s |
+| **Linux**: the drag-feedback cursor | The pointer changes shape over the window during a drag and returns afterwards | The X11 arm DOES execute in CI (the `--real-window` Linux leg creates a real window and this code runs on it), but its EFFECT is unobservable there — xvfb has no one to look at the cursor. `XCreateFontCursor` failing is handled as cosmetic, and the resource is freed on every change and at window destroy |
+| All OSes: drag OUT of the editor, or a file INTO it | **Does not work yet, by design** — see § 11 | Nothing, deliberately: this is a named gap, not a regression |
 
 ### Still manual — the window chrome (editor-window-chrome a1–f1, closed out by g1)
 
@@ -1284,7 +1320,7 @@ distribution (`include/cef_render_handler.h`, `include/cef_browser.h`,
 with the `dev` preset). Reading the headers needs no MSVC and no link step, so this audit runs on the
 box whose GCC dev gate cannot build the CEF-linking targets (see this repo's `CLAUDE.md`).
 
-`ShellCefClient` (`src/editor/shell/cef/src/cef_shell.cpp:668-673`) derives `CefClient`,
+`ShellCefClient` (`src/editor/shell/cef/src/cef_shell.cpp:704-709`) derives `CefClient`,
 `CefRenderHandler`, `CefLifeSpanHandler`, `CefLoadHandler`, `CefDisplayHandler` and
 `CefRequestHandler` — **not** `CefContextMenuHandler`, and nothing in `src/` derives `CefDragHandler`
 or calls the windowless-only `CefBrowserHost` drag/IME/visibility family.
@@ -1294,27 +1330,28 @@ or calls the windowless-only `CefBrowserHost` drag/IME/visibility family.
 | Member | Verdict | Detail |
 |---|---|---|
 | `GetAccessibilityHandler` | gap | An OS-level screen reader sees nothing in this window; the `gui-a11y-*` gates assert the C++ models and the DOM only, which is honestly green and still blind here — sharp for a repo with R-A11Y-001. Registered outside this set's scope (no task id yet); tracked in `01-current-architecture.md` §1 and this table pending a follow-up issue. |
-| `GetRootScreenRect` | **implemented** | Closed by task `a1`. `cef_shell.cpp:794` — the CLIENT rect on screen, always in DIP (`osr_root_screen_rect`, dpi.h), with no per-platform split: the header's own fallback for this member is `GetViewRect`, so the honest correction of it for a windowless browser whose view IS the client is that same rect moved to where it really is. |
-| `GetViewRect` | **implemented** | `cef_shell.cpp:777` — reports the view in DIP. |
-| `GetScreenPoint` | **implemented** | Closed by task `a1` — the default returned `false`, so CEF treated view coordinates as screen coordinates, which **was** the reported offset context menu (owner item #5). `cef_shell.cpp:807` — view DIP + the window's CLIENT origin through `osr_screen_point` (dpi.h), taking the per-platform device/DIP split `GetRootScreenRect` above must NOT take. macOS remains an honest zero-origin (no NSView owner exists there yet — § 5), i.e. unchanged rather than wrongly changed. |
-| `GetScreenInfo` | **implemented** | `cef_shell.cpp:817` — `device_scale_factor` plus the view rect in **DIP**. Corrected by `a2`: this member does NOT take the device/DIP split. The split is documented for `GetScreenPoint` alone; `GetScreenInfo`'s own doc names `GetViewRect` (DIP) as the fallback CEF substitutes when the rect is left empty, and upstream `cefclient` assigns a DIP rect on both of its branches (`osr_window_win.cc`). `rect`/`available_rect` are what CEF fits an OSR popup into, so the device-pixel version claimed a 1200x900 screen for an 800x600 DIP view at 150 % — a `<select>` near the bottom then had 300 imaginary DIP of room and opened downward past the view instead of flipping up. |
-| `OnPopupShow` | **implemented** | `cef_shell.cpp:848`. |
-| `OnPopupSize` | **implemented** | `cef_shell.cpp:858` — the rect is reported correctly, in DIP, and is forwarded to the sink UNCONVERTED on purpose (`a2`): the compositor converts, so the arithmetic sits where all three `build` legs execute it. The mis-placed/cropped popup was downstream, in how the compositor consumed it, and is closed by `a2`. |
-| `OnPaint` | **implemented** | `cef_shell.cpp:877`. |
+| `GetRootScreenRect` | **implemented** | Closed by task `a1`. `cef_shell.cpp:830` — the CLIENT rect on screen, always in DIP (`osr_root_screen_rect`, dpi.h), with no per-platform split: the header's own fallback for this member is `GetViewRect`, so the honest correction of it for a windowless browser whose view IS the client is that same rect moved to where it really is. |
+| `GetViewRect` | **implemented** | `cef_shell.cpp:813` — reports the view in DIP. |
+| `GetScreenPoint` | **implemented** | Closed by task `a1` — the default returned `false`, so CEF treated view coordinates as screen coordinates, which **was** the reported offset context menu (owner item #5). `cef_shell.cpp:843` — view DIP + the window's CLIENT origin through `osr_screen_point` (dpi.h), taking the per-platform device/DIP split `GetRootScreenRect` above must NOT take. macOS remains an honest zero-origin (no NSView owner exists there yet — § 5), i.e. unchanged rather than wrongly changed. |
+| `GetScreenInfo` | **implemented** | `cef_shell.cpp:853` — `device_scale_factor` plus the view rect in **DIP**. Corrected by `a2`: this member does NOT take the device/DIP split. The split is documented for `GetScreenPoint` alone; `GetScreenInfo`'s own doc names `GetViewRect` (DIP) as the fallback CEF substitutes when the rect is left empty, and upstream `cefclient` assigns a DIP rect on both of its branches (`osr_window_win.cc`). `rect`/`available_rect` are what CEF fits an OSR popup into, so the device-pixel version claimed a 1200x900 screen for an 800x600 DIP view at 150 % — a `<select>` near the bottom then had 300 imaginary DIP of room and opened downward past the view instead of flipping up. |
+| `OnPopupShow` | **implemented** | `cef_shell.cpp:884`. |
+| `OnPopupSize` | **implemented** | `cef_shell.cpp:894` — the rect is reported correctly, in DIP, and is forwarded to the sink UNCONVERTED on purpose (`a2`): the compositor converts, so the arithmetic sits where all three `build` legs execute it. The mis-placed/cropped popup was downstream, in how the compositor consumed it, and is closed by `a2`. |
+| `OnPaint` | **implemented** | `cef_shell.cpp:913`. |
 | `OnAcceleratedPaint` | deliberately not needed | Owner ruling 2026-07-19: stock wgpu-native exposes no external-texture import and a patched fork was rejected; rationale recorded in `cef_shell.h:13-17`. The seam stays wired (`CefShellOptions::accelerated_osr` feeds e03's `OsrImportOptions`) and `shared_texture_enabled` is left at its default (off), so CEF never calls this. |
 | `GetTouchHandleSize` | gap | No touch input pipeline exists anywhere in the Shell (`input.h` has no touch event type). `01-current-architecture.md` §1 already flags this "not needed today" but explicitly **not yet decided** — no ruling is recorded. Tracked here pending a follow-up issue. |
 | `OnTouchHandleStateChanged` | gap | Pairs with `GetTouchHandleSize` above — same absent decision, same absent input source. |
-| `StartDragging` | gap | Default returns `false`, which the header defines as *"abort the drag operation"*: every HTML5 drag in the editor is actively refused (owner item #3, dead tab drag). Closed by task `b1`. |
-| `UpdateDragCursor` | gap | No drag-feedback cursor once dragging exists. Closed by task `b1`. |
+| `StartDragging` | **implemented** | Closed by task `b1`. `cef_shell.cpp:962` — the default returned `false`, which the header defines as *"abort the drag operation"*, so every HTML5 drag in the editor was ACTIVELY REFUSED at its first `dragstart` (owner item #3, the dead tab drag). It now converts the header's SCREEN start point to view DIP (`osr_view_point`, dpi.h — the drag is the one part of this contract that needs the mapping backwards) and hands it to the window's `OsrDragSession`, whose answer IS this member's return value. The drag data is `Clone()`d with `ResetFileContents()`, per the header's own instruction on `DragTargetDragEnter`. |
+| `UpdateDragCursor` | **implemented** | Closed by task `b1`. `cef_shell.cpp:1003` — the operation is recorded on the session (it becomes `DragSourceEndedAt`'s `op`) and pushed to the OS through `IWindowBackend::set_drag_cursor`, which Win32/X11/Cocoa each implement. Note the vocabulary change at that seam: `DRAG_OPERATION_NONE` from THIS callback means "the thing under the pointer will not take the drop", not "there is no drag", so `drag_cursor_for` (osr_drag.h) maps it to a `refused` cursor — a backend handed the bare enumerator could not tell the two apart. |
 | `OnScrollOffsetChanged` | gap | `01-current-architecture.md` §1: "not needed today" but explicitly **not yet decided**; no ruling recorded. Tracked here pending a follow-up issue. |
 | `OnImeCompositionRangeChanged` | gap | Composition-based text input has no candidate-window placement. Registered outside this set's scope (IME family); tracked in `01-current-architecture.md` §1 pending a follow-up issue. |
 | `OnTextSelectionChanged` | gap | OS services that read the current selection (e.g. a screen reader's text cursor, macOS Services) get nothing. Registered outside this set's scope; tracked pending a follow-up issue. |
 | `OnVirtualKeyboardRequested` | gap | Same IME family as `OnImeCompositionRangeChanged` — an on-screen keyboard is never shown or hidden automatically. Registered outside this set's scope; tracked pending a follow-up issue. |
 
-Count: 17/17 — **seven** implemented, one deliberately not needed, nine gaps. (The audit counted five
-and eleven; `a1` closed `GetScreenPoint` and `GetRootScreenRect`. The counts are updated in place
-rather than left as of the audit date, so this table stays a statement about the CURRENT tree — which
-is the only form in which it can be re-audited.)
+Count: 17/17 — **nine** implemented, one deliberately not needed, **seven** gaps. (The audit counted
+five and eleven; `a1` closed `GetScreenPoint` and `GetRootScreenRect`, and `b1` closed `StartDragging`
+and `UpdateDragCursor`. The counts are updated in place rather than left as of the audit date, so this
+table stays a statement about the CURRENT tree — which is the only form in which it can be
+re-audited.)
 
 ### `CefBrowserHost` — windowless-only members
 
@@ -1324,24 +1361,24 @@ windowless input-injection surface the render-handler contract above depends on)
 
 | Member | Verdict | Detail |
 |---|---|---|
-| `SetFocus` (`cef_browser.h:401`) | **implemented** | `cef_shell.cpp:1402`. |
-| `WasResized` (`:699`) | **implemented** | `cef_shell.cpp:1327` — the resize protocol: makes CEF re-read `GetViewRect` and repaint. |
+| `SetFocus` (`cef_browser.h:401`) | **implemented** | `cef_shell.cpp:1530`. |
+| `WasResized` (`:699`) | **implemented** | `cef_shell.cpp:1455` — the resize protocol: makes CEF re-read `GetViewRect` and repaint. |
 | `WasHidden` (`:707`) | gap | No call site in `src/`. CEF keeps laying out and calling `OnPaint` at full rate while the window is minimized or hidden — a CPU/GPU cost with no correctness effect. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
-| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1316-1328`) drives only `WasResized` on a DPI change, and the CEF SDK's own doc comment for `WasResized` (`cef_browser.h`) says it re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — note this is narrower than `resize()`'s own local comment, which says `WasResized` re-reads `GetScreenInfo` too; that local comment is itself inaccurate against the pinned SDK doc, a pre-existing mismatch outside this task's scope. So a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
-| `SendKeyEvent` (`:751`) | **implemented** | `cef_shell.cpp:1394`. |
-| `SendMouseClickEvent` (`:758`) | **implemented** | `cef_shell.cpp:1364,1368`. |
-| `SendMouseMoveEvent` (`:768`) | **implemented** | `cef_shell.cpp:1356,1361`. |
-| `SendMouseWheelEvent` (`:780`) | **implemented** | `cef_shell.cpp:1372`. |
+| `NotifyScreenInfoChanged` (`:730`) | gap | No call site. `resize()` (`cef_shell.cpp:1444-1455`) drives only `WasResized` on a DPI change, and the CEF SDK's own doc comment for `WasResized` (`cef_browser.h`) says it re-reads `GetViewRect`/`OnPaint`, not `GetScreenInfo`/`GetRootScreenRect` — note this is narrower than `resize()`'s own local comment, which says `WasResized` re-reads `GetScreenInfo` too; that local comment is itself inaccurate against the pinned SDK doc, a pre-existing mismatch outside this task's scope. So a live DPI change may not refresh CEF's own `window.devicePixelRatio` / `screen.*` JS values. Newly found by this audit, no task id; tracked here pending a follow-up issue. |
+| `SendKeyEvent` (`:751`) | **implemented** | `cef_shell.cpp:1522`. |
+| `SendMouseClickEvent` (`:758`) | **implemented** | `cef_shell.cpp:1492,1496`. |
+| `SendMouseMoveEvent` (`:768`) | **implemented** | `cef_shell.cpp:1484,1489`. |
+| `SendMouseWheelEvent` (`:780`) | **implemented** | `cef_shell.cpp:1500`. |
 | `SendTouchEvent` (`:788`) | gap | Same absent decision as `GetTouchHandleSize` / `OnTouchHandleStateChanged` above — no touch input pipeline exists in the Shell. Tracked here pending a follow-up issue. |
 | `NotifyMoveOrResizeStarted` (`:801`) | gap | Popups are not dismissed or repositioned when the window moves. Registered outside this set's scope; already on `03-osr-geometry-and-drag.md`'s pre-registered gap list (§ "a0 — The OSR conformance audit"), pending a follow-up issue. |
-| `SetWindowlessFrameRate` (`:821`) | deliberately not needed | The frame rate is fixed at browser-creation time via `CefBrowserSettings.windowless_frame_rate` (`cef_shell.h:116`, set at `cef_shell.cpp:1813-1814`; default 60, most smokes pin 10) and never needs a runtime change — consistent with `cef_shell.h`'s `NEVER SendExternalBeginFrame … CEF-internal pacing only` rule for the same reason: let CEF own pacing rather than drive it from the host. |
+| `SetWindowlessFrameRate` (`:821`) | deliberately not needed | The frame rate is fixed at browser-creation time via `CefBrowserSettings.windowless_frame_rate` (`cef_shell.h:116`, set at `cef_shell.cpp:2003-2004`; default 60, most smokes pin 10) and never needs a runtime change — consistent with `cef_shell.h`'s `NEVER SendExternalBeginFrame … CEF-internal pacing only` rule for the same reason: let CEF own pacing rather than drive it from the host. |
 | `ImeSetComposition` and siblings — `ImeSetComposition` (`:849`), `ImeCommitText` (`:865`), `ImeFinishComposingText` (`:876`), `ImeCancelComposition` (`:885`) | gap | The host-injection half of the same IME family as `OnImeCompositionRangeChanged` / `OnVirtualKeyboardRequested` above — no call site for any of the four. Registered outside this set's scope; tracked pending a follow-up issue. |
-| `DragTargetDragEnter` / `DragTargetDragOver` / `DragTargetDragLeave` / `DragTargetDrop` (`:897-927`) | gap | No call site — the injection half of the drag protocol `StartDragging` above needs. Closed by task `b1`. |
-| `DragSourceEndedAt` / `DragSourceSystemDragEnded` (`:939-951`) | gap | No call site. Closed by task `b1`. |
+| `DragTargetDragEnter` (`:897`) / `DragTargetDragOver` (`:908`) / `DragTargetDragLeave` (`:917`) / `DragTargetDrop` (`:927`) | **implemented** | Closed by task `b1`. `cef_shell.cpp:1562`, `:1567`, `:1571`, `:1574` — all four inside ONE `inject_drag` (`:1541`), a pure translation of the value `OsrDragSession` emits. Which member, in what order, and with which operation is decided in the CEF-FREE `osr_drag.h`, so the two normative ordering rules (an `over` only after an `enter`; all `DragTarget*` before all `DragSource*`) are pinned by `editor-shell-test_osr_drag` on all three default `build` legs rather than in the one TU no local gate compiles. |
+| `DragSourceEndedAt` (`:939`) / `DragSourceSystemDragEnded` (`:951`) | **implemented** | Closed by task `b1`. `cef_shell.cpp:1580`, `:1585`. `DragSourceEndedAt` takes bare view-space ints rather than a `CefMouseEvent`, and its `op` is what the view last reported through `UpdateDragCursor` — `DRAG_OPERATION_NONE` on every cancel and on a drop the view declined, so a drag that performed nothing never reports that it moved something. |
 
 ### `CefContextMenuHandler` — 0 of 7 members
 
-Not derived by `ShellCefClient` at all (`cef_shell.cpp:668-673`), so CEF displays its own built-in
+Not derived by `ShellCefClient` at all (`cef_shell.cpp:704-709`), so CEF displays its own built-in
 context menu for every member below.
 
 | Member | Verdict | Detail |
@@ -1359,13 +1396,19 @@ context menu for every member below.
 - Replaces an impression ("is this the wrong framework?",
   `.taskflow/2026-08-29-editor-ux-packages-events/README.md` § "The framework question, answered
   once" — not the repo-root `README.md`, which has no such section) with a count: 5 implemented at
-  audit time (**7 now** — see the render-handler count above), 3
+  audit time (**9 now** — see the render-handler count above), 3
   deliberately-not-needed groups (`OnAcceleratedPaint`,
   `SetWindowlessFrameRate`, all of `CefContextMenuHandler`), and the rest gaps.
 - Tasks `a1` and `b1` each close a named subset of the gaps above; their own task files cite the exact
-  rows they close. **`a1` has landed**: `GetScreenPoint` + `GetRootScreenRect`, with the arithmetic in
-  `dpi.h` and the client-origin channel through `IWindowBackend::client_origin()` →
-  `IBrowserHost::set_client_origin()` (§ 5). `b1`'s drag rows are still open.
+  rows they close. **BOTH HAVE LANDED.** `a1`: `GetScreenPoint` + `GetRootScreenRect`, with the
+  arithmetic in `dpi.h` and the client-origin channel through `IWindowBackend::client_origin()` →
+  `IBrowserHost::set_client_origin()` (§ 5). `b1` (D11): `StartDragging` + `UpdateDragCursor` plus all
+  six windowless-only `CefBrowserHost` drag members, with the protocol's decisions in the CEF-free
+  `osr_drag.h`, the screen→view direction of the a1 mapping in `dpi.h` (`osr_view_point`), and the
+  feedback cursor down through `IWindowBackend::set_drag_cursor`. What `b1` deliberately did NOT do is
+  enter any platform's MODAL drag loop — see § 11 for the cross-application half that leaves open, and
+  `osr_drag.h`'s header for why a modal loop is incompatible with this Shell's single-threaded owner
+  loop.
 - Six gaps surfaced by this audit were **not** already on `03-osr-geometry-and-drag.md`'s
   pre-registered list: `WasHidden`, `NotifyScreenInfoChanged`, `SendTouchEvent` (plus its render-handler
   counterparts `GetTouchHandleSize` / `OnTouchHandleStateChanged`), and `OnScrollOffsetChanged`. None
@@ -1378,20 +1421,46 @@ context menu for every member below.
 
 Named so the gaps are visible rather than assumed:
 
+- **HTML5 drag-and-drop does not CROSS the application boundary (b1, D11).** Inside the editor's own
+  document it works end to end — a Dockview tab lifts, splits, and re-docks (§ 16's drag rows). What
+  does not work is a drag that starts in the editor and ends somewhere else (a tab dropped on the
+  desktop, a `<a>` dragged into a browser) or a drop from another application INTO the editor (a file
+  from a file manager). ⚠ NOT AN OVERSIGHT AND NOT A SMALL REMAINDER — it is the direct consequence
+  of a design constraint this Shell has had since e04, so a future task should read the reasoning
+  before assuming it is an afternoon's work. Every platform's outbound transfer runs through a MODAL
+  OS loop (Win32 `DoDragDrop`, XDND's own event loop, `NSDraggingSession`) that does not return until
+  the gesture ends, and this Shell runs CEF on ONE thread with an external message pump
+  (`multi_threaded_message_loop = false` + `OnScheduleMessagePumpWork`, design 03 §1) driven by that
+  same thread's owner loop. Entering the modal loop from inside `StartDragging` therefore FREEZES the
+  browser for the whole drag: no repaint, no `UpdateDragCursor`, no drop feedback. The Shell instead
+  drives the protocol from the pointer stream it already owns, which is exactly what an in-document
+  drag needs and all it needs. Closing the cross-application half means giving the OS loop a way to
+  pump the Shell from inside its own callbacks (`IDropSource::GiveFeedback` is the Win32 hook), which
+  is a re-entrancy question about `CefDoMessageLoopWork` and not a matter of porting more code.
+  ⚠ Also missing WITH it, and worth naming separately because it is visible where the transfer is
+  not: on Windows the drag-feedback BADGE cursors (the copy plus, the link arrow) live in OLE's
+  resources rather than the `IDC_*` stock set, so the Win32 arm shows the ordinary pointer where
+  macOS shows a real badge. `IDC_NO` for "you cannot drop here" IS stock and is used.
+- **No drag GHOST is drawn.** `CefDragData::GetImage()` / `GetImageHotspot()` carry the image the
+  renderer wants dragged, and nothing reads them: the Shell composites no ghost layer, so a drag is
+  feedback-by-cursor only. The compositor's layer stack (§ 4) is where one would go — it already
+  composites the `PET_POPUP` layer over the view — which is why this is a follow-up rather than an
+  architecture change. Named by `b1`, no task id.
+
 - ~~**No Linux window backend.**~~ Landed by **e12a**: `x11_window.cpp` (X11/XWayland, D21), the pure
   `translate_x11_event` decoder, the X11-SHM present blitter, and the live `editor-shell-x11-window`
   smoke that opens a REAL window and asserts a server-driven repaint and resize.
 - ~~**The live CEF scenario smokes never run through a real window.**~~ Landed by **e12a-x11-legs**
-  (#408). All **ten** `editor-cef-smoke-shell*` smokes now take their window through the shared
+  (#408). All **eleven** `editor-cef-smoke-shell*` smokes now take their window through the shared
   smoke-tier seam `src/editor/shell/smoke/smoke_window.h`, and the ctest registration passes
   `--real-window` on **Linux**, where they open a REAL X11 window and present through the REAL X11
-  blitter `EditorWindow::attach_cpu_present()` selects; the **two** of them that drive input take it
+  blitter `EditorWindow::attach_cpu_present()` selects; the **three** of them that drive input take it
   FROM THE X SERVER (for the other eight the server is the source of `Expose`/`ConfigureNotify`
   only). The Windows leg keeps the offscreen backend, which is what the Session-0 runner requires. Two earlier
   claims here were WRONG and are corrected rather than deleted, because both were load-bearing for
-  the "this is not a constructor swap" reading: the count is **ten**, not eight (`-uimirror`,
-  `-iframe` and `-inspector-fanout` landed after this note was written), and only **two** of them ever
-  `post()`ed at all —
+  the "this is not a constructor swap" reading: the count is **eleven**, not eight (`-uimirror`,
+  `-iframe`, `-inspector-fanout` and `-osrdrag` landed after this note was written), and only **two** of the
+  ten that existed AT THAT TIME ever `post()`ed at all —
   the other eight built a `HeadlessWindowBackend` and drove their scenarios entirely through the CEF
   bridge, so for those it genuinely WAS a construction swap. What was not a swap is INPUT: real mode
   sends pointer and key events to the smoke's own window through the X server (XSendEvent with an
@@ -1424,11 +1493,11 @@ Named so the gaps are visible rather than assumed:
   `CAMetalLayer`-backed NSView), the pure `translate_ns_event` / `translate_ns_window_geometry`
   decoders, and the `CALayer.contents` CPU present blitter.
 - ~~**No macOS CEF hosting.**~~ Landed by **e12c-1** (issue #436) and completed by **e12c-2**:
-  `context_editor` and ALL TEN live smokes are real `.app` bundles on macOS, each with its five
+  `context_editor` and ALL ELEVEN live smokes are real `.app` bundles on macOS, each with its five
   per-process-type helper bundles and its embedded framework, driven by
-  `shell::cef::execute_helper_process()` (see § 3). `editor-cef-smoke (macos-latest)` BUILDS all eleven
-  bundles — the ten smokes off ONE shared `--target` list, plus `context_editor` on its own step — and
-  RUNS the ten, so the assembly, the load-bearing helper names, the framework embed and the
+  `shell::cef::execute_helper_process()` (see § 3). `editor-cef-smoke (macos-latest)` BUILDS all twelve
+  bundles — the eleven smokes off ONE shared `--target` list, plus `context_editor` on its own step — and
+  RUNS the eleven, so the assembly, the load-bearing helper names, the framework embed and the
   no-`libcef_lib` link line have CI coverage on every scenario rather than on the two e12c-1 ported.
   (`context_editor` itself stays build-only on every leg: no ctest names it, and the family's
   `ctest -R "^editor-cef-smoke-"` step cannot match it — see § 9.)
@@ -1483,9 +1552,9 @@ Named so the gaps are visible rather than assumed:
   stream (the desktop is entitled to deliver moves of its own), the four injected samples carry a
   modifier MARKER (Shift+Control+Option) and are selected by it, with unmarked samples counted and
   reported rather than silently dropped.
-  **Still deliberately open:** the ten `editor-cef-smoke-shell*` smokes run HEADLESS on macOS — see
+  **Still deliberately open:** the eleven `editor-cef-smoke-shell*` smokes run HEADLESS on macOS — see
   the next bullet, which carries the mechanism and the tracking issue.
-- **The ten live CEF smokes are still HEADLESS on macOS.** e12c-3 closed the DoD line above with a
+- **The eleven live CEF smokes are still HEADLESS on macOS.** e12c-3 closed the DoD line above with a
   CEF-free smoke, which is what makes the windowed proof independent of the CEF keychain class
   (#437); the CEF legs themselves keep the offscreen backend on macOS exactly as Windows does. The
   work is the direct macOS twin of what e12a-x11-legs did for Linux: pass `--real-window` from

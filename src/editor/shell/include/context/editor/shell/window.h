@@ -37,6 +37,7 @@
 #include "context/editor/shell/dpi.h"
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/input.h"
+#include "context/editor/shell/osr_drag.h"
 #include "context/render/rhi.h"
 
 #include <cstddef>
@@ -191,6 +192,23 @@ public:
     virtual void set_chrome_regions(const std::vector<ShellRegion>& regions);
     virtual void set_appearance(bool dark);
 
+    // The DRAG-FEEDBACK CURSOR (b1, D11) — the OS half of `CefRenderHandler::UpdateDragCursor`
+    // (cef_render_handler.h:222), which reports the operation the web view would perform at the
+    // pointer's current position. Without it a drag looks identical to an ordinary pointer move,
+    // so nothing tells a user that a drop here would MOVE a tab, COPY it, or do nothing at all —
+    // the row `docs/shell.md` § 16 records as "No drag-feedback cursor once dragging exists".
+    //
+    // `DragOperation::none` means "restore the ordinary cursor", and it is sent on EVERY end of a
+    // drag (osr_drag.h): a cursor left showing a drop feedback after the gesture is over is the
+    // cosmetic cousin of a leaked cursor capture.
+    //
+    // NOT PURE, unlike `minimize` / `set_maximized` and for the same reason `set_chrome_regions` is
+    // not: "ignore it" is a TRUTHFUL answer here. A backend with no OS cursor renders the stock
+    // one, honestly; where a silently-ignored `minimize()` would be a user-facing button that does
+    // nothing. The defaults (window.cpp) are no-ops; headless RECORDS (the ctest observable), and
+    // the three native backends do the real OS call.
+    virtual void set_drag_cursor(DragCursor cursor);
+
     [[nodiscard]] virtual WindowPlacement placement() const = 0;
     virtual void apply_placement(const WindowPlacement& placement) = 0;
 
@@ -235,6 +253,16 @@ public:
         ++chrome_region_pushes_;
     }
     void set_appearance(bool dark) override { appearance_dark_ = dark; }
+    // b1: RECORD the drag cursor, for the same reason the chrome facts are recorded — the real
+    // consumer is an OS call that only a live desktop makes, and this is what lets a ctest pin the
+    // `UpdateDragCursor` -> backend wiring on every leg. The COUNT is what keeps the assertion
+    // honest in the other direction: a cursor pushed on every pointer sample of a drag would be a
+    // per-frame OS call nothing in the value alone would reveal.
+    void set_drag_cursor(DragCursor cursor) override
+    {
+        drag_cursor_ = cursor;
+        ++drag_cursor_pushes_;
+    }
     [[nodiscard]] WindowPlacement placement() const override { return placement_; }
     void apply_placement(const WindowPlacement& placement) override;
     // COMPUTED from the placement plus the modelled frame inset — never a second stored copy of
@@ -269,6 +297,10 @@ public:
     [[nodiscard]] int chrome_region_pushes() const { return chrome_region_pushes_; }
     // nullopt until the first `set_appearance` — "nothing reported yet" and "light" must differ.
     [[nodiscard]] std::optional<bool> appearance_dark() const { return appearance_dark_; }
+    // What `set_drag_cursor` recorded — the b1 observable. `none` is both the initial state and the
+    // "drag over, restore the ordinary cursor" push, which is why the count is exposed beside it.
+    [[nodiscard]] DragCursor drag_cursor() const { return drag_cursor_; }
+    [[nodiscard]] int drag_cursor_pushes() const { return drag_cursor_pushes_; }
 
 private:
     std::vector<ShellEvent> queued_;
@@ -280,6 +312,8 @@ private:
     std::string title_;
     std::vector<ShellRegion> chrome_regions_;
     std::optional<bool> appearance_dark_;
+    DragCursor drag_cursor_ = DragCursor::none;
+    int drag_cursor_pushes_ = 0;
     int redraw_requests_ = 0;
     int chrome_region_pushes_ = 0;
     bool minimized_ = false;

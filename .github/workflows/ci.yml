@@ -1927,8 +1927,11 @@ jobs:
       matrix:
         os: [ubuntu-latest, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
-    # 60, up from the 45 this job shared with the heavy build/sanitize legs, and DERIVED not picked: the ten ctests this
-    # job runs declare TIMEOUT budgets summing to 2640 s = 44 min (180x4 + 240 + 300x3 + 360 + 420),
+    # 60, up from the 45 this job shared with the heavy build/sanitize legs, and DERIVED not picked: the eleven ctests this
+    # job runs declare TIMEOUT budgets summing to 3120 s = 52 min (180x3 + 240x2 + 300x3 + 360 + 420x2 — M9 b1's
+    # `-shell-osrdrag` is the second 240; re-derived term by term from
+    # src/editor/shell/cef/CMakeLists.txt, which is what corrected the pre-b1 decomposition that had
+    # spelled the same ten budgets 180x4 + 420x1 and so understated them by 240 s),
     # ctest runs them SERIALLY here (no `execution.jobs` in CMakePresets.json, no -j on the ctest steps
     # below), and nothing may make these live browsers concurrent — sharing ${CEF_TARGET_OUT_DIR}
     # concurrently is exactly issue #360. So 45 left only ~60 s for checkout, the CEF cache, configure
@@ -1936,8 +1939,10 @@ jobs:
     # host) would be killed by GitHub at the JOB level, burning the full budget on the priciest runner
     # class AND discarding the ctest summary that says WHICH tests hung. At 60 the per-test TIMEOUTs fire
     # first and the failure stays legible. Typical green wall-clock is unaffected — the whole family
-    # measures ~8.6 s. M9 e12c-2 is what made this tight on macOS (worst case 720 s -> 2640 s when the
-    # seven fanned-out smokes joined that leg; Windows/Linux already carried the full sum).
+    # measures ~8.6 s. M9 e12c-2 is what made this tight on macOS (worst case 720 s -> 2880 s when the
+    # seven fanned-out smokes joined that leg; Windows/Linux already carried the full sum), and b1's
+    # eleventh smoke took the worst case to 3120 s — 8 min inside the job budget, which is the
+    # margin a twelfth smoke has to be checked against rather than assumed into.
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
@@ -2055,8 +2060,12 @@ jobs:
       # (`add_dependencies(context_editor_shell_inspector_fanout_smoke context)`), deliberately: a
       # second hand-maintained name in this list is a second thing to forget, and the dependency
       # travels with the target the way the webui asset root already does.
-      - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe + inspector-fanout smokes
-        run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke context_editor_shell_palette_smoke context_editor_shell_settings_smoke context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke context_editor_shell_iframe_smoke context_editor_shell_inspector_fanout_smoke
+      # ⚠ M9 b1 (D11) added the ELEVENTH name below (`..._osrdrag_smoke`) — the live HTML5
+      # drag-and-drop proof. Same "Not Run = RED" tripwire as every other name here: the ctest step
+      # selects the whole `editor-cef-smoke-` family by regex, so a smoke missing from this list is
+      # found by the regex with no executable and reported "Not Run" -> red.
+      - name: Build the Shell's live CEF boot + restart + palette + settings + multiwindow + tearout + drag + uimirror + iframe + osr-drag + inspector-fanout smokes
+        run: cmake --build --preset dev --target context_editor_shell_cef_smoke context_editor_shell_restore_smoke context_editor_shell_palette_smoke context_editor_shell_settings_smoke context_editor_shell_multiwindow_smoke context_editor_shell_tearout_smoke context_editor_shell_drag_smoke context_editor_shell_uimirror_smoke context_editor_shell_iframe_smoke context_editor_shell_osrdrag_smoke context_editor_shell_inspector_fanout_smoke
         working-directory: src
 
       # The SHIPPING editor binary, in its CEF-linked configuration — on ALL THREE legs since M9
