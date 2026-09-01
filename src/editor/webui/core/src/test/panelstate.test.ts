@@ -56,6 +56,14 @@ import {
 // ------------------------------------------------------------------------------ the roster fixture
 
 const PANEL_ID = "pkg.hello";
+/**
+ * The FIRST live copy of that kind (editor-UX c3). Every accessor keyed by identity — `portState`,
+ * `seedPortState`, the verb binding's store key, and the persisted/published document — addresses a
+ * COPY now, while `data-panel-id` and the roster still name the KIND. Spelled out as a constant
+ * rather than inlined so the two are never confused at a call site.
+ */
+const PANEL_INSTANCE = `${PANEL_ID}#1`;
+const PROBLEMS_INSTANCE = "builtin.problems#1";
 const SCHEMA_VERSION = 3;
 
 /** One `panel.list` entry in the WIRE shape `PanelHost::list()` emits, for an `iframe` panel. */
@@ -417,16 +425,16 @@ export const panelStateTests: readonly TestCase[] = [
             const mounted = await mountHost();
             try {
                 assertNull(
-                    mounted.host.portState(PANEL_ID),
+                    mounted.host.portState(PANEL_INSTANCE),
                     "a port panel that stored nothing answers NULL — distinct from the `undefined` " +
                         "that means 'not a port panel', because only the latter may cost a " +
                         "`panel.state.get` the Shell can answer for",
                 );
-                const store = mounted.stores.get(PANEL_ID);
+                const store = mounted.stores.get(PANEL_INSTANCE);
                 assert(store !== undefined, "the verb factory was handed this panel's store");
                 store?.write({ scroll: 7 });
                 assertEqual(
-                    mounted.host.portState(PANEL_ID),
+                    mounted.host.portState(PANEL_INSTANCE),
                     { schemaVersion: SCHEMA_VERSION, data: { scroll: 7 } },
                     "the blob is published in the SAME wrapper the C++ models use, so the Shell " +
                         "never has to know which kind of panel wrote an entry",
@@ -459,13 +467,13 @@ export const panelStateTests: readonly TestCase[] = [
             });
             try {
                 assertEqual(
-                    mounted.host.portState("builtin.problems"),
+                    mounted.host.portState(PROBLEMS_INSTANCE),
                     undefined,
                     "a C++-modeled panel has no port store to publish from — `undefined`, NOT the " +
                         "`null` an empty port panel gives, or persistence would skip its C++ route",
                 );
                 assertEqual(
-                    mounted.host.seedPortState("builtin.problems", {
+                    mounted.host.seedPortState(PROBLEMS_INSTANCE, {
                         schemaVersion: SCHEMA_VERSION,
                         data: { a: 1 },
                     }),
@@ -505,8 +513,8 @@ export const panelStateTests: readonly TestCase[] = [
                 shell.persisted = {
                     layout: null,
                     panels: {
-                        [PANEL_ID]: { schemaVersion: SCHEMA_VERSION, data: { scroll: 7 } },
-                        "builtin.problems": { schemaVersion: SCHEMA_VERSION, data: { row: 2 } },
+                        [PANEL_INSTANCE]: { schemaVersion: SCHEMA_VERSION, data: { scroll: 7 } },
+                        [PROBLEMS_INSTANCE]: { schemaVersion: SCHEMA_VERSION, data: { row: 2 } },
                     },
                 };
                 shell.methods.length = 0;
@@ -520,7 +528,7 @@ export const panelStateTests: readonly TestCase[] = [
                         "store it does not have, and its real state was never restored",
                 );
                 assertEqual(
-                    mounted.stores.get(PANEL_ID)?.read(),
+                    mounted.stores.get(PANEL_INSTANCE)?.read(),
                     { scroll: 7 },
                     "…and the package panel's blob went into its PORT store, which is what " +
                         "`bridge.state.get` answers with after a reload",
@@ -533,7 +541,7 @@ export const panelStateTests: readonly TestCase[] = [
 
                 const panels = (shell.published?.["panels"] ?? {}) as Record<string, unknown>;
                 assertEqual(
-                    panels[PANEL_ID],
+                    panels[PANEL_INSTANCE],
                     { schemaVersion: SCHEMA_VERSION, data: { scroll: 7 } },
                     "the package panel's blob came from the PORT store",
                 );
@@ -562,7 +570,7 @@ export const panelStateTests: readonly TestCase[] = [
             const mounted = await mountHost();
             try {
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, {
+                    mounted.host.seedPortState(PANEL_INSTANCE, {
                         schemaVersion: SCHEMA_VERSION + 1,
                         data: { a: 1 },
                     }),
@@ -570,7 +578,7 @@ export const panelStateTests: readonly TestCase[] = [
                     "a blob written by a DIFFERENT state schema degrades rather than being applied",
                 );
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, { data: { a: 1 } }),
+                    mounted.host.seedPortState(PANEL_INSTANCE, { data: { a: 1 } }),
                     false,
                     "so does one with no schemaVersion at all (a hand-edited editor-state file)",
                 );
@@ -580,18 +588,18 @@ export const panelStateTests: readonly TestCase[] = [
                 //   the panel is reported RESTORED while being handed nothing. A well-formed entry
                 //   always carries `data` (it is `null` at minimum), so requiring it costs nothing.
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, { schemaVersion: SCHEMA_VERSION }),
+                    mounted.host.seedPortState(PANEL_INSTANCE, { schemaVersion: SCHEMA_VERSION }),
                     false,
                     "…and one whose `data` member is MISSING — a truncated write degrades rather " +
                         "than reporting a restore of nothing",
                 );
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, "not an envelope"),
+                    mounted.host.seedPortState(PANEL_INSTANCE, "not an envelope"),
                     false,
                     "…and one that is not an object",
                 );
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, {
+                    mounted.host.seedPortState(PANEL_INSTANCE, {
                         schemaVersion: SCHEMA_VERSION,
                         data: { blob: "x".repeat(70 * 1024) },
                     }),
@@ -601,12 +609,12 @@ export const panelStateTests: readonly TestCase[] = [
                         "a file a human can edit",
                 );
                 assertNull(
-                    mounted.host.portState(PANEL_ID),
+                    mounted.host.portState(PANEL_INSTANCE),
                     "and not one of those degrades left anything in the store",
                 );
 
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, {
+                    mounted.host.seedPortState(PANEL_INSTANCE, {
                         schemaVersion: SCHEMA_VERSION,
                         data: { scroll: 9 },
                     }),
@@ -614,7 +622,7 @@ export const panelStateTests: readonly TestCase[] = [
                     "a matching, in-budget blob IS applied",
                 );
                 assertEqual(
-                    mounted.stores.get(PANEL_ID)?.read(),
+                    mounted.stores.get(PANEL_INSTANCE)?.read(),
                     { scroll: 9 },
                     "…and the panel reads it back through its own store — which is what " +
                         "bridge.state.get answers with",
@@ -635,9 +643,9 @@ export const panelStateTests: readonly TestCase[] = [
         run: async (): Promise<void> => {
             const mounted = await mountHost();
             try {
-                mounted.stores.get(PANEL_ID)?.write({ live: true });
+                mounted.stores.get(PANEL_INSTANCE)?.write({ live: true });
                 assertEqual(
-                    mounted.host.seedPortState(PANEL_ID, {
+                    mounted.host.seedPortState(PANEL_INSTANCE, {
                         schemaVersion: SCHEMA_VERSION,
                         data: { live: false, stale: true },
                     }),
@@ -645,7 +653,7 @@ export const panelStateTests: readonly TestCase[] = [
                     "the seed reports restored — the panel IS holding state, and its own is fresher",
                 );
                 assertEqual(
-                    mounted.stores.get(PANEL_ID)?.read(),
+                    mounted.stores.get(PANEL_INSTANCE)?.read(),
                     { live: true },
                     "…but the panel's own write STANDS; the outcome is order-independent, not merely " +
                         "usually right",
@@ -678,7 +686,7 @@ export const panelStateTests: readonly TestCase[] = [
             // intermittent, which is exactly what this tier must not acquire.
             let persistence: LayoutPersistence | undefined;
             try {
-                first.stores.get(PANEL_ID)?.write({ filter: "mesh", scroll: 12 });
+                first.stores.get(PANEL_INSTANCE)?.write({ filter: "mesh", scroll: 12 });
                 persistence = makePersistence(first.host, shell);
                 // THE REAL TRIGGER, not a private method reached through a cast: `attach` registers
                 // the production `pagehide` listener and this dispatches the production event. A
@@ -690,7 +698,7 @@ export const panelStateTests: readonly TestCase[] = [
                 const published = shell.published;
                 assert(published !== null, "the editor-state document was published");
                 assertEqual(
-                    (published?.["panels"] as Record<string, unknown>)[PANEL_ID],
+                    (published?.["panels"] as Record<string, unknown>)[PANEL_INSTANCE],
                     { schemaVersion: SCHEMA_VERSION, data: { filter: "mesh", scroll: 12 } },
                     "the PACKAGE panel's blob is in the published document — the half a Shell " +
                         "round trip could never have supplied, since an iframe panel has no C++ model",
@@ -707,7 +715,7 @@ export const panelStateTests: readonly TestCase[] = [
             persistence = undefined;
             try {
                 assertEqual(
-                    second.stores.get(PANEL_ID)?.read(),
+                    second.stores.get(PANEL_INSTANCE)?.read(),
                     null,
                     "the fresh panel starts with nothing, as it must before a restore",
                 );
@@ -720,7 +728,7 @@ export const panelStateTests: readonly TestCase[] = [
                 );
                 assertEqual(report.degraded.length, 0, "…with nothing degraded");
                 assertEqual(
-                    second.stores.get(PANEL_ID)?.read(),
+                    second.stores.get(PANEL_INSTANCE)?.read(),
                     { filter: "mesh", scroll: 12 },
                     "AND the panel reads its own blob back after the reload — which is what " +
                         "bridge.state.get answers with, so the package resumes where it left off",

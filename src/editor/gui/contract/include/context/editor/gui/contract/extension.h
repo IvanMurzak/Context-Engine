@@ -270,16 +270,19 @@ struct Contribution
 
 // The grep-stable token for an instance mode (diagnostics + the manifest projection).
 //
-// ⚠ SCOPE, stated precisely because the obvious stronger claim is FALSE. Every C++ inverse searches
-// THIS table rather than keeping a second copy: `package_store.cpp`'s `read_instance_mode` walks
-// `kInstanceModes` below, and `scaffold.cpp` emits through this function. `panels.ts` does NOT — its
-// `PANEL_INSTANCE_MODES` is a hand-written mirror, and unlike the panel-state keys and the gesture
-// verbs, it is NOT yet enrolled in `webui-panel-contract` (check_webui_assets.py reads only
-// panel_state.h from this directory). So renaming a token here reds nothing on the TS side; the
-// parser falls to its `?? "singleton"` default and every panel silently becomes a singleton.
-// Enrolling it means generalising `_read_cpp_gesture_verbs` — which reads exactly this switch's
-// shape — into a token-switch reader and pinning the set. `DOCK_ZONES` and `CONTENT_TYPES` sit in
-// the same un-gated position and the same generalisation covers all three.
+// ⚠ CROSS-LANGUAGE AND GATED SINCE editor-UX c3. Every C++ inverse searches THIS table rather than
+// keeping a second copy — `package_store.cpp`'s `read_instance_mode` walks `kInstanceModes` below
+// and `scaffold.cpp` emits through this function — and `panels.ts`'s `PANEL_INSTANCE_MODES`, which
+// is a hand-written mirror, is now compared against this switch SET vs SET by
+// `tools/check_webui_assets.py --panel-contract` (ctest `webui-panel-contract`), reading the TS side
+// out of the BUILT bundle.
+//
+// The gap that closed, recorded because it was live for a whole contract major: until c3 the check
+// read only `panel_state.h` from this directory, so renaming a token here red NOTHING on the TS
+// side — the parser fell to its `?? "singleton"` default and EVERY panel silently became a
+// singleton, which is the exact failure the instance runtime exists to prevent. `dock_zone_token`
+// and `content_type_token` sat in the same position and are enrolled by the same generalisation
+// (`_read_cpp_token_switch`), so all three closed vocabularies are now gated together.
 [[nodiscard]] const char* instance_mode_token(InstanceMode mode);
 
 // Every instance mode, in declaration order, so a reader can invert `instance_mode_token` by search

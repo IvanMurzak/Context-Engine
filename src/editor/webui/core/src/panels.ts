@@ -30,6 +30,51 @@ export const PANEL_COMMAND_METHOD = "panel.command";
 export const PANEL_GESTURE_METHOD = "panel.gesture";
 export const PANEL_STATE_GET_METHOD = "panel.state.get";
 export const PANEL_STATE_SET_METHOD = "panel.state.set";
+/**
+ * The instance-lifecycle verb (editor-UX c3). Mirrors `kPanelInstanceCloseMethod`.
+ *
+ * ONE verb, and it is the CLOSE half: instance creation is implicit — this side owns panel lifecycle,
+ * mints the instance id, and the first `panel.render` carrying it materialises the Shell-side model
+ * — so an `open` verb would only buy a round trip `PanelHost.open` would have to await, turning a
+ * synchronous call async across every caller. Release cannot be implicit the same way: nothing else
+ * on the wire says "this copy is gone", so without this the Shell's instance table would only grow
+ * and a `limited` panel would exhaust its ceiling over the session rather than holding `max` LIVE.
+ */
+export const PANEL_INSTANCE_CLOSE_METHOD = "panel.instance.close";
+
+/**
+ * The separator between a panel KIND and its instance ordinal (`builtin.problems#1`). Mirrors
+ * `kPanelInstanceSeparator` and is byte-compared by `webui-panel-contract`.
+ *
+ * WHY AN ID IS COMPOSED RATHER THAN OPAQUE. Dockview restores a persisted arrangement BY PANEL ID and
+ * calls `createComponent` for each one before this app has registered anything, so the KIND has to be
+ * recoverable from the id alone or a restore cannot know which renderer to build. Both sides compose
+ * AND decompose with this, which is why a drift is the quietest failure in the panel family: every
+ * instance would resolve to a kind that does not exist, with no method refusing.
+ */
+export const PANEL_INSTANCE_SEPARATOR = "#";
+
+/**
+ * Compose an instance id. `ordinal` is 1-based and per KIND, never global, so the FIRST copy of every
+ * panel is `<id>#1` on every boot — which is what makes a persisted single-instance arrangement
+ * restore unchanged.
+ */
+export function makeInstanceId(panelId: string, ordinal: number): string {
+    return `${panelId}${PANEL_INSTANCE_SEPARATOR}${String(ordinal)}`;
+}
+
+/**
+ * The KIND an instance id names, or the whole string when it carries no separator.
+ *
+ * Splits on the LAST separator, mirroring `panel_id_of_instance`: a panel id is free to contain one
+ * (nothing in the registry forbids it), and splitting on the first would resolve `a#b#1` to the kind
+ * `a` — which does not exist — rather than to `a#b`, which does. A bare id (a persisted arrangement
+ * written before instances existed) reads as the kind itself, which is the honest restore.
+ */
+export function panelIdOfInstance(instanceId: string): string {
+    const at = instanceId.lastIndexOf(PANEL_INSTANCE_SEPARATOR);
+    return at === -1 ? instanceId : instanceId.slice(0, at);
+}
 
 /**
  * The continuous-gesture verbs (04 §4). A CLOSED set, mirroring `shell::GestureVerb` — the C++ panel
@@ -174,6 +219,12 @@ export interface PanelManifestCommand {
 /** The hydration payload for one panel (`shell::PanelRender`). */
 export interface PanelRender {
     readonly panelId: string;
+    /**
+     * WHICH COPY this payload is of (c3) — echoed by the Shell even for a call that named none, so a
+     * host holding several instances of one kind routes it to the right DOM slot instead of to the
+     * first slot whose KIND matches.
+     */
+    readonly instanceId: string;
     readonly revision: number;
     /**
      * Semantic HTML from the C++ `uitree::render_html`. Every interpolated value has ALREADY been
@@ -191,12 +242,16 @@ export interface PanelRender {
 export interface PanelDispatchResult {
     /** The PANEL's verdict. `false` is an ordinary outcome (a click on a dead row), not an error. */
     readonly dispatched: boolean;
+    /** The copy the Shell addressed (c3) — the id sent, or the kind's default instance. */
+    readonly instanceId: string;
     readonly revision: number;
 }
 
 /** The outcome of a `panel.state.set` call — the D6 restore contract. */
 export interface PanelRestoreResult {
     readonly restored: boolean;
+    /** The copy the Shell addressed (c3). */
+    readonly instanceId: string;
     /** Empty when restored; else `gui.state_schema_mismatch` / `gui.state_malformed`. */
     readonly code: string;
     /** Empty when restored; else the human/AI-readable reason the panel got NULL state instead. */
@@ -377,6 +432,12 @@ export function parsePanelRender(value: unknown): PanelRender | null {
     }
     return {
         panelId,
+        // ⚠ DEFAULTED TO THE PANEL ID, not to the empty string. A Shell that predates c3 — or a
+        // harness that answers a bare render envelope — carries no `instanceId`, and the honest
+        // reading of that is "the kind's one copy", which is exactly what the panel id names in a
+        // single-instance world. Defaulting to `""` would instead produce a render nothing could be
+        // keyed to, and the caller would drop a payload that is perfectly usable.
+        instanceId: readString(value, "instanceId", panelId),
         revision: readNumber(value, "revision"),
         html: readString(value, "html"),
         focusOrder: readStringArray(value, "focusOrder"),
@@ -413,9 +474,11 @@ export class PanelClient {
      * ordinary, designed state would push try/catch into every mount path. A transport failure still
      * rejects — that is not an ordinary state.
      */
-    async render(panelId: string): Promise<PanelRender | null> {
+    async render(panelId: string, instanceId?: string): Promise<PanelRender | null> {
         try {
-            return parsePanelRender(await this.#bridge.call(PANEL_RENDER_METHOD, { panelId }));
+            return parsePanelRender(
+                await this.#bridge.call(PANEL_RENDER_METHOD, instanceParams(panelId, instanceId)),
+            );
         } catch (error) {
             if (error instanceof BridgeError) {
                 return null;
@@ -448,9 +511,14 @@ export class PanelClient {
         commandId: string,
         nodeId: string,
         value?: string,
+        instanceId?: string,
     ): Promise<PanelDispatchResult | null> {
         try {
-            const params: Record<string, unknown> = { panelId, commandId, nodeId };
+            const params: Record<string, unknown> = {
+                ...instanceParams(panelId, instanceId),
+                commandId,
+                nodeId,
+            };
             if (value !== undefined) {
                 params["value"] = value;
             }
@@ -460,6 +528,7 @@ export class PanelClient {
             }
             return {
                 dispatched: readBoolean(result, "dispatched"),
+                instanceId: readString(result, "instanceId", panelId),
                 revision: readNumber(result, "revision"),
             };
         } catch (error) {
@@ -475,10 +544,11 @@ export class PanelClient {
         panelId: string,
         verb: GestureVerb,
         detail: Record<string, unknown>,
+        instanceId?: string,
     ): Promise<PanelDispatchResult | null> {
         try {
             const result = await this.#bridge.call(PANEL_GESTURE_METHOD, {
-                panelId,
+                ...instanceParams(panelId, instanceId),
                 verb,
                 ...detail,
             });
@@ -487,6 +557,7 @@ export class PanelClient {
             }
             return {
                 dispatched: readBoolean(result, "dispatched"),
+                instanceId: readString(result, "instanceId", panelId),
                 revision: readNumber(result, "revision"),
             };
         } catch (error) {
@@ -498,9 +569,12 @@ export class PanelClient {
     }
 
     /** Read a panel's D6 state blob. `null` when it persists none. */
-    async getState(panelId: string): Promise<unknown> {
+    async getState(panelId: string, instanceId?: string): Promise<unknown> {
         try {
-            const result = await this.#bridge.call(PANEL_STATE_GET_METHOD, { panelId });
+            const result = await this.#bridge.call(
+                PANEL_STATE_GET_METHOD,
+                instanceParams(panelId, instanceId),
+            );
             return isRecord(result) ? (result["state"] ?? null) : null;
         } catch (error) {
             if (error instanceof BridgeError) {
@@ -517,14 +591,22 @@ export class PanelClient {
      * diagnostic and the panel rebuilds from its defaults (04 §3). e05d2's layout restore depends on
      * that being an ordinary result — one stale panel blob must not discard a whole layout.
      */
-    async setState(panelId: string, state: unknown): Promise<PanelRestoreResult | null> {
+    async setState(
+        panelId: string,
+        state: unknown,
+        instanceId?: string,
+    ): Promise<PanelRestoreResult | null> {
         try {
-            const result = await this.#bridge.call(PANEL_STATE_SET_METHOD, { panelId, state });
+            const result = await this.#bridge.call(PANEL_STATE_SET_METHOD, {
+                ...instanceParams(panelId, instanceId),
+                state,
+            });
             if (!isRecord(result)) {
                 return null;
             }
             return {
                 restored: readBoolean(result, "restored"),
+                instanceId: readString(result, "instanceId", panelId),
                 code: readString(result, "code"),
                 diagnostic: readString(result, "diagnostic"),
                 revision: readNumber(result, "revision"),
@@ -536,4 +618,41 @@ export class PanelClient {
             throw error;
         }
     }
+
+    /**
+     * Release one instance's Shell-side model (c3) — the CLOSE half of the instance lifecycle.
+     *
+     * `true` when the Shell released a live copy; `false` is ORDINARY (a double close, a close racing
+     * a window teardown, a panel with no C++ model at all), never an error, so no caller has to
+     * catch. `PanelHost.close` fires it without awaiting: a released model is not something the DOM
+     * is waiting on, and blocking a close on a round trip would make tearing a panel down feel slow.
+     */
+    async closeInstance(panelId: string, instanceId: string): Promise<boolean> {
+        try {
+            const result = await this.#bridge.call(PANEL_INSTANCE_CLOSE_METHOD, {
+                panelId,
+                instanceId,
+            });
+            return isRecord(result) && readBoolean(result, "closed");
+        } catch (error) {
+            if (error instanceof BridgeError) {
+                return false;
+            }
+            throw error;
+        }
+    }
+}
+
+/**
+ * The `{panelId}` / `{panelId, instanceId}` param pair every panel method sends.
+ *
+ * ⚠ THE KEY IS OMITTED ENTIRELY WHEN THERE IS NO INSTANCE, never sent as `""` — the same discipline
+ * `command`'s optional `value` follows, and for the same reason: a caller that does not address a
+ * copy stays byte-identical on the wire, so the Shell's "no id ⇒ the default instance" path keeps
+ * meaning exactly what it meant. An empty STRING would take the same branch today, but only because
+ * the Shell reads emptiness as absence; sending it would make that an assumption instead of a
+ * property of the payload.
+ */
+function instanceParams(panelId: string, instanceId?: string): Record<string, unknown> {
+    return instanceId === undefined || instanceId === "" ? { panelId } : { panelId, instanceId };
 }

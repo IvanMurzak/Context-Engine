@@ -20,7 +20,8 @@
 // exactly the same Dockview geometry calls, and its lifecycle lives here like every other panel's.
 // What it adds is a TRUST TIER — see `IframePanelRenderer` — and one structural consequence: the
 // per-content-type gate that used to sit inline in `start`'s loop is now the `#mountable` predicate,
-// because `openById` (e10b's seed path) reached `open` without it and a gate one caller can walk
+// because `openInstance` (e10b's seed path, `openById` before c3) reached `open` without it and a
+// gate one caller can walk
 // past is not a gate. `#renderer` is fail-closed for the same reason.
 //
 // M9 e13b-1 GIVES THAT PANEL A TRANSPORT: one authenticated `MessagePort`, owned by
@@ -50,7 +51,13 @@ import { HydrationRuntime } from "./hydration.js";
 // `kStateSchemaVersionKey` / `kStateDataKey` by `tools/check_webui_assets.py`, so spelling them as
 // literals here would drift SILENTLY past that gate — the gate gets a matching constant, not a
 // matching consumer (editorstate.ts § the same reasoning for its own keys).
-import { STATE_DATA_KEY, STATE_SCHEMA_VERSION_KEY } from "./panels.js";
+import {
+    PANEL_INSTANCE_SEPARATOR,
+    STATE_DATA_KEY,
+    STATE_SCHEMA_VERSION_KEY,
+    makeInstanceId,
+    panelIdOfInstance,
+} from "./panels.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
 import { PANEL_BRIDGE_REFUSALS, PanelPortBridge } from "./panelport.js";
 import type { PanelBridgeReply, PanelVerbHandler } from "./panelport.js";
@@ -190,9 +197,25 @@ function isPersistedPanelState(value: unknown): value is PersistedPanelState {
  */
 export type LocalPanelFactory = (container: HTMLElement) => (() => void) | void;
 
-/** A panel PanelHost is currently hosting. */
+/**
+ * Mark one panel's DOM slot (editor-UX c3).
+ *
+ * TWO ATTRIBUTES, NOT ONE, and the split is the point. `data-panel-id` stays the KIND — it is what
+ * every existing selector, smoke and stylesheet means by "the Problems panel", and re-pointing it at
+ * an instance id would silently break each of them. `data-panel-instance` names the COPY, which is
+ * the only way a test (or a human with devtools) can tell two viewports apart once a kind can exist
+ * twice.
+ */
+function markPanelSlot(element: HTMLElement, panelId: string, instanceId: string): void {
+    element.setAttribute("data-panel-id", panelId);
+    element.setAttribute("data-panel-instance", instanceId);
+}
+
+/** A panel PanelHost is currently hosting — ONE live copy, keyed in `#panels` by its instance id. */
 interface HostedPanel {
     readonly manifest: PanelManifest;
+    /** This copy's id (`<panelId>#<n>`) — also the Dockview panel id and the DOM-id scope. */
+    readonly instanceId: string;
     readonly renderer: PanelRenderer;
 }
 
@@ -234,10 +257,10 @@ class LocalPanelRenderer implements PanelRenderer {
     #suspended = false;
     #built = false;
 
-    constructor(panelId: string, factory: LocalPanelFactory) {
+    constructor(panelId: string, instanceId: string, factory: LocalPanelFactory) {
         this.element = document.createElement("div");
         this.element.className = "ctx-panel-body";
-        this.element.setAttribute("data-panel-id", panelId);
+        markPanelSlot(this.element, panelId, instanceId);
         this.#factory = factory;
     }
 
@@ -348,6 +371,8 @@ class IframePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
     readonly #url: string;
     readonly #panelId: string;
+    /** This copy's id (c3) — the frame's `data-panel-instance`, and its accessible title. */
+    readonly #instanceId: string;
     /** The `context-ext://<packageId>` authority this panel belongs to (M9 e13c-2 routes on it). */
     readonly #packageId: string;
     readonly #verbs: PanelVerbTable;
@@ -382,12 +407,14 @@ class IframePanelRenderer implements PanelRenderer {
 
     constructor(
         panelId: string,
+        instanceId: string,
         url: string,
         packageId: string,
         verbs?: PanelVerbBinder,
         themeChannel?: PanelThemeChannel,
     ) {
         this.#panelId = panelId;
+        this.#instanceId = instanceId;
         this.#url = url;
         // CARRIED, NOT RE-DERIVED FROM `#url` (M9 e13c-2). `parseExtPanelEntry` already validated the
         // `context-ext://<packageId>` authority, and a second parse here would be a second notion of
@@ -414,7 +441,7 @@ class IframePanelRenderer implements PanelRenderer {
         ) ?? { verbs: new Map<string, PanelVerbHandler>(), dispose: (): void => {} };
         this.element = document.createElement("div");
         this.element.className = `ctx-panel-body ${IFRAME_PANEL_CLASS}`;
-        this.element.setAttribute("data-panel-id", panelId);
+        markPanelSlot(this.element, panelId, instanceId);
     }
 
     get suspended(): boolean {
@@ -531,8 +558,10 @@ class IframePanelRenderer implements PanelRenderer {
         frame.setAttribute("loading", IFRAME_LOADING);
         // A labelled frame is a labelled landmark: a screen reader announces WHICH panel focus moved
         // into, exactly as the uitree renderer's `data-panel-id` slot does (R-A11Y-001).
-        frame.setAttribute("title", this.#panelId);
-        frame.setAttribute("data-panel-id", this.#panelId);
+        // TITLED BY THE INSTANCE (c3): a screen reader announcing "Tilemap Painter" twice for two
+        // copies of one package panel tells the user nothing about which one focus moved into.
+        frame.setAttribute("title", this.#instanceId);
+        markPanelSlot(frame, this.#panelId, this.#instanceId);
         // A literal, like `ctx-panel-body` in the three sibling renderers: `app.css` carries the
         // matching rule and CSS cannot import a TS constant, so naming it here would buy a symbol on
         // editor-core's public surface and no enforcement. `IFRAME_PANEL_CLASS` is a constant only
@@ -637,10 +666,10 @@ class IframePanelRenderer implements PanelRenderer {
 class UnavailablePanelRenderer implements PanelRenderer {
     readonly element: HTMLElement;
 
-    constructor(panelId: string) {
+    constructor(panelId: string, instanceId: string) {
         this.element = document.createElement("div");
         this.element.className = "ctx-panel-body";
-        this.element.setAttribute("data-panel-id", panelId);
+        markPanelSlot(this.element, panelId, instanceId);
         // MARKED, not merely empty. Without this the slot is byte-identical to a healthy panel that
         // has not drawn yet, and "the editor is missing a panel" would be something a user discovers
         // by its absence — the failure `start`'s own `unavailable` report exists to prevent. This is
@@ -674,14 +703,17 @@ class UitreePanelRenderer implements PanelRenderer {
     readonly #runtime: HydrationRuntime;
     #suspended = false;
 
-    constructor(panelId: string, client: PanelClient, gestures: boolean) {
+    constructor(panelId: string, instanceId: string, client: PanelClient, gestures: boolean) {
         this.element = document.createElement("div");
         this.element.className = "ctx-panel-body";
         // The panel's DOM slot is a labelled landmark in its own right, so a screen reader announces
         // which panel focus moved into when the user tabs between docked groups.
-        this.element.setAttribute("data-panel-id", panelId);
+        markPanelSlot(this.element, panelId, instanceId);
         this.#runtime = new HydrationRuntime(this.element, client, panelId, {
             gestures,
+            // THE COPY, and therefore also this runtime's DOM-id scope — two instances of one kind
+            // in one document would otherwise both mint `<panelId>::root` (hydration.ts states it).
+            instanceId,
             // A dispatch changed the model, so pull the new render immediately rather than waiting
             // for the next poll — this is what makes a click feel instant instead of eventually
             // consistent.
@@ -789,6 +821,26 @@ export interface PanelHostStartOptions {
     readonly only?: string;
 }
 
+/**
+ * What one `open` / `openInstance` did (editor-UX c3, design 04 §3's open semantics).
+ *
+ * ⚠ A RESULT OBJECT, NOT A BOOLEAN, and that is the whole D6 correction. `open` used to answer
+ * `false` for "already open", which is the same answer it gives for "the docking root is down" and
+ * for "this build cannot mount it" — three different facts collapsed onto one, so a second open of a
+ * `singleton` was indistinguishable from a failure and no caller could focus the live copy instead.
+ * A `singleton` re-open now reports `focused` WITH the instance id, which is an honest success.
+ */
+export type PanelOpenOutcome = "opened" | "focused" | "refused";
+
+/** The outcome of one open, plus the copy it names and — on a refusal — why. */
+export interface PanelOpenResult {
+    readonly outcome: PanelOpenOutcome;
+    /** The live copy this open opened or focused; `""` when refused. */
+    readonly instanceId: string;
+    /** Empty unless refused. NAMES the limit when a mode refused it (design 04 §3). */
+    readonly diagnostic: string;
+}
+
 /** Why PanelHost could not start, when it could not. Empty on success. */
 export interface PanelHostStartReport {
     readonly started: boolean;
@@ -805,7 +857,19 @@ export class PanelHost {
     readonly #localPanels: ReadonlyMap<string, LocalPanelFactory>;
     readonly #panelVerbs: PanelVerbFactory | undefined;
     readonly #themeChannel: PanelThemeChannel | undefined;
+    /**
+     * The live copies, keyed by INSTANCE id (c3) — not by panel id, which is the rekeying D6's
+     * imperative half is. Insertion order is mount order, which `mounted` and `panelsForPackage`
+     * both rely on.
+     */
     readonly #panels = new Map<string, HostedPanel>();
+    /**
+     * The next ordinal each KIND will mint (c3). Kept here rather than derived from `#panels`,
+     * because a derived counter reuses the ordinal of a CLOSED copy: close `p#2` of three, mint
+     * again, and a `size + 1` rule hands the new copy `p#3`, which is live. Monotonic per kind, and
+     * advanced past any id a restore or a rehome named — see `#reserveInstanceId`.
+     */
+    readonly #ordinals = new Map<string, number>();
     /**
      * The panel revision each mounted panel was last REFRESHED for (M9 e09e-3) — `pollRevisions`'
      * whole state, and deliberately not the roster's own numbers: what matters is what this host has
@@ -992,14 +1056,42 @@ export class PanelHost {
 
     /**
      * The roster manifest for `panelId`, or undefined when this build's roster does not name it —
-     * the ONE id-to-manifest lookup `openById`, Dockview's `#create` and boot.ts's seeded-title
+     * the ONE kind-to-manifest lookup `openInstance`, `manifestForInstance` and boot.ts's seeded-title
      * path all share, so an id-matching change lands in every caller at once.
      */
     manifest(panelId: string): PanelManifest | undefined {
         return this.#roster?.panels.find((entry) => entry.id === panelId);
     }
 
-    /** The ids currently mounted, in mount order. */
+    /**
+     * The manifest behind an INSTANCE id (c3) — the lookup every caller holding a mounted id needs.
+     *
+     * Reads the live entry first and falls back to decomposing the id, so it answers for a copy this
+     * host does not (yet) hold: `#create` is driven by Dockview during a layout restore BEFORE any
+     * entry exists, and that path has nothing but the id.
+     */
+    manifestForInstance(instanceId: string): PanelManifest | undefined {
+        const hosted = this.#panels.get(instanceId);
+        return hosted?.manifest ?? this.manifest(panelIdOfInstance(instanceId));
+    }
+
+    /** The KIND an instance id names — the shared decomposition, re-exported for callers. */
+    panelIdOf(instanceId: string): string {
+        return this.#panels.get(instanceId)?.manifest.id ?? panelIdOfInstance(instanceId);
+    }
+
+    /** The live copies of one kind, in mount order (c3). */
+    instancesOf(panelId: string): readonly string[] {
+        const ids: string[] = [];
+        for (const [instanceId, hosted] of this.#panels) {
+            if (hosted.manifest.id === panelId) {
+                ids.push(instanceId);
+            }
+        }
+        return ids;
+    }
+
+    /** The INSTANCE ids currently mounted, in mount order. */
     get mounted(): readonly string[] {
         return Array.from(this.#panels.keys());
     }
@@ -1059,7 +1151,7 @@ export class PanelHost {
                 unavailable.push(manifest.id);
                 continue;
             }
-            if (this.open(manifest)) {
+            if (this.open(manifest).outcome === "opened") {
                 mounted += 1;
             }
         }
@@ -1072,32 +1164,65 @@ export class PanelHost {
     }
 
     /**
-     * Open one panel. Returns false when it is already open, or when the docking root is not up.
+     * Open one copy of a panel, HONOURING ITS DECLARED INSTANCE MODE (editor-UX c3, design 04 §3).
+     *
+     * `singleton` — a second open FOCUSES the live copy and reports `focused`, which is a success:
+     * before c3 this method refused a second open of EVERY panel whatever its mode declared, which
+     * is precisely why `dock.singleton` was decorative (there was no path on which it could differ).
+     * `limited` — opens up to `instances.max`; the next is `refused` with the limit NAMED in the
+     * diagnostic. `unlimited` — mints a new copy every time.
+     *
+     * `requestedInstanceId` is the RESTORE / REHOME channel: a caller replaying a persisted
+     * arrangement asks for the exact ids it saved. An id already live reports `focused` for it,
+     * never a silently different copy.
      */
-    open(manifest: PanelManifest): boolean {
+    open(manifest: PanelManifest, requestedInstanceId?: string): PanelOpenResult {
         if (this.#api === null) {
-            return false;
+            return refusal("the docking root is not up");
         }
         // THE SINK GATE, APPLIED AT THE ONE CHOKEPOINT rather than in `start`'s loop (M9 e13a-2).
-        // `start` is not the only caller: `openById` (e10b's tear-out seed path) reaches here with a
+        // `start` is not the only caller: `openInstance` (e10b's tear-out seed path) reaches here with a
         // roster manifest and no content-type check of its own, so a gate that lived only in the
         // loop above would be bypassed by a seeded window — and for an `iframe` manifest that means
         // a third-party entry URL routed into `#create`. Refusing here is what makes the gate a
         // property of the class instead of a property of one code path.
         if (!this.#mountable(manifest)) {
-            return false;
+            return refusal(`this build cannot mount '${manifest.id}'`);
         }
-        if (this.#panels.has(manifest.id)) {
-            // ⚠ THE MODE IS NOT CONSULTED YET, and saying so is the point: this refuses a second open
-            // of EVERY panel, whatever its `instances.mode` declares (04 §1). Manifest v3 (c2) landed
-            // the DECLARATION; the instance runtime that honours it — focusing an existing singleton,
-            // refusing past a `limited` ceiling, minting a new `unlimited` copy — is c3, and it rekeys
-            // `#panels` by (panelId, instanceId) to do it.
-            return false;
+        if (requestedInstanceId !== undefined && this.#panels.has(requestedInstanceId)) {
+            // ALREADY OPEN, AND THAT IS AN ANSWER. A restore replaying an id it already replayed gets
+            // that copy back rather than a refusal it would have to tell apart from a real one.
+            return this.#focus(requestedInstanceId);
         }
+        const live = this.instancesOf(manifest.id);
+        const admission = admits(manifest, live.length);
+        if (admission !== "") {
+            // A `singleton` whose copy is already open FOCUSES it — the one behaviour the old
+            // boolean could not express. Every other refusal (a `limited` ceiling, a drifted mode)
+            // is reported with the limit named.
+            //
+            // ⚠ ONLY WHEN NO SPECIFIC COPY WAS ASKED FOR. A caller naming an id it does not already
+            // hold — a restore replaying a saved arrangement — wants THAT copy or an honest refusal;
+            // answering with a different live one would attach the restored state to the wrong panel,
+            // silently, which is worse than not restoring it. (The already-live case returned
+            // `focused` above, before this branch.)
+            const first = live[0];
+            if (
+                requestedInstanceId === undefined &&
+                manifest.instances.mode === "singleton" &&
+                first !== undefined
+            ) {
+                return this.#focus(first);
+            }
+            return refusal(admission);
+        }
+        const instanceId = this.#reserveInstanceId(manifest.id, requestedInstanceId);
         const previous = this.mounted[this.mounted.length - 1];
         this.#api.addPanel({
-            id: manifest.id,
+            // THE DOCKVIEW PANEL ID IS THE INSTANCE ID (c3). Dockview keys its whole arrangement —
+            // and the blob `captureLayout` persists — on this, so two copies of one kind need two
+            // ids here or the second `addPanel` silently replaces the first.
+            id: instanceId,
             component: componentFor(manifest),
             title: manifest.title,
             ...rendererFor(manifest),
@@ -1112,18 +1237,78 @@ export class PanelHost {
                       },
                   }),
         });
-        return this.#panels.has(manifest.id);
+        return this.#panels.has(instanceId)
+            ? { outcome: "opened", instanceId, diagnostic: "" }
+            : refusal(`the docking root did not create '${instanceId}'`);
     }
 
     /**
-     * Open one panel BY ID, looked up from the roster (M9 e10b). The seed-open path: a torn-out or
-     * rehomed panel arrives as an id + a D6 state blob, and the target window opens it here, then the
-     * caller restores the blob over `panel.state.set`. Returns false when the id is unknown to this
-     * build's roster or already open — the same honest outcomes `open` reports.
+     * Open one copy of a panel BY KIND, looked up from the roster (M9 e10b, rekeyed by c3 — this is
+     * `openById` under its instance-aware name). The seed-open path: a torn-out or rehomed panel
+     * arrives as a panel id + a D6 state blob, the target window opens a copy here, and the caller
+     * restores the blob over `panel.state.set` addressed to the id this returns.
+     *
+     * ⚠ A REHOME MINTS A FRESH COPY rather than carrying the source window's instance id across.
+     * Instance ordinals are per WINDOW (each window runs its own editor-core with its own counters),
+     * so a moved `p#2` landing in a window that already holds `p#2` would collide with an unrelated
+     * panel. What travels is the KIND and the STATE, which is what "moves an instance" means once the
+     * copy is on the other side of an OS window boundary.
      */
-    openById(panelId: string): boolean {
+    openInstance(panelId: string, requestedInstanceId?: string): PanelOpenResult {
         const manifest = this.manifest(panelId);
-        return manifest !== undefined && this.open(manifest);
+        return manifest === undefined
+            ? refusal(`'${panelId}' is not in this build's roster`)
+            : this.open(manifest, requestedInstanceId);
+    }
+
+    /**
+     * Focus a live copy — the `singleton` second-open answer, and the only place Dockview's
+     * per-panel activation is used.
+     *
+     * `setActive` is OPTIONAL on the declared handle (dockview.ts) so a harness need not implement
+     * it; the outcome is `focused` either way, because "which copy answers this open" is the fact the
+     * caller acts on and a host that cannot raise a tab has still answered it correctly.
+     */
+    #focus(instanceId: string): PanelOpenResult {
+        this.#api?.getPanel(instanceId)?.api?.setActive();
+        return { outcome: "focused", instanceId, diagnostic: "" };
+    }
+
+    /**
+     * Mint (or accept) an instance id and keep the kind's counter ahead of it.
+     *
+     * The counter must move past an id that came from OUTSIDE — a persisted arrangement, a rehome —
+     * or the next mint could collide with a live copy and hand it Dockview's existing slot.
+     */
+    #reserveInstanceId(panelId: string, requestedInstanceId?: string): string {
+        if (requestedInstanceId !== undefined && requestedInstanceId !== "") {
+            this.#noteInstanceId(panelId, requestedInstanceId);
+            return requestedInstanceId;
+        }
+        let ordinal = this.#ordinals.get(panelId) ?? 1;
+        // Skip anything already live. The counter alone is enough in every ordinary sequence; this
+        // closes the case where a restore reserved a HIGHER id and a lower one is still open.
+        while (this.#panels.has(makeInstanceId(panelId, ordinal))) {
+            ordinal += 1;
+        }
+        this.#ordinals.set(panelId, ordinal + 1);
+        return makeInstanceId(panelId, ordinal);
+    }
+
+    /** Advance a kind's mint counter past an id minted elsewhere. A non-numeric tail is ignored. */
+    #noteInstanceId(panelId: string, instanceId: string): void {
+        const prefix = `${panelId}${PANEL_INSTANCE_SEPARATOR}`;
+        if (!instanceId.startsWith(prefix)) {
+            return;
+        }
+        const tail = instanceId.slice(prefix.length);
+        if (tail === "" || !/^[0-9]+$/.test(tail)) {
+            return;
+        }
+        const ordinal = Number(tail);
+        if (Number.isSafeInteger(ordinal) && ordinal + 1 > (this.#ordinals.get(panelId) ?? 1)) {
+            this.#ordinals.set(panelId, ordinal + 1);
+        }
     }
 
     /**
@@ -1133,8 +1318,8 @@ export class PanelHost {
      * user (and the live smoke) can SEE. Returns false when the panel is not mounted or the docking
      * root is down (nothing to float), so the caller can report the degrade honestly.
      */
-    floatPanel(panelId: string): boolean {
-        const panel = this.#api?.getPanel(panelId);
+    floatPanel(instanceId: string): boolean {
+        const panel = this.#api?.getPanel(instanceId);
         if (this.#api === null || panel === undefined) {
             return false;
         }
@@ -1142,20 +1327,35 @@ export class PanelHost {
         return true;
     }
 
-    /** Close one panel, disposing its hydration runtime. */
-    close(panelId: string): boolean {
-        const panel = this.#api?.getPanel(panelId);
+    /**
+     * Close one COPY, disposing its hydration runtime and RELEASING its Shell-side model (c3).
+     *
+     * ⚠ THE RELEASE IS THE HALF THAT IS EASY TO OMIT, and omitting it is silent: the Shell's instance
+     * table would only ever grow, so a `limited` panel would exhaust its ceiling after `max` opens
+     * over the whole session and the next open would be refused for a copy the user closed an hour
+     * ago. Fire-and-forget on purpose — a released model is not something the DOM waits on, and
+     * blocking a close on a round trip would make tearing a panel down feel slow. Only `uitree`
+     * panels are released: they are exactly the kinds with a C++ model, and `local`/`iframe` panels
+     * would spend a guaranteed-refused round trip per close (the same reasoning `portState`'s three
+     * answers turn on).
+     */
+    close(instanceId: string): boolean {
+        const panel = this.#api?.getPanel(instanceId);
         if (this.#api === null || panel === undefined) {
             return false;
         }
+        const hosted = this.#panels.get(instanceId);
         this.#api.removePanel(panel);
-        this.#panels.get(panelId)?.renderer.dispose();
+        hosted?.renderer.dispose();
+        if (hosted !== undefined && hosted.manifest.contentType === "uitree") {
+            void this.#client.closeInstance(hosted.manifest.id, instanceId);
+        }
         // FORGET THE REVISION TOO (e09e-3). A reopened panel gets a FRESH renderer whose mounted
         // revision is `-1`, so a remembered number here would make `pollRevisions` skip it until the
         // model happened to move again — the reopened panel would sit on whatever its own `init`
         // render caught, which is the very race this driver exists to close.
-        this.#revisions.delete(panelId);
-        return this.#panels.delete(panelId);
+        this.#revisions.delete(instanceId);
+        return this.#panels.delete(instanceId);
     }
 
     /**
@@ -1219,16 +1419,28 @@ export class PanelHost {
         if (roster === null) {
             return 0;
         }
-        let refreshed = 0;
+        // ⚠ KEYED BY INSTANCE, DRIVEN BY THE KIND'S REVISION (c3). The roster reports ONE revision
+        // per kind — `panel.list` builds nothing, which is the whole reason this driver polls it
+        // rather than re-rendering (see above) — so every live copy of a kind whose model moved is
+        // refreshed. For a kind whose copies share one model (a `provide()` binding) that is exactly
+        // right; for a factory-bound kind it can refresh a sibling whose own model did not move,
+        // which costs one render and patches nothing, because `HydrationRuntime.apply` no-ops on an
+        // unchanged revision one layer down. Paying that is deliberate: the alternative is a
+        // per-instance revision on the wire, i.e. a `panel.list` whose size grows with the open set.
+        const revisions = new Map<string, number>();
         for (const manifest of roster.panels) {
-            const hosted = this.#panels.get(manifest.id);
-            if (hosted === undefined || hosted.renderer.suspended) {
+            revisions.set(manifest.id, manifest.revision);
+        }
+        let refreshed = 0;
+        for (const [instanceId, hosted] of this.#panels) {
+            const revision = revisions.get(hosted.manifest.id);
+            if (revision === undefined || hosted.renderer.suspended) {
                 continue;
             }
-            if (this.#revisions.get(manifest.id) === manifest.revision) {
+            if (this.#revisions.get(instanceId) === revision) {
                 continue;
             }
-            this.#revisions.set(manifest.id, manifest.revision);
+            this.#revisions.set(instanceId, revision);
             hosted.renderer.refresh();
             refreshed += 1;
         }
@@ -1286,6 +1498,21 @@ export class PanelHost {
         const previous = this.#api.toJSON();
         try {
             this.#api.fromJSON(state);
+            // RECONCILE THE LIVE SET (c3). `fromJSON` clears the grid and re-creates every panel it
+            // names, driving `#create` — which registers the restored copies — but nothing removes
+            // the entries `start()` opened whose ids the arrangement does NOT name. Before instances
+            // that was invisible: the ids were panel ids and a restore replayed the same ones, so
+            // every entry was overwritten. A restored arrangement can now legitimately name
+            // `p#2, p#3` where `start()` opened `p#1`, and a stale entry left behind is a renderer
+            // Dockview no longer shows, still registered for theme pushes and still counted against
+            // its kind's instance ceiling.
+            for (const [instanceId, hosted] of [...this.#panels]) {
+                if (this.#api.getPanel(instanceId) === undefined) {
+                    hosted.renderer.dispose();
+                    this.#panels.delete(instanceId);
+                    this.#revisions.delete(instanceId);
+                }
+            }
         } catch (error) {
             try {
                 this.#api.fromJSON(previous);
@@ -1306,6 +1533,10 @@ export class PanelHost {
         }
         this.#panels.clear();
         this.#revisions.clear();
+        // The mint counters go with the panels. A host that kept them would hand the FIRST copy of a
+        // re-started editor an ordinal from the previous session, so a persisted `p#1` arrangement
+        // would no longer match what a fresh `start()` opens.
+        this.#ordinals.clear();
         this.#api?.dispose();
         this.#api = null;
     }
@@ -1315,10 +1546,17 @@ export class PanelHost {
      * asked for. The manifest is looked up from the roster rather than passed in, because Dockview
      * hands us only an id.
      */
-    #create(panelId: string): DockviewContentRenderer {
-        const manifest = this.manifest(panelId);
-        const renderer = this.#renderer(panelId, manifest);
+    #create(instanceId: string): DockviewContentRenderer {
+        // ⚠ DOCKVIEW HANDS US AN INSTANCE ID AND NOTHING ELSE (c3), including on the restore path,
+        // where `fromJSON` re-creates every persisted panel BEFORE this host has registered any of
+        // them. That is exactly why an instance id is composed rather than opaque: the KIND has to be
+        // recoverable from the id alone or a restore cannot know which renderer to build.
+        const manifest = this.manifestForInstance(instanceId);
+        const renderer = this.#renderer(instanceId, manifest);
         if (manifest !== undefined) {
+            // Keep the kind's mint counter ahead of an id Dockview restored, so the next open cannot
+            // collide with a copy the arrangement just brought back.
+            this.#noteInstanceId(manifest.id, instanceId);
             // DISPOSE THE ONE BEING REPLACED, IF THERE IS ONE. Dockview calls `init` and NOTHING
             // else on a content renderer (dockview.ts § the lifecycle note) — it never disposes ours
             // — so overwriting this map entry WITHOUT disposing would orphan the previous renderer
@@ -1340,8 +1578,8 @@ export class PanelHost {
             // Kept because it costs one lookup on a path that runs once per panel creation and is
             // correct by construction — dropping an entry from `#panels` without disposing it can
             // never be right — not because a leak was observed.
-            this.#panels.get(panelId)?.renderer.dispose();
-            this.#panels.set(panelId, { manifest, renderer });
+            this.#panels.get(instanceId)?.renderer.dispose();
+            this.#panels.set(instanceId, { manifest, instanceId, renderer });
         }
         return renderer;
     }
@@ -1366,19 +1604,24 @@ export class PanelHost {
      * independent on purpose — this is the construction chokepoint, `#mountable` is the policy — but
      * neither is a copy of the other, which is what makes them safe to keep both.
      */
-    #renderer(panelId: string, manifest: PanelManifest | undefined): PanelRenderer {
+    #renderer(instanceId: string, manifest: PanelManifest | undefined): PanelRenderer {
         // Narrowed through an `if` rather than `switch (manifest?.contentType)` so TS keeps the
         // narrowing inside each arm; the shape then matches `#mountable` and `componentFor`, which
         // switch on the same discriminant directly below.
         if (manifest === undefined) {
-            return new UnavailablePanelRenderer(panelId);
+            return new UnavailablePanelRenderer(panelIdOfInstance(instanceId), instanceId);
         }
+        const panelId = manifest.id;
         switch (manifest.contentType) {
             case "local": {
+                // KEYED BY THE KIND, not the copy: `localPanels` says which of the manifest's panels
+                // THIS bundle knows how to draw, which is a fact about the kind. A per-instance key
+                // would need one factory registration per copy, i.e. a registry that grows as the
+                // user opens panels.
                 const localFactory = this.#localPanels.get(panelId);
                 return localFactory === undefined
-                    ? new UnavailablePanelRenderer(panelId)
-                    : new LocalPanelRenderer(panelId, localFactory);
+                    ? new UnavailablePanelRenderer(panelId, instanceId)
+                    : new LocalPanelRenderer(panelId, instanceId, localFactory);
             }
             case "iframe": {
                 // An unparseable entry is UNAVAILABLE, not an `about:blank` frame. Both spell "this
@@ -1387,7 +1630,7 @@ export class PanelHost {
                 // `context-ext://…` URL is the ONLY string it accepts.
                 const entry = parseExtPanelEntry(manifest.contentEntry);
                 if (entry === null) {
-                    return new UnavailablePanelRenderer(panelId);
+                    return new UnavailablePanelRenderer(panelId, instanceId);
                 }
                 // Bind everything the verb table needs from the MANIFEST here; the renderer supplies
                 // the one thing only it can (a `request` on the port it is about to create).
@@ -1397,7 +1640,12 @@ export class PanelHost {
                         ? undefined
                         : (request: PanelPortRequest, state: PanelStateStore): PanelVerbTable =>
                               factory({
-                                  panelId,
+                                  // ⚠ THE INSTANCE, not the kind (c3). A package panel's verb table
+                                  // is the identity its own port answers under, and two copies of one
+                                  // package panel must be two addressees — a table built for the kind
+                                  // would make the second copy's `commands.register` collide with the
+                                  // first's under incumbent-wins.
+                                  panelId: instanceId,
                                   packageId: entry.packageId,
                                   declaredCapabilities: manifest.capabilities,
                                   manifestCommandIds: manifest.commands.map(
@@ -1408,6 +1656,7 @@ export class PanelHost {
                               });
                 return new IframePanelRenderer(
                     panelId,
+                    instanceId,
                     entry.url,
                     entry.packageId,
                     binder,
@@ -1415,16 +1664,21 @@ export class PanelHost {
                 );
             }
             case "uitree":
-                return new UitreePanelRenderer(panelId, this.#client, manifest.gestures);
+                return new UitreePanelRenderer(
+                    panelId,
+                    instanceId,
+                    this.#client,
+                    manifest.gestures,
+                );
             default:
-                return new UnavailablePanelRenderer(panelId);
+                return new UnavailablePanelRenderer(panelId, instanceId);
         }
     }
 
     /**
      * Can THIS build mount this panel? The ONE predicate `start` reports `unavailable` from and
      * `open` refuses on (M9 e13a-2) — previously three separate checks inside `start`'s loop, which
-     * is how `openById` came to bypass them.
+     * is how `openById` (c3's `openInstance`) came to bypass them.
      *
      * Per content type:
      *   * `uitree` — needs a Shell PROVIDER (`hosted`). The D10-blocked panels were unavailable here
@@ -1449,6 +1703,38 @@ export class PanelHost {
             default:
                 return false;
         }
+    }
+}
+
+/** A refusal, with the reason. The one shape every `open` refusal is built from. */
+function refusal(diagnostic: string): PanelOpenResult {
+    return { outcome: "refused", instanceId: "", diagnostic };
+}
+
+/**
+ * May a kind with `live` copies open ANOTHER? `""` = yes; otherwise the reason, NAMING the limit.
+ *
+ * The TS half of design 04 §3's open semantics, and the mirror of the Shell's `may_open`. Both sides
+ * enforce it deliberately: this one is what the human meets (an honest refusal instead of a panel
+ * that does not appear), the Shell's is the backstop over an untrusted renderer, and neither is a
+ * substitute for the other.
+ */
+function admits(manifest: PanelManifest, live: number): string {
+    switch (manifest.instances.mode) {
+        case "singleton":
+            return live < 1 ? "" : `'${manifest.id}' is a singleton panel and is already open`;
+        case "limited":
+            return live < manifest.instances.max
+                ? ""
+                : `'${manifest.id}' allows at most ${String(manifest.instances.max)} open copies` +
+                      ` and ${String(live)} are open`;
+        case "unlimited":
+            return "";
+        default:
+            // Unreachable for a parsed manifest (`readInstances` fails closed to `singleton`), and
+            // deny-by-default if it ever is not: an unknown mode must read as the MOST restrictive
+            // answer, exactly as the C++ `instance_mode_token` fallback does.
+            return `'${manifest.id}' declares an instance mode this build cannot read`;
     }
 }
 

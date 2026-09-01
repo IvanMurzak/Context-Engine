@@ -478,9 +478,11 @@ export const extPanelTests: readonly TestCase[] = [
                 );
                 assertEqual(
                     iframe.getAttribute("title"),
-                    "pkg.hello",
+                    "pkg.hello#1",
                     "the frame is a LABELLED landmark (R-A11Y-001) — a screen reader announces " +
-                        "which panel focus moved into",
+                        "which panel focus moved into. The INSTANCE id since editor-UX c3: two " +
+                        "copies of one package panel both announcing 'Hello' would tell the user " +
+                        "nothing about which of them focus entered",
                 );
                 assertEqual(
                     iframe.getAttribute("loading"),
@@ -502,16 +504,16 @@ export const extPanelTests: readonly TestCase[] = [
             try {
                 assertEqual(
                     mounted.host.mounted.join(","),
-                    "builtin.problems,pkg.hello",
-                    "both panels are docked, in roster order",
+                    "builtin.problems#1,pkg.hello#1",
+                    "both panels are docked, in roster order — named by INSTANCE since c3",
                 );
                 assert(
-                    mounted.host.api?.getPanel("pkg.hello") !== undefined,
+                    mounted.host.api?.getPanel("pkg.hello#1") !== undefined,
                     "Dockview owns the package panel exactly as it owns the built-in — the " +
                         "geometry layer never learns there is a trust tier",
                 );
                 assert(
-                    mounted.host.floatPanel("pkg.hello"),
+                    mounted.host.floatPanel("pkg.hello#1"),
                     "the package panel FLOATS: dockview-core renders a floating group with an " +
                         "inline position:absolute, so this is the rendered result, not a selector",
                 );
@@ -561,17 +563,19 @@ export const extPanelTests: readonly TestCase[] = [
         },
     },
     {
-        name: "iframe panel: openById cannot walk past the gate (the e10b seed path)",
+        name: "iframe panel: openInstance cannot walk past the gate (the e10b seed path)",
         run: async () => {
             // THE REGRESSION THIS PINS: the content-type gate used to live inline in `start`'s loop,
-            // so `openById` — e10b's tear-out seed path, which looks a manifest up from the roster
-            // and calls `open` directly — reached `addPanel` with no gate at all. A seeded window
-            // could therefore mount a panel `start` had just reported unavailable.
+            // so `openInstance` (c3's name for `openById`) — e10b's tear-out seed path, which looks a
+            // manifest up from the roster and calls `open` directly — reached `addPanel` with no gate
+            // at all. A seeded window could therefore mount a panel `start` had just reported
+            // unavailable.
             const mounted = await mountHost([manifestJson({ entry: "javascript:alert(1)" })]);
             try {
-                assert(
-                    !mounted.host.openById("pkg.hello"),
-                    "openById REFUSES a panel this build cannot mount",
+                assertEqual(
+                    mounted.host.openInstance("pkg.hello").outcome,
+                    "refused",
+                    "openInstance REFUSES a panel this build cannot mount",
                 );
                 assertEqual(mounted.container.querySelectorAll("iframe").length, 0, "nothing mounted");
                 assertEqual(
@@ -693,7 +697,7 @@ export const extPanelTests: readonly TestCase[] = [
                 // CLOSING the panel disposes the renderer, which must dispose the bridge — otherwise a
                 // closed panel leaves a `message` listener on the editor's window for a frame that is
                 // gone.
-                assert(mounted.host.close("pkg.hello"), "the panel closed");
+                assert(mounted.host.close("pkg.hello#1"), "the panel closed");
                 assertEqual(
                     iframe.getAttribute(PANEL_PORT_STATE_ATTRIBUTE),
                     "revoked",
@@ -726,10 +730,12 @@ export const extPanelTests: readonly TestCase[] = [
                 assert(frameFor(mounted, "pkg.hello") !== null, "the frame is up");
                 assertEqual(
                     JSON.stringify(disposals),
-                    JSON.stringify(["built:pkg.hello"]),
-                    "the host built the panel's verb table and has not torn it down yet",
+                    JSON.stringify(["built:pkg.hello#1"]),
+                    "the host built the panel's verb table and has not torn it down yet. Bound to " +
+                        "the INSTANCE since c3: two copies of one package panel must be two " +
+                        "addressees, or the second's `commands.register` collides with the first's",
                 );
-                assert(mounted.host.close("pkg.hello"), "the panel closed");
+                assert(mounted.host.close("pkg.hello#1"), "the panel closed");
                 // ⚠ AT LEAST once, not EXACTLY once — measured: `PanelHost.close` reaches
                 // `IframePanelRenderer.dispose` TWICE (Dockview's own `removePanel` teardown, then
                 // the explicit `renderer.dispose()` call), so the count is not the contract. That is
@@ -738,7 +744,7 @@ export const extPanelTests: readonly TestCase[] = [
                 // second pass withdraws nothing). Pinning an exact count here would pin Dockview's
                 // teardown shape, not ours.
                 assert(
-                    disposals.filter((entry) => entry === "disposed:pkg.hello").length >= 1,
+                    disposals.filter((entry) => entry === "disposed:pkg.hello#1").length >= 1,
                     "closing the panel disposed its verb table — the hook that withdraws the panel's " +
                         `runtime commands from the ONE registry, which outlives every panel: ${JSON.stringify(disposals)}`,
                 );
@@ -933,13 +939,13 @@ export const extPanelTests: readonly TestCase[] = [
                 // artifact that discriminates, and `deliverToPackage` is built over it.
                 assertEqual(
                     [...mounted.host.panelsForPackage("pkg.hello")].sort(),
-                    ["pkg.hello", "pkg.hello.second"],
+                    ["pkg.hello#1", "pkg.hello.second#1"],
                     "BOTH of the package's panels are addressed by its ONE poll — the half the " +
                         "deduplication above would otherwise silently starve",
                 );
                 assertEqual(
                     mounted.host.panelsForPackage("pkg.other"),
-                    ["pkg.other"],
+                    ["pkg.other#1"],
                     "…and the other package's panel is NOT one of them",
                 );
                 assertEqual(
@@ -957,7 +963,7 @@ export const extPanelTests: readonly TestCase[] = [
                 const fanout = mounted.host.deliverToPackage("pkg.hello", "events.deliver", {});
                 assertEqual(
                     [...fanout.addressed].sort(),
-                    ["pkg.hello", "pkg.hello.second"],
+                    ["pkg.hello#1", "pkg.hello.second#1"],
                     "the DELIVERY addressed exactly its own package's two panels — pkg.other and the " +
                         "uitree panel are not reachable from pkg.hello's events",
                 );

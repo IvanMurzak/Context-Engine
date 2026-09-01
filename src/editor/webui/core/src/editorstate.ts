@@ -269,6 +269,12 @@ export class LayoutPersistence {
         }
         let panelsRestored = 0;
         const degraded: string[] = [];
+        // ⚠ THE KEYS ARE INSTANCE IDS SINCE editor-UX c3, and the C++ route needs BOTH halves of the
+        // pair: `panel.state.set` takes the KIND plus the copy. `PanelHost.panelIdOf` answers from
+        // the live entry when there is one and decomposes the id when there is not — which is the
+        // case that matters here, because a blob may name a copy this build no longer opens (a panel
+        // dropped from the roster, a `limited` kind whose ceiling shrank). A bare id written before
+        // instances existed decomposes to itself, so an old document still restores onto the kind.
         for (const [id, blob] of Object.entries(persisted.panels)) {
             // A THIRD-PARTY `iframe` PANEL HAS NO C++ MODEL (M9 e13d), so `panel.state.set` has
             // nothing to apply for it — its blob is seeded into the PORT store instead, which is what
@@ -285,7 +291,7 @@ export class LayoutPersistence {
                 }
                 continue;
             }
-            const result = await this.#panelClient.setState(id, blob);
+            const result = await this.#panelClient.setState(this.#panelHost.panelIdOf(id), blob, id);
             if (result === null) {
                 // The panel is unknown to this build or persists no state — an ordinary outcome for a
                 // blob left over from a panel this build cannot host (e05d3's Scene tree / Inspector).
@@ -366,6 +372,10 @@ export class LayoutPersistence {
         // chain is the likeliest to be cut short before the last panel is read.
         const panels: Record<string, unknown> = {};
         await Promise.all(
+            // `mounted` names COPIES (c3), so the published map is keyed by instance id and a
+            // reload restores each copy's own blob — which is what "state is persisted per instance"
+            // means. Two viewports save two entries; before c3 the second would have overwritten the
+            // first under one shared key.
             [...this.#panelHost.mounted].map(async (id): Promise<void> => {
                 // The PORT store first (M9 e13d) — a third-party `iframe` panel's blob lives on this
                 // side of the bridge, so asking the Shell for it would answer `null` for every
@@ -383,7 +393,7 @@ export class LayoutPersistence {
                     }
                     return;
                 }
-                const state = await this.#panelClient.getState(id);
+                const state = await this.#panelClient.getState(this.#panelHost.panelIdOf(id), id);
                 if (state !== null && state !== undefined) {
                     panels[id] = state;
                 }

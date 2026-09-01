@@ -579,9 +579,9 @@ Shell does; the gate is the authority on this boundary.
 
 ## 7. Panels — the host, the providers, and the live feed (M9 e05d1)
 
-`PanelHost` (`src/editor/shell/src/panel_host.cpp`) publishes six methods on the privileged bridge —
-`panel.list`, `panel.render`, `panel.command`, `panel.gesture`, `panel.state.get/set` — over the e05b
-roster. It is **panel-agnostic by construction**: no panel id appears in it, and the ability to render
+`PanelHost` (`src/editor/shell/src/panel_host.cpp`) publishes seven methods on the privileged bridge —
+`panel.list`, `panel.render`, `panel.command`, `panel.gesture`, `panel.state.get/set` and (editor-UX
+c3) `panel.instance.close` — over the e05b roster. It is **panel-agnostic by construction**: no panel id appears in it, and the ability to render
 one comes from a `PanelProvider` (a bundle of `std::function`s) bound at the composition root. Adding
 a panel is a roster entry plus one provider binding, with no change to the host or to the TS hydration
 runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the host has never heard of.
@@ -598,6 +598,24 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
   panel would leave panel-agnosticism resting on a claim. `hostable_panel_ids()` is the one
   enumeration, and `editor-shell-test_builtin_panels` asserts every id in it is hosted and that
   nothing else is, so this list cannot drift into a claim the bindings do not honour.
+- **Identity is `(panelId, instanceId)` (editor-UX c3, design 04 §3).** `panelId` names the KIND;
+  `instanceId` names the live copy, spelled `<panelId>#<n>` with a per-kind ordinal. The pair is
+  honoured end to end: the provider may be a **factory** (`provide_factory`) that mints one model per
+  copy, every `panel.*` method takes an optional trailing `instanceId`, and D6 state is persisted per
+  copy. `provide()` still binds ONE model **shared** by every copy — right for a singleton, and right
+  for a kind whose model is genuinely global (the Problems feed is one diagnostics set however many
+  views of it exist); a kind whose copies must diverge binds the factory instead.
+  - **Open semantics come from the manifest's `instances.mode`**: `singleton` FOCUSES the live copy on
+    a second open (an honest answer, not a failure — this is what `dock.singleton` never had, since
+    the old `open` refused a second open of every panel whatever its mode said), `limited` refuses
+    past `max` with the limit named, `unlimited` mints. Both hosts enforce it: the renderer's is what
+    the human meets, the Shell's is the backstop over an untrusted renderer.
+  - **Creation is implicit, release is explicit.** The renderer owns panel lifecycle and mints the id,
+    so the first `panel.render` naming a copy materialises its model; `panel.instance.close` is what
+    frees it. Without that verb the instance table could only grow, and a `limited` kind would exhaust
+    its ceiling over the session rather than holding `max` LIVE copies.
+  - **a11y stays keyed by KIND** (planner ruling): auditing N copies of one model proves nothing the
+    first copy did not, so `src/editor/gui/a11y/` gains no per-instance entries.
 - **The live read path**: the Shell subscribes to the daemon's `diagnostics` + `derivation` topics
   through the SDK's `SubscriptionConsumer` and projects what arrives onto the `ProblemsPanel` model
   (`src/editor/shell/panels/src/problems_feed.cpp`). The projection is pure and unit-tested on all
@@ -1564,7 +1582,8 @@ Named so the gaps are visible rather than assumed:
   byte-compared against `ext_scheme.h` by the `webui-scheme-contract` ctest. The per-content-type
   gate lives in `PanelHost#mountable` and is *decided* in `open()` rather than in `start()`'s loop
   (which still calls the same predicate, but only to build its `unavailable` report), because
-  `openById` (the e10b tear-out seed path) reached `addPanel` without it. `#renderer` is the second,
+  `openInstance` (the e10b tear-out seed path, `openById` before c3) reached `addPanel` without it.
+  `#renderer` is the second,
   independent guard at the construction chokepoint: it is fail-closed for **every** content type, so
   the one caller that does not pass `open` — `restoreLayout`, which hands a persisted arrangement
   straight to Dockview's `createComponent` — cannot default a drifted manifest into the `innerHTML`
