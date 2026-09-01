@@ -6,17 +6,19 @@
 #
 #   THIS is the only target in the Shell family that links `context_gui_panel_*` libraries, and it is
 #   linked by the EXECUTABLES (context_editor + the CEF smoke), never by context_editor_shell. Since
-#   e05d3 the three hosted panel libraries are ALL boundary-clean (the scenetree/inspector
-#   kernel-typed builders were split out to gui/panels/builders/, which only the DAEMON side links),
-#   so `context_editor`'s audited closure — which now includes them — stays CLEAN and the gate's
-#   FORBIDDEN list is untouched. Do NOT link context_gui_panel_builders (or any kernel module) here:
-#   that would put compose/schema straight back on the audited closure the split just cleaned.
+#   e05d3 the hosted panel libraries are ALL boundary-clean (the scenetree/inspector kernel-typed
+#   builders were split out to gui/panels/builders/, which only the DAEMON side links; M9 e1's Files
+#   panel followed the SAME split from day one), so `context_editor`'s audited closure — which now
+#   includes them — stays CLEAN and the gate's FORBIDDEN list is untouched. Do NOT link
+#   context_gui_panel_builders (or any kernel module) here: that would put compose/schema/assetdb
+#   straight back on the audited closure the split exists to keep clean.
 #
 # Every library on this target's closure is boundary-clean:
 #   context_editor_shell        -> client / render_present / gui_uitree / gui_contract
 #   context_gui_panel_problems  -> gui_uitree / bridge       (bridge is deliberately NOT forbidden)
 #   context_gui_panel_scenetree -> gui_uitree / bridge       (e05d3: compose split OUT)
 #   context_gui_panel_inspector -> gui_uitree / serializer   (e05d3: compose+schema split OUT)
+#   context_gui_panel_files     -> gui_uitree / bridge       (M9 e1: assetdb split OUT from day one)
 #   context_gui_playbar         -> gui_uitree                (e08b: session_control split OUT, so the
 #                                                             transport carries no runtime/render dep)
 
@@ -24,6 +26,7 @@ add_library(context_editor_panels STATIC
     src/problems_feed.cpp    # the live `diagnostics` topic -> ProblemsPanel projection (04 §4)
     src/scenetree_feed.cpp   # e05d3: the `editor.scene-tree` read -> SceneTreePanel projection
     src/inspector_feed.cpp   # e05d3: the `editor.inspect` read -> InspectorPanel projection
+    src/files_feed.cpp       # M9 e1: the `editor.files` read -> FilesPanel projection (D10 read half)
     src/session_feed.cpp     # e08b: the `session` topic + the `editor.*` writes <-> panel state
     src/wire_override_gateway.cpp # e09b-2: the Inspector's L-20/L-30 commit over the `edit` RPC
     src/undo_feed.cpp        # e09c: the session undo HOST (records, replays over the wire, persists)
@@ -42,7 +45,7 @@ target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_D
 # `context_editor`'s D10-audited link closure gains no new library and the FORBIDDEN list is untouched.
 target_link_libraries(context_editor_panels
     PUBLIC context_editor_shell context_gui_panel_problems context_gui_panel_scenetree
-           context_gui_panel_inspector context_gui_playbar context_gui_undo
+           context_gui_panel_inspector context_gui_panel_files context_gui_playbar context_gui_undo
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
@@ -60,6 +63,7 @@ set(_context_editor_panels_tests
     test_problems_feed     # the wire->model projection, promotion/settle, and the row-id mapping
     test_scenetree_feed    # e05d3: the scene-tree wire round-trip, settle->refetch, selection dispatch
     test_inspector_feed    # e05d3: the inspector wire round-trip, CAS token, edit staging dispatch
+    test_files_feed        # M9 e1: the files wire round-trip, settle->refetch, selection dispatch
     test_session_feed      # e08b: the `session` facts, origin echo suppression, the `editor.*` writes
     test_wire_override_gateway # e09b-2: the `edit` wire shape, the CAS refusal, L-30 over the seam
     test_undo_feed         # e09c: record -> replay-over-the-wire -> persist -> RESTART -> undo again

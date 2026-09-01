@@ -847,6 +847,8 @@ int main(int argc, char** argv)
     // the apply_* non-member seams builtin_panels.h exposes for exactly this caller.
     shell::panels::ProblemsFeed* feed = builtin.problems.get();
     shell::panels::SceneTreeFeed* tree_feed = builtin.scenetree.get();
+    // M9 e1: the Files feed (D10 read half). Same forward-declared-pointer discipline.
+    shell::panels::FilesFeed* files_feed = builtin.files.get();
     // e08b: the daemon session feed (selection / play). Same forward-declared-pointer discipline.
     shell::panels::SessionFeed* session_feed = builtin.session.get();
     // e09e-2: the Inspector rides the SAME `derivation` stream, so design 05 §8's fan-out tail — a
@@ -1122,7 +1124,7 @@ int main(int argc, char** argv)
                 });
         });
     lifecycle.on_event(
-        [feed, tree_feed, session_feed, inspector_feed, &for_each_secondary_bag](
+        [feed, tree_feed, files_feed, session_feed, inspector_feed, &for_each_secondary_bag](
             const std::string&, const client::ClientEvent& event)
         {
             if (feed != nullptr)
@@ -1131,6 +1133,11 @@ int main(int argc, char** argv)
             if (tree_feed != nullptr)
                 (void)shell::panels::apply_scenetree_event(*tree_feed, event.topic, event.payload,
                                                            event.generation);
+            // M9 e1: the Files panel re-fetches on the SAME `derivation.settled` signal (a write
+            // anywhere — including this window's own — can create/move/delete a file).
+            if (files_feed != nullptr)
+                (void)shell::panels::apply_files_event(*files_feed, event.topic, event.payload,
+                                                       event.generation);
             // e09e-2: the fan-out half. A `false` here is ordinary — the feed WITHHOLDS the re-read
             // while a gesture is staged, so the human's in-flight edit and its L-30 CAS base survive
             // a concurrent writer's settle (inspector_feed.h § apply_event).
@@ -1154,6 +1161,9 @@ int main(int argc, char** argv)
                     if (bag.scenetree != nullptr)
                         (void)shell::panels::apply_scenetree_event(*bag.scenetree, event.topic,
                                                                    event.payload, event.generation);
+                    if (bag.files != nullptr)
+                        (void)shell::panels::apply_files_event(*bag.files, event.topic, event.payload,
+                                                               event.generation);
                     if (bag.inspector != nullptr)
                         (void)shell::panels::apply_inspector_event(*bag.inspector, event.topic,
                                                                    event.payload);

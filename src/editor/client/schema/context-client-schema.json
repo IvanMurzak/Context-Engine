@@ -874,6 +874,25 @@
       ]
     },
     {
+      "method": "editor.files",
+      "ns": "",
+      "noun": "editor",
+      "verb": "files",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
       "method": "editor.select",
       "ns": "",
       "noun": "editor",

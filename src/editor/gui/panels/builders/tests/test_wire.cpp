@@ -16,6 +16,7 @@
 namespace builders = context::editor::gui::panels::builders;
 namespace scenetree = context::editor::gui::panels::scenetree;
 namespace inspector = context::editor::gui::panels::inspector;
+namespace files = context::editor::gui::panels::files;
 namespace serializer = context::editor::serializer;
 using Json = context::editor::contract::Json;
 
@@ -106,6 +107,50 @@ int main()
         const Json none = builders::inspector_to_wire(inspector::InspectorModel{});
         CHECK(!none.at("present").as_bool());
         CHECK(none.size() == 1u);
+    }
+
+    // --- files (M9 e1): shape, guid/assetKind, no hash, determinism -----------------------------
+    {
+        files::FilesModel model;
+        model.ok = true;
+        model.file_count = 2;
+        files::FileNode dir;
+        dir.identity = "textures";
+        dir.display_name = "textures";
+        dir.kind = files::FileNodeKind::directory;
+        files::FileNode asset;
+        asset.identity = "textures/wall.tex.json";
+        asset.display_name = "wall.tex.json";
+        asset.kind = files::FileNodeKind::file;
+        asset.guid = "abc123";
+        asset.asset_kind = "ctx:texture";
+        dir.children.push_back(asset);
+        files::FileNode plain;
+        plain.identity = "README.md";
+        plain.display_name = "README.md";
+        plain.kind = files::FileNodeKind::file;
+        model.roots.push_back(dir);
+        model.roots.push_back(plain);
+
+        const Json wire = builders::files_to_wire(model);
+        CHECK(wire.at("ok").as_bool());
+        CHECK(wire.at("fileCount").as_int() == 2);
+        CHECK(wire.at("roots").size() == 2u);
+        const Json& wdir = wire.at("roots").at(std::size_t{0});
+        CHECK(wdir.at("identity").as_string() == "textures");
+        CHECK(wdir.at("kind").as_string() == "directory");
+        CHECK(wdir.at("guid").as_string().empty());
+        const Json& wasset = wdir.at("children").at(std::size_t{0});
+        CHECK(wasset.at("identity").as_string() == "textures/wall.tex.json");
+        CHECK(wasset.at("kind").as_string() == "file");
+        CHECK(wasset.at("guid").as_string() == "abc123");
+        CHECK(wasset.at("assetKind").as_string() == "ctx:texture");
+        const Json& wplain = wire.at("roots").at(std::size_t{1});
+        CHECK(wplain.at("identity").as_string() == "README.md");
+        CHECK(wplain.at("guid").as_string().empty()); // no meta sidecar yet — unknown, not a defect
+        CHECK(!wire.contains("identityHash")); // a path is its own stable identity, no hash carried
+
+        CHECK(builders::files_to_wire(model).dump(0) == wire.dump(0)); // deterministic
     }
 
     BUILDERS_TEST_MAIN_END();

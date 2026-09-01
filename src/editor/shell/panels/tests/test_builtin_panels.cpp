@@ -157,14 +157,16 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // FIVE panels, from four different libraries (uitree / problems / the e05d3 pair / the e09c
-    // session journal) — the panel-agnosticism claim exercised across every hosted shape.
-    // (AMENDED by editor-window-chrome e1: the docked `builtin.playbar` retired, 6 -> 5.)
-    CHECK(panels::hostable_panel_ids().size() == 5);
+    // SIX panels, from five different libraries (uitree / problems / the e05d3 pair / the M9 e1
+    // Files panel / the e09c session journal) — the panel-agnosticism claim exercised across every
+    // hosted shape. (AMENDED by editor-window-chrome e1: the docked `builtin.playbar` retired,
+    // 6 -> 5; AMENDED again by editor-UX e1: the Files panel joined hostable from day one, 5 -> 6.)
+    CHECK(panels::hostable_panel_ids().size() == 6);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
     CHECK(host.hosts("builtin.scene-tree"));
     CHECK(host.hosts("builtin.inspector"));
+    CHECK(host.hosts("builtin.files"));
     // e09c: rostered since e05b and UNHOSTED until now — which is exactly why the journal's
     // to_json/load_json had no caller. Hosting it is what gives `session.undo` / `session.redo` a
     // reachable path (R-CLI-001).
@@ -181,6 +183,7 @@ void binds_every_hostable_panel_and_nothing_else()
     CHECK(bound.problems != nullptr);
     CHECK(bound.scenetree != nullptr);
     CHECK(bound.inspector != nullptr);
+    CHECK(bound.files != nullptr); // M9 e1
     CHECK(bound.session != nullptr);
     // e09b-2: the Inspector's wire write gateway came back too — it is what the panel's raw gateway
     // pointer points at, so a bag missing it would leave the panel pointing at freed memory.
@@ -206,11 +209,15 @@ void binds_every_hostable_panel_and_nothing_else()
     const Json* problems_entry =
         find_panel(listing, context::editor::gui::panels::problems::ProblemsPanel::kContributionId);
     CHECK(problems_entry != nullptr && problems_entry->at("hosted").as_bool());
+    const Json* files_entry = find_panel(listing, "builtin.files");
+    CHECK(files_entry != nullptr && files_entry->at("hosted").as_bool());
     // The observers expose no gestures and persist nothing. REPORTED, not stubbed.
     CHECK(problems_entry != nullptr && !problems_entry->at("gestures").as_bool());
     CHECK(problems_entry != nullptr && !problems_entry->at("persists").as_bool());
     CHECK(scenetree_entry != nullptr && !scenetree_entry->at("gestures").as_bool());
     CHECK(inspector_entry != nullptr && !inspector_entry->at("persists").as_bool());
+    CHECK(files_entry != nullptr && !files_entry->at("gestures").as_bool());
+    CHECK(files_entry != nullptr && !files_entry->at("persists").as_bool());
 
     // M9 e09b-2 — THE `gestures:false -> true` FLIP, at the ONE place it is decided. The Inspector is
     // the only built-in that WRITES, so it is the only one that can end a gesture with a commit; the

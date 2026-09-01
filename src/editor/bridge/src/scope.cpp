@@ -173,7 +173,9 @@ Scope required_scope_for(const std::string& rpc_method)
         return Scope::session_control;
     // describe, the operational `query` read, the M9 e05d3 editor-panel reads (`editor.scene-tree` /
     // `editor.inspect` — composed-world projections the Shell's panels hydrate from; they plan no
-    // write and touch no session), and everything else is a read/query read.
+    // write and touch no session), the M9 e1 `editor.files` project-file-tree read (same reasoning:
+    // a project-wide listing, no write planned, no session touched), and everything else is a
+    // read/query read.
     return Scope::read_query;
 }
 

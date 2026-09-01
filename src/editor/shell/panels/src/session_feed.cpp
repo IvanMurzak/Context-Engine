@@ -103,6 +103,12 @@ void SessionFeed::bind_scene_tree(scenetree::SceneTreePanel* panel, std::string 
     scene_tree_panel_id_ = std::move(panel_id);
 }
 
+void SessionFeed::bind_files(files::FilesPanel* panel, std::string panel_id)
+{
+    files_ = panel;
+    files_panel_id_ = std::move(panel_id);
+}
+
 void SessionFeed::add_focus_listener(FocusListener listener)
 {
     if (listener)
@@ -136,26 +142,45 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
     const std::string event = read_string(payload, "event");
     if (event == kSelectionChangedEvent)
     {
-        // THE SUBJECT FILTER (session_feed.h § THE SUBJECT FILTER). The Scene tree renders ENTITIES;
-        // feeding it a `file` selection would hand `apply_selection` project paths to resolve as L-35
-        // entity id-paths, and the result — a tree with nothing selected — is indistinguishable from
-        // a correct empty result. Counted, not silently skipped, so the drop is observable.
-        if (read_subject(payload) != kSelectionSubjectEntity)
+        // THE SUBJECT FILTER (session_feed.h § THE SUBJECT FILTER), DISPATCHING BY SUBJECT rather
+        // than filtering a single one. The Scene tree renders ENTITIES and the Files panel renders
+        // PATHS; feeding either the OTHER's ids would hand `apply_selection` a vocabulary it cannot
+        // resolve, and the result — a panel with nothing selected — is indistinguishable from a
+        // correct empty result. A subject outside BOTH vocabularies is counted, not silently
+        // skipped, so the drop is observable; a recognized subject with no bound consumer (its
+        // provider was refused) is an ordinary unhosted state and is NOT counted (mirrors every
+        // other `panel == nullptr` guard in this feed).
+        const std::string subject = read_subject(payload);
+        if (subject == kSelectionSubjectEntity)
         {
-            ++foreign_subject_facts_;
-            return false;
+            if (scene_tree_ == nullptr)
+            {
+                return false;
+            }
+            if (!scene_tree_->apply_selection(read_ids(payload)))
+            {
+                return false;
+            }
+            ++facts_applied_;
+            host_.touch(scene_tree_panel_id_);
+            return true;
         }
-        if (scene_tree_ == nullptr)
+        if (subject == kSelectionSubjectFile)
         {
-            return false;
+            if (files_ == nullptr)
+            {
+                return false;
+            }
+            if (!files_->apply_selection(read_ids(payload)))
+            {
+                return false;
+            }
+            ++facts_applied_;
+            host_.touch(files_panel_id_);
+            return true;
         }
-        if (!scene_tree_->apply_selection(read_ids(payload)))
-        {
-            return false;
-        }
-        ++facts_applied_;
-        host_.touch(scene_tree_panel_id_);
-        return true;
+        ++foreign_subject_facts_;
+        return false;
     }
 
     if (event == kSelectionFocusEvent)
@@ -261,6 +286,50 @@ SessionFeed::request_selection(const std::vector<std::string>& ids)
     if (read_bool(data, "changed") && !applied.empty())
     {
         selection_focus_ = kSelectionSubjectEntity;
+    }
+    return applied;
+}
+
+std::optional<std::vector<std::string>>
+SessionFeed::request_file_selection(const std::vector<std::string>& ids)
+{
+    // Mirrors request_selection above (see its comments for the shared rationale) with ONE
+    // difference: `subject: "file"` MUST be sent explicitly — the daemon's default is `entity`, and
+    // omitting it here would silently move the wrong selection.
+    if (client_ == nullptr)
+    {
+        return std::nullopt;
+    }
+    ++writes_issued_;
+
+    contract::Json params = contract::Json::object();
+    contract::Json wire = contract::Json::array();
+    for (const std::string& id : ids)
+    {
+        wire.push_back(contract::Json(id));
+    }
+    params.set("ids", std::move(wire));
+    params.set("subject", contract::Json(std::string(kSelectionSubjectFile)));
+
+    std::string error;
+    const std::optional<contract::Json> reply =
+        client_->call("editor.select", std::move(params), error);
+    if (!reply.has_value())
+    {
+        std::fprintf(stderr, "context_editor: `editor.select` (file) was refused (%s: %s)\n",
+                     client_->last_error_code().c_str(), error.c_str());
+        return std::nullopt;
+    }
+    // The reply's `ids` is the ACTED subject's post-write selection (kernel_server.cpp's
+    // `editor.select` handler: `selection_ids_json(session_, subject)`) — since this write NAMED
+    // `file`, that is the file selection, not the entity one.
+    const contract::Json& data = envelope_data(*reply);
+
+    // The c1/D3 focus mirror (see request_selection's note — same rule, `file` instead of `entity`).
+    std::vector<std::string> applied = read_ids(data);
+    if (read_bool(data, "changed") && !applied.empty())
+    {
+        selection_focus_ = kSelectionSubjectFile;
     }
     return applied;
 }

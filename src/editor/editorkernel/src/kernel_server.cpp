@@ -2,6 +2,7 @@
 
 #include "context/editor/editorkernel/kernel_server.h"
 
+#include "context/editor/assetdb/asset_database.h"    // e1: the editor.files GUID/kind index
 #include "context/editor/compose/compose_write.h"    // e09b-1: plan_write — the composed WRITE path
 #include "context/editor/compose/flatten.h"          // e05d3: the editor.* composed reads
 #include "context/editor/compose/project_resolver.h" // e05d3: the disk-backed scene resolver
@@ -12,6 +13,7 @@
 #include "context/editor/filesync/content_hash.h"       // e05d3: the inspect CAS token
 #include "context/editor/filesync/native_file_store.h"  // e05d3: root-scene raw-byte read
 #include "context/editor/filesync/path_jail.h"          // e05d3: R-SEC-008 jail on the raw read
+#include "context/editor/gui/panels/builders/files_builder.h"      // e1: kernel-side builder
 #include "context/editor/gui/panels/builders/inspector_builder.h"  // e05d3: kernel-side builders
 #include "context/editor/gui/panels/builders/scene_tree_builder.h" // e05d3
 #include "context/editor/gui/panels/builders/wire.h"               // e05d3: model -> wire JSON
@@ -27,10 +29,12 @@
 #include <cstdint>
 #include <cstdio>
 #include <deque>
+#include <filesystem> // e1: is_directory() on the editor.files project-root existence check
 #include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <system_error> // e1: std::error_code for the noexcept is_directory() overload
 #include <thread>
 #include <utility>
 #include <vector>
@@ -931,6 +935,38 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
                 raw_hash = filesync::content_hash(*bytes);
         }
         data.set("rawHash", hash_string(raw_hash));
+        data.set("generation", Json(kernel_.generation()));
+        return Envelope::success(std::move(data), kernel_.generation());
+    }
+
+    // `editor.files` — the M9 e1 project FILE TREE read (D10 read half): the project's file list,
+    // filtered to asset candidates and nested by directory, with each file's guid/kind resolved
+    // through a FRESH assetdb::AssetDatabase scan — always the current on-disk truth, the same
+    // discipline the scene-tree/inspect reads above follow (no cross-request caching). The Files
+    // panel hydrates from exactly this; read-only (read_query — a project-wide listing touches no
+    // session). No params: unlike the per-scene composed reads, this lists the WHOLE project.
+    if (method == "editor.files")
+    {
+        // A missing/not-a-directory project root is the one honest failure this read can hit — the
+        // model reports it INSIDE the envelope (ok=false, zero files), the same tolerance
+        // `editor.scene-tree` applies to an unresolved scene, rather than an error envelope.
+        // `list()`/`scan()` already degrade to empty on a missing root (native_file_store.cpp /
+        // asset_database.cpp), so this check exists only to make that honest — never to gate them.
+        std::error_code ec;
+        const bool project_exists =
+            std::filesystem::is_directory(kernel_.config().project_root, ec) && !ec;
+
+        const filesync::NativeFileStore store(kernel_.config().project_root);
+        assetdb::RandomGuidGenerator guids; // never invoked: scan() mints nothing, only indexes
+        assetdb::AssetDatabase db(guids);
+        (void)db.scan(store, "");
+
+        gui::panels::files::FilesModel model =
+            gui::panels::builders::build_files_model(store.list(""), db);
+        model.ok = project_exists;
+
+        Json data = Json::object();
+        data.set("files", gui::panels::builders::files_to_wire(model));
         data.set("generation", Json(kernel_.generation()));
         return Envelope::success(std::move(data), kernel_.generation());
     }

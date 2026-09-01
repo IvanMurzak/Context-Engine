@@ -21,6 +21,8 @@
 #include "context/editor/shell/panels/scenetree_feed.h"  // ...and the feed the entity arm re-reads
 
 #include "context/editor/gui/contract/extension.h" // the synthetic roster (e1 — see the provider block)
+#include "context/editor/gui/panels/files/files_model.h" // M9 e1: the SECOND selection subject
+#include "context/editor/gui/panels/files/files_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 #include "context/editor/gui/playbar/playbar_panel.h"
 #include "context/editor/gui/uitree/panel.h"
@@ -48,6 +50,7 @@ using context::editor::shell::panels::InspectorFeed;
 using context::editor::shell::panels::kSelectionChangedEvent;
 using context::editor::shell::panels::kSelectionFocusEvent;
 using context::editor::shell::panels::kSelectionSubjectEntity;
+using context::editor::shell::panels::kSelectionSubjectFile;
 using context::editor::shell::panels::SceneTreeFeed;
 using context::editor::shell::panels::kSessionTopicName;
 using context::editor::shell::panels::session_control;
@@ -57,6 +60,7 @@ using context::editor::shell::panels::session_sim_tick;
 namespace client = context::editor::client;
 namespace playbar = context::editor::gui::playbar;
 namespace scenetree = context::editor::gui::panels::scenetree;
+namespace files = context::editor::gui::panels::files;
 namespace uitree = context::editor::gui::uitree;
 using context::editor::contract::Json;
 
@@ -255,12 +259,13 @@ int main()
         CHECK(feed.facts_applied() == 2);
     }
 
-    // --- c1/D1: THE SUBJECT FILTER, BOTH DIRECTIONS ----------------------------------------------
-    // Selection is typed now, and this feed consumes the ENTITY selection. Without the filter a
-    // `file` fact would reach `SceneTreePanel::apply_selection` as L-35 entity id-paths and resolve
-    // nothing — a tree showing no selection, indistinguishable from a correct empty result. So the
-    // negative is paired with a positive: ONE DIRECTION ALONE PROVES NOTHING (a disconnected feed
-    // would pass the negative on its own).
+    // --- c1/D1: THE SUBJECT FILTER, BOTH DIRECTIONS -------------------------------------------------
+    // Selection is typed now, and this feed consumes the ENTITY selection. Without the filter an
+    // `asset` fact (no consumer in this Shell build — see the M9 e1 block below for `file`, which
+    // DOES have one now) would reach `SceneTreePanel::apply_selection` as L-35 entity id-paths and
+    // resolve nothing — a tree showing no selection, indistinguishable from a correct empty result.
+    // So the negative is paired with a positive: ONE DIRECTION ALONE PROVES NOTHING (a disconnected
+    // feed would pass the negative on its own).
     {
         PanelHost host;
         SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
@@ -269,9 +274,11 @@ int main()
         feed.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
         feed.bind_client(nullptr, kShellId);
 
-        // NEGATIVE — a `file` selection does NOT move the scene tree, and is counted as dropped.
+        // NEGATIVE — a subject outside this Shell's vocabulary does NOT move the scene tree, and is
+        // counted as dropped. `asset` (not `file`): `file` gained a consumer this task, so it is no
+        // longer the example of a subject this Shell cannot render at all.
         CHECK(!feed.apply_event(kSessionTopicName,
-                                subject_selection_fact(kOtherClientId, "file", {"src/a.json"})));
+                                subject_selection_fact(kOtherClientId, "asset", {"g1"})));
         CHECK(tree.selection().identity.empty());
         CHECK(feed.foreign_subject_facts() == 1);
         CHECK(feed.facts_applied() == 0);
@@ -290,7 +297,7 @@ int main()
         // ...and a foreign-subject fact does not DISTURB the entity selection either — it is dropped
         // before `apply_selection` is reached, not applied and then undone.
         CHECK(!feed.apply_event(kSessionTopicName,
-                                subject_selection_fact(kOtherClientId, "file", {})));
+                                subject_selection_fact(kOtherClientId, "asset", {})));
         CHECK(tree.selection().identity == "e1");
         CHECK(feed.foreign_subject_facts() == 2);
 
@@ -299,6 +306,116 @@ int main()
         malformed.set("subject", Json(std::uint64_t{7}));
         CHECK(!feed.apply_event(kSessionTopicName, malformed));
         CHECK(tree.selection().identity == "e1");
+
+        // A `file` fact with NO Files panel bound applies to nothing — an ordinary unhosted state,
+        // NOT counted as foreign (mirrors an `entity` fact with no Scene tree bound).
+        const std::size_t foreign_before = feed.foreign_subject_facts();
+        CHECK(!feed.apply_event(kSessionTopicName,
+                                subject_selection_fact(kOtherClientId, "file", {"README.md"})));
+        CHECK(feed.foreign_subject_facts() == foreign_before);
+        CHECK(tree.selection().identity == "e1"); // and the entity selection is untouched either way
+    }
+
+    // --- M9 e1: THE FILES SUBJECT — routes to the Files panel, and D1 COEXISTENCE with entity -------
+    // The falsifiable pairing again, this time proving BOTH halves of D1 at once: a `file` fact moves
+    // the Files panel and does NOT move the Scene tree (which still holds its own prior entity
+    // selection), and — symmetrically — an `entity` fact moves the Scene tree and does NOT move the
+    // Files panel. Two independent selections, one feed, proven to coexist rather than assumed.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+        scenetree::SceneTreePanel tree(&feed);
+        tree.set_model(two_node_model());
+        feed.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
+
+        files::FilesModel model;
+        model.file_count = 1;
+        files::FileNode node;
+        node.identity = "README.md";
+        node.kind = files::FileNodeKind::file;
+        model.roots.push_back(node);
+        files::FilesPanel files_panel(&feed.file_selection_gateway());
+        files_panel.set_model(model);
+        feed.bind_files(&files_panel, files::FilesPanel::kContributionId);
+        feed.bind_client(nullptr, kShellId);
+
+        // entity moves the tree, leaves Files untouched.
+        CHECK(feed.apply_event(kSessionTopicName,
+                               subject_selection_fact(kOtherClientId, "entity", {"e2"})));
+        CHECK(tree.selection().identity == "e2");
+        CHECK(files_panel.selection().identity.empty());
+        CHECK(feed.facts_applied() == 1);
+
+        // file moves the Files panel, leaves the tree's entity selection exactly where it was (D1).
+        CHECK(feed.apply_event(kSessionTopicName,
+                               subject_selection_fact(kOtherClientId, "file", {"README.md"})));
+        CHECK(files_panel.selection().identity == "README.md");
+        CHECK(tree.selection().identity == "e2"); // UNCHANGED — the coexistence claim, proved
+        CHECK(feed.facts_applied() == 2);
+
+        // Restating the file selection changes nothing and counts nothing.
+        CHECK(!feed.apply_event(kSessionTopicName,
+                                subject_selection_fact(kOtherClientId, "file", {"README.md"})));
+        CHECK(feed.facts_applied() == 2);
+
+        // With no daemon client, the file gateway adapter honestly refuses — exactly like the
+        // entity gateway's own no-client posture.
+        CHECK(!feed.file_selection_gateway().request_selection({"README.md"}).has_value());
+    }
+
+    // --- M9 e1: THE FILES WRITE SEAM — `editor.select {subject:"file"}` over the real Client --------
+    // Mirrors "the WRITE seam: `editor.select` over the real Client" above (entity), with the ONE
+    // difference request_file_selection's own comment names: `subject` is sent EXPLICITLY, since the
+    // daemon's default is `entity` and omitting it here would silently move the wrong selection.
+    {
+        PanelHost host;
+        SessionFeed feed(host, playbar::PlaybarModel::kContributionId);
+
+        files::FilesPanel files_panel(&feed.file_selection_gateway());
+        files::FilesModel model;
+        model.file_count = 1;
+        files::FileNode node;
+        node.identity = "README.md";
+        node.kind = files::FileNodeKind::file;
+        model.roots.push_back(node);
+        files_panel.set_model(model);
+        feed.bind_files(&files_panel, files::FilesPanel::kContributionId);
+
+        Wired wired = make_client(kShellId);
+        wired.channel->on("editor.select",
+                          [](const clientmock::Request& request)
+                          {
+                              Json data = Json::object();
+                              data.set("subject", request.params.at("subject"));
+                              data.set("ids", request.params.at("ids"));
+                              data.set("mode", Json(std::string("replace")));
+                              data.set("changed", Json(true));
+                              return clientmock::MockChannel::ok_envelope(std::move(data));
+                          });
+        feed.bind_client(wired.client.get(), wired.client->client_id());
+
+        CHECK(files_panel.select("README.md"));
+        CHECK(feed.writes_issued() == 1);
+        const std::vector<clientmock::Request> sent = wired.channel->requests_for("editor.select");
+        CHECK(sent.size() == 1);
+        if (sent.size() == 1)
+        {
+            CHECK(sent[0].params.at("subject").as_string() == "file"); // sent EXPLICITLY, unlike entity
+            CHECK(sent[0].params.at("ids").size() == 1);
+            CHECK(sent[0].params.at("ids").at(0).as_string() == "README.md");
+        }
+        // The panel renders the DAEMON'S reply, the same rule as the entity gateway.
+        CHECK(files_panel.selection().identity == "README.md");
+
+        // The focus mirror moves to `file` — OUR OWN write's `selection-focus` fact carries our
+        // origin and is dropped by apply_event, so this is the only path to seeing it (c1/D3, same
+        // rule request_selection's own comment states for `entity`).
+        CHECK(feed.selection_focus() == kSelectionSubjectFile);
+
+        // The echo of this write is dropped, no double-apply.
+        CHECK(!feed.apply_event(kSessionTopicName,
+                                subject_selection_fact(kShellId, "file", {"README.md"})));
+        CHECK(feed.echoes_dropped() == 1);
     }
 
     // --- c1/D3: the Inspector renders the FOCUSED subject (the PRODUCTION wiring) -----------------

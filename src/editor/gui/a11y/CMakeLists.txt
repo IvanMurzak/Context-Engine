@@ -27,8 +27,8 @@ target_link_libraries(context_gui_a11y
     PUBLIC context_gui_uitree
     PRIVATE context_gui_contract
             context_gui_panel_scenetree context_gui_panel_inspector context_gui_panel_problems
-            context_gui_panel_tilemap context_gui_viewport context_gui_viewport_edit
-            context_gui_help context_gui_undo context_warnings)
+            context_gui_panel_tilemap context_gui_panel_files context_gui_viewport
+            context_gui_viewport_edit context_gui_help context_gui_undo context_warnings)
 
 # harness.cpp uses std::ostringstream and the scan exe uses std::ofstream, so static-link the GCC
 # runtime (gated to GNU) to keep the local ctest gate deterministic against a PATH-shadowed

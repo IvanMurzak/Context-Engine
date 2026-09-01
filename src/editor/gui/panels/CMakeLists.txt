@@ -8,6 +8,7 @@ add_subdirectory(scenetree)
 add_subdirectory(problems)
 add_subdirectory(inspector)
 add_subdirectory(tilemap)
-# builders LAST: it links the scenetree + inspector panel libraries above (M9 e05d3 — the
+add_subdirectory(files) # M9 e1: the Files observer panel (D10 read half)
+# builders LAST: it links the scenetree + inspector + files panel libraries above (M9 e05d3/e1 — the
 # kernel-typed model builders split OUT of the panel libraries so those stay D10 boundary-clean).
 add_subdirectory(builders)

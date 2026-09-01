@@ -37,6 +37,15 @@ target_link_libraries(context_editorkernel PUBLIC context_migrate)
 target_link_libraries(context_editorkernel
     PRIVATE context_gui_panel_builders context_compose_project)
 
+# M9 e1 — the `editor.files` project-file-tree read (D10 read half): kernel_server.cpp scans the
+# project via a fresh assetdb::AssetDatabase (over a NativeFileStore, the same "always current
+# on-disk truth" discipline the scene-tree/inspect reads follow) and hands the result to
+# gui::panels::builders::build_files_model. context_assetdb was ALREADY transitively reachable
+# through context_gui_panel_builders' PUBLIC interface; named EXPLICITLY per this file's standing
+# rule, because this target now uses assetdb::AssetDatabase/RandomGuidGenerator directly. PRIVATE:
+# no public header here exposes an assetdb:: type.
+target_link_libraries(context_editorkernel PRIVATE context_assetdb)
+
 # M9 e09b-1 — the pointer/value (composed) `edit` mode: kernel_server.cpp now also drives the WRITE
 # half of composition (compose::plan_write + the canonical serializer) over that same disk-backed
 # resolver, so the editor can issue the design 05 §8 field-addressed write it structurally cannot
@@ -72,7 +81,11 @@ set(_context_editorkernel_tests
 
 foreach(_t IN LISTS _context_editorkernel_tests)
     add_executable(context_editorkernel_${_t} tests/${_t}.cpp)
-    target_link_libraries(context_editorkernel_${_t} PRIVATE context_editorkernel context_warnings)
+    # context_assetdb: test_kernel_server.cpp writes real `<asset>.meta.json` sidecars via
+    # assetdb::serialize_meta for its `editor.files` fixture (M9 e1) rather than hand-rolling the
+    # schema — linked uniformly, the sibling context_gui_panel_builders-in-every-test pattern.
+    target_link_libraries(context_editorkernel_${_t}
+        PRIVATE context_editorkernel context_assetdb context_warnings)
     target_link_options(context_editorkernel_${_t} PRIVATE ${_context_editorkernel_static_runtime})
     target_include_directories(context_editorkernel_${_t} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR}/tests)
     add_test(NAME editorkernel-${_t} COMMAND context_editorkernel_${_t})

@@ -173,6 +173,10 @@ std::vector<PanelHelp> panel_topics()
         {"builtin.inspector", "Inspector",
          "Inspect and edit the selected entity's composed fields; edits write file overrides.",
          {"context set", "context query"}},
+        {"builtin.files", "Files",
+         "Browse the project's file tree; selecting a file is independent of the entity selection "
+         "(rename/move/delete are a separate, later surface).",
+         {"context describe"}},
         {"builtin.viewport", "Viewport",
          "The read-only render observer of the current scene.",
          {"context query", "context describe"}},
