@@ -1,12 +1,18 @@
 // File-tree view-model builder: the project's flat, asset-candidate-filtered path list -> a nested
 // hierarchy by path segment (see files_builder.h). Mirrors scene_tree_builder.cpp's TreeBuilder
-// shape, substituting path segments for L-35 id-path segments.
+// shape, substituting path segments for L-35 id-path segments, and reuses that file's
+// join_identity/split_identity for the segment join/split — both builders join '/'-separated
+// segments the identical way, and scene_tree_builder.h already exports the pair (M9 e09b-1)
+// specifically so consumers do not hand-roll a copy.
 
 #include "context/editor/gui/panels/builders/files_builder.h"
+
+#include "context/editor/gui/panels/builders/scene_tree_builder.h" // join_identity / split_identity
 
 #include <cstddef>
 #include <deque>
 #include <map>
+#include <optional>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -20,44 +26,6 @@ namespace
 using files::FileNode;
 using files::FileNodeKind;
 using files::FilesModel;
-
-// Split a normalized ('/'-separated) project-relative path into its segments. Never returns an
-// empty segment: files_builder is fed paths from filesync::FileStore::list / assetdb, which never
-// emit a leading, trailing, or doubled '/'.
-[[nodiscard]] std::vector<std::string> split_path(std::string_view path)
-{
-    std::vector<std::string> segments;
-    std::size_t start = 0;
-    while (start <= path.size())
-    {
-        const std::size_t slash = path.find('/', start);
-        const std::size_t end = slash == std::string_view::npos ? path.size() : slash;
-        if (end > start)
-        {
-            segments.emplace_back(path.substr(start, end - start));
-        }
-        if (slash == std::string_view::npos)
-        {
-            break;
-        }
-        start = slash + 1;
-    }
-    return segments;
-}
-
-[[nodiscard]] std::string join_path(const std::vector<std::string>& segments)
-{
-    std::string out;
-    for (std::size_t i = 0; i < segments.size(); ++i)
-    {
-        if (i != 0)
-        {
-            out += '/';
-        }
-        out += segments[i];
-    }
-    return out;
-}
 
 // A mutable build node with a STABLE address (stored in a std::deque) so parent nodes can hold child
 // pointers while the tree is still growing — the SAME shape scene_tree_builder.cpp's BuildNode uses.
@@ -77,7 +45,7 @@ public:
     // it. Ancestors are created first, so parents always precede children.
     BuildNode* ensure(const std::vector<std::string>& path)
     {
-        const std::string key = join_path(path);
+        const std::string key = join_identity(path);
         auto it = index_.find(key);
         if (it != index_.end())
         {
@@ -111,7 +79,7 @@ private:
 [[nodiscard]] FileNode finalize(const BuildNode& b)
 {
     FileNode node;
-    node.identity = join_path(b.path);
+    node.identity = join_identity(b.path);
     node.display_name = b.path.empty() ? std::string() : b.path.back();
     node.kind = b.is_file ? FileNodeKind::file : FileNodeKind::directory;
     if (b.is_file)
@@ -139,12 +107,14 @@ FilesModel build_files_model(const std::vector<std::string>& paths, const assetd
         {
             continue; // a sidecar, atomic-write residue, or a dot-segment tool-internal path
         }
-        const std::vector<std::string> segments = split_path(path);
-        if (segments.empty())
+        // split_identity only returns nullopt for an empty or malformed ('/'-leading/trailing/
+        // doubled) key — never an empty-but-present segment vector — so this is the sole guard.
+        const std::optional<std::vector<std::string>> segments = split_identity(path);
+        if (!segments.has_value())
         {
             continue; // defensive; is_asset_candidate already refuses the paths that would land here
         }
-        BuildNode* file_node = builder.ensure(segments);
+        BuildNode* file_node = builder.ensure(*segments);
         file_node->is_file = true;
         if (const assetdb::AssetRecord* record = db.find_by_path(path))
         {
