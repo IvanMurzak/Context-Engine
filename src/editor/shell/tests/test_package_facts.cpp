@@ -409,11 +409,11 @@ void describe_lists_the_live_package_topics()
 
 // ============================== 2. THE SHELL HALF — D4's authorization ===========================
 
-// Every client the host mints, so a test can read what actually reached the daemon.
+// Every client the host mints, so a test can read what actually reached the daemon. `channels` IS
+// the count as well as the record (`channels.size()`), so this carries no separate tally.
 struct MintedWires
 {
     std::vector<clientmock::MockChannel*> channels;
-    std::size_t minted = 0;
 };
 
 [[nodiscard]] PackageSessionHost::ClientFactory make_factory(MintedWires& wires)
@@ -460,7 +460,6 @@ struct MintedWires
                     return clientmock::MockChannel::ok_envelope(std::move(data));
                 });
         wires.channels.push_back(raw);
-        ++wires.minted;
         return std::make_unique<client::Client>(std::move(channel));
     };
 }

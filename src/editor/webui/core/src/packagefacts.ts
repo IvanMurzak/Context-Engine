@@ -31,6 +31,7 @@
 
 import { BridgeError } from "./bridge.js";
 import type { ShellBridge } from "./bridge.js";
+import type { PanelFactOutcome, PanelFactPublish } from "./panelverbs.js";
 
 /**
  * The Shell method this publishes over (editor-UX d2).
@@ -46,24 +47,20 @@ import type { ShellBridge } from "./bridge.js";
 export const PANEL_FACTS_PUBLISH_METHOD = "panel.facts.publish";
 
 /**
- * What one publish answered. `ok:false` carries the Shell's or the daemon's own machine code.
+ * The two shapes this channel speaks, RE-EXPORTED from `panelverbs.ts` rather than restated here.
  *
- * MIRRORS `PanelFactOutcome` (panelverbs.ts) STRUCTURALLY rather than importing it, exactly as
- * `PackageUiSubscribeResult` mirrors `PanelUiSubscribeOutcome`: the SHAPE travels between the two
- * layers, the transport does not. Importing it here would give the verb table a dependency on this
- * module's `ShellBridge`, which is the coupling `panelverbs.ts` is transport-free to avoid.
+ * ONE DEFINITION, and the import direction is what makes that free: `panelverbs.ts` imports nothing
+ * from this module, so naming its types here cannot give the transport-free verb table a dependency
+ * on this module's `ShellBridge`. It is also the precedent `makePackageDaemonCall` already sets —
+ * that factory lives in `boot.ts` and imports `PanelDaemonCall` / `PanelDaemonOutcome` from
+ * `panelverbs.js` instead of declaring its own pair. A second, structurally-identical declaration
+ * would unify silently under TypeScript's structural typing and stop unifying the moment either
+ * side grew an optional member, with no compile error and no gate to catch it.
+ *
+ * `PanelFactOutcome` is what one publish answered — `ok:false` carries the Shell's or the daemon's
+ * own machine code, verbatim. `PanelFactPublish` is the seam `panelverbs.ts` closes a package over.
  */
-export interface PanelFactOutcome {
-    readonly ok: boolean;
-    /** The daemon's `{topic, changed, seq}` on success. */
-    readonly result?: unknown;
-    /** The refusal's machine-readable code (`panel.facts.topic_not_declared`, `package.fact_reentrant`, …). */
-    readonly code?: string;
-    readonly message?: string;
-}
-
-/** Publish one fact on `topic`. The seam `panelverbs.ts` closes a package over. */
-export type PanelFactPublish = (topic: string, payload: unknown) => Promise<PanelFactOutcome>;
+export type { PanelFactOutcome, PanelFactPublish };
 
 /**
  * Bind ONE package's fact publisher (editor-UX d2).

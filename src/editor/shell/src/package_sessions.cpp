@@ -128,6 +128,33 @@ bool PackageSessionHost::may_receive_fact(const std::string& package_id,
     return fact_gate_ ? fact_gate_(package_id, topic) : false;
 }
 
+contract::Json PackageSessionHost::filter_topic_array(const contract::Json& in,
+                                                      const std::string& package_id,
+                                                      UnreadableEntry unreadable)
+{
+    contract::Json kept = contract::Json::array();
+    for (std::size_t i = 0; i < in.size(); ++i)
+    {
+        const contract::Json& entry = in.at(i);
+        const bool readable =
+            entry.is_object() && entry.contains("topic") && entry.at("topic").is_string();
+        // The unreadable case is the header's `UnreadableEntry` axis and the ONLY thing the two
+        // callers disagree about — an argument here rather than a second copy of this loop with the
+        // conditional inverted, which is how the two policies drifted apart to begin with.
+        const bool pass = readable ? may_receive_fact(package_id, entry.at("topic").as_string())
+                                   : unreadable == UnreadableEntry::keep;
+        if (pass)
+        {
+            kept.push_back(entry);
+        }
+        else
+        {
+            ++events_filtered_;
+        }
+    }
+    return kept;
+}
+
 bool PackageSessionHost::has_session(const std::string& package_id) const
 {
     return std::any_of(sessions_.begin(), sessions_.end(),
@@ -488,49 +515,15 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
             data.at("snapshot").at("packageFacts").is_array())
         {
             contract::Json snapshot = data.at("snapshot");
-            const contract::Json& facts = snapshot.at("packageFacts");
-            contract::Json kept = contract::Json::array();
-            for (std::size_t i = 0; i < facts.size(); ++i)
-            {
-                const contract::Json& entry = facts.at(i);
-                // A malformed entry is DROPPED rather than passed through: an entry whose topic this
-                // Shell cannot read is one it cannot police either, and the deny direction is the
-                // only one that stays a control if the reply's shape ever moves.
-                if (entry.is_object() && entry.contains("topic") && entry.at("topic").is_string() &&
-                    may_receive_fact(package_id, entry.at("topic").as_string()))
-                {
-                    kept.push_back(entry);
-                }
-                else
-                {
-                    ++events_filtered_;
-                }
-            }
-            snapshot.set("packageFacts", std::move(kept));
+            snapshot.set("packageFacts",
+                         filter_topic_array(snapshot.at("packageFacts"), package_id,
+                                            UnreadableEntry::drop));
             data.set("snapshot", std::move(snapshot));
         }
         if (data.contains("catchup") && data.at("catchup").is_array())
         {
-            const contract::Json& catchup = data.at("catchup");
-            contract::Json kept = contract::Json::array();
-            for (std::size_t i = 0; i < catchup.size(); ++i)
-            {
-                const contract::Json& event = catchup.at(i);
-                // The replayed events are the WIRE envelope, so an entry with no readable topic is a
-                // shape this Shell does not model — passed through exactly as `pump()` passes one,
-                // since `may_receive_fact` is about package topics and nothing else.
-                if (!event.is_object() || !event.contains("topic") ||
-                    !event.at("topic").is_string() ||
-                    may_receive_fact(package_id, event.at("topic").as_string()))
-                {
-                    kept.push_back(event);
-                }
-                else
-                {
-                    ++events_filtered_;
-                }
-            }
-            data.set("catchup", std::move(kept));
+            data.set("catchup",
+                     filter_topic_array(data.at("catchup"), package_id, UnreadableEntry::keep));
         }
         result->set("data", std::move(data));
     }
@@ -580,7 +573,7 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
             break;
         }
     }
-    return BridgeResult::ok(*result);
+    return BridgeResult::ok(std::move(*result));
 }
 
 BridgeResult PackageSessionHost::publish_fact(const std::string& package_id,
@@ -628,12 +621,9 @@ BridgeResult PackageSessionHost::publish_fact(const std::string& package_id,
                                        : "the fact on '" + topic +
                                              "' could not be delivered to the daemon");
     }
-    // COUNTED ON THE DAEMON'S ANSWER, not on the attempt: the accessor documents this as a fact the
-    // daemon ACCEPTED (a D5 dedup counts — it was accepted and deliberately emitted nothing), so
-    // incrementing before the call would fold every `topic_undeclared` / `fact_too_large` /
-    // `fact_reentrant` refusal into the same number and leave it unable to answer the question it
-    // exists for.
-    ++facts_published_;
+    // COUNTED BY `PackageFactHost::accepted_publishes()`, on the daemon's answer, and counted there
+    // ONLY: this method is unreachable except through that host, so a second counter here would be
+    // the same number under a second name — and the one no test pins is the one that drifts.
     return BridgeResult::ok(*result);
 }
 

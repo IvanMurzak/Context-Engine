@@ -3,6 +3,7 @@
 #include "context/editor/shell/package_facts.h"
 
 #include "context/editor/gui/contract/extension.h"
+#include "context/editor/gui/contract/registry.h"
 #include "context/editor/shell/ext_scheme.h"
 
 #include <algorithm>
@@ -41,18 +42,6 @@ namespace
     return std::find(names.begin(), names.end(), name) != names.end();
 }
 
-// Is `topic` a real SUB-name of `owner` — `<owner>.<something>`, never the bare owner id?
-//
-// BOTH HALVES MATTER, and they are the halves `registry.cpp`'s `is_namespaced_under` and
-// `validatePackageTopic` (uibus.ts) already state: the bare package id is a NAMESPACE, not a member
-// of it, so accepting it would let one package's topic and its id be the same string — and a
-// consumer could then not tell "the package" from "a fact of the package" by reading the name.
-[[nodiscard]] bool is_namespaced_under(const std::string& topic, const std::string& owner)
-{
-    return topic.size() > owner.size() + 1 && topic.compare(0, owner.size(), owner) == 0 &&
-           topic[owner.size()] == '.';
-}
-
 // The union of one member list across a package's contributions, deduplicated, in declaration order.
 //
 // ⚠ THE UNION IS PER PACKAGE, NOT PER CONTRIBUTION, and that is the same shape (and the same stated
@@ -78,6 +67,29 @@ declared_union(const InstalledPackage& package,
         }
     }
     return names;
+}
+
+// Does `package` declare `topic` in one of its contributions' `member` list?
+//
+// THE MEMBERSHIP QUESTION, ANSWERED WITHOUT MATERIALISING THE UNION, and the split is about where
+// each is asked from. `declared_union` is right for `declared_publishes` / `declared_subscribes`,
+// whose callers want the LIST (control 6 hands it to `events.declare` once per session). The
+// AUTHORIZATION paths want only "is this one string in it" — and `pump()` asks that per DELIVERED
+// EVENT, every frame — so building a deduplicated vector of heap-allocated topic names in order to
+// scan it linearly and drop it on the next line is the whole cost of the answer. Same predicate,
+// same per-package (not per-contribution) rule the union documents; it just stops early.
+[[nodiscard]] bool declares(const InstalledPackage& package,
+                            std::vector<std::string> gc::EventSpec::*member,
+                            const std::string& topic)
+{
+    for (const gc::Contribution& contribution : package.contributions)
+    {
+        if (contains_name(contribution.events.*member, topic))
+        {
+            return true;
+        }
+    }
+    return false;
 }
 
 } // namespace
@@ -116,23 +128,21 @@ std::vector<std::string> PackageFactHost::declared_subscribes(const std::string&
 
 bool PackageFactHost::may_subscribe(const std::string& package_id, const std::string& topic) const
 {
-    // An UNINSTALLED package receives nothing: a grant left in the document for a package that is
-    // gone stays unusable WHILE IT IS GONE — the same posture `attach_scope_spec_for` takes, and for
-    // the same reason (the manifest that would clamp it is not there to clamp with).
+    // THE ONE PACKAGE RESOLUTION THIS DECISION MAKES, and it doubles as the uninstalled guard. An
+    // UNINSTALLED package receives nothing: a grant left in the document for a package that is gone
+    // stays unusable WHILE IT IS GONE — the same posture `attach_scope_spec_for` takes, and for the
+    // same reason (the manifest that would clamp it is not there to clamp with).
     //
-    // ⚠ THIS GUARD IS BEHAVIOURALLY REDUNDANT, AND SAYING SO IS THE POINT (the discipline
-    // `parse_capability_list` states about its own unknown-token branch): both `declared_*` calls
-    // below already answer EMPTY for an unknown package, so deleting this returns `false` by the
-    // same route and no assertion in the suite could tell. What it uniquely contributes is one
-    // NAMED place where "uninstalled ⇒ nothing" is stated — the rule a reader would otherwise have
-    // to reconstruct from two accessors' null handling — plus an exit before two vectors are built.
-    // Defence in depth, not the control.
-    if (find_package(package_id) == nullptr)
+    // Resolving once and reading BOTH clauses off this pointer is not tidiness: `pump()` calls this
+    // per delivered event, on every frame, so a shape that re-found the package for each clause
+    // would pay three linear scans of the store to answer one membership question.
+    const InstalledPackage* package = find_package(package_id);
+    if (package == nullptr)
     {
         return false;
     }
     // DECISION 3 — its OWN declared topic, with no grant and no prompt.
-    if (contains_name(declared_publishes(package_id), topic))
+    if (declares(*package, &gc::EventSpec::publishes, topic))
     {
         return true;
     }
@@ -140,7 +150,7 @@ bool PackageFactHost::may_subscribe(const std::string& package_id, const std::st
     // package-authored one answer first: the manifest must have declared an interest, AND the
     // operator must have consented. `granted()` is FALSE for every unknown package and unknown
     // capability, so the grant half is deny-by-default by construction.
-    if (!contains_name(declared_subscribes(package_id), topic))
+    if (!declares(*package, &gc::EventSpec::subscribes, topic))
     {
         return false;
     }
@@ -168,7 +178,7 @@ BridgeResult PackageFactHost::publish(const std::string& package_id, const std::
     // one, so checking declaration first would report every namespacing mistake as "your manifest
     // does not declare that" and send an author to add an entry the registry would then refuse. The
     // namespacing message names the actual defect.
-    if (!is_namespaced_under(topic, package_id))
+    if (!gc::is_namespaced_under(topic, package_id))
     {
         ++refused_publishes_;
         return BridgeResult::error(kErrFactsTopicNotNamespaced,
@@ -177,7 +187,8 @@ BridgeResult PackageFactHost::publish(const std::string& package_id, const std::
                                        "package id ('" +
                                        package_id + ".<name>')");
     }
-    if (!contains_name(declared_publishes(package_id), topic))
+    const InstalledPackage* package = find_package(package_id);
+    if (package == nullptr || !declares(*package, &gc::EventSpec::publishes, topic))
     {
         ++refused_publishes_;
         return BridgeResult::error(kErrFactsTopicNotDeclared,

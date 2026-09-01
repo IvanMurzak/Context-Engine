@@ -331,8 +331,6 @@ public:
     [[nodiscard]] std::size_t refused_topics() const { return refused_topics_; }
     /** Delivered events DROPPED by the pump filter because the topic was not this package's — control 6. */
     [[nodiscard]] std::uint64_t events_filtered() const { return events_filtered_; }
-    /** Package facts this host forwarded onto a daemon session (a dedup counts — it was accepted). */
-    [[nodiscard]] std::size_t facts_published() const { return facts_published_; }
 
     explicit PackageSessionHost(ClientFactory factory, std::size_t max_sessions = kMaxPackageSessions);
 
@@ -424,6 +422,29 @@ private:
     [[nodiscard]] client::Client* session_for(const std::string& package_id, std::string& error_code,
                                               std::string& message);
 
+    // What an entry whose `topic` this Shell cannot READ should do — the ONE axis on which the two
+    // arms of the `subscribe`-reply filter differ, spelled as an argument rather than as an inverted
+    // conditional in a second copy of the loop.
+    //
+    // `drop` is the SNAPSHOT's: a `packageFacts` entry is a shape this Shell defines, so one it
+    // cannot read is one it cannot police either, and the deny direction is the only one that stays
+    // a control if that shape ever moves. `keep` is the CATCHUP's: those are the daemon's own WIRE
+    // envelopes, and `may_receive_fact` is about package topics and nothing else — so a pathless
+    // frame passes exactly as it does through `pump()`.
+    enum class UnreadableEntry
+    {
+        drop,
+        keep,
+    };
+
+    // `in` (an array) minus every entry `package_id` may not receive, counting each removal in
+    // `events_filtered_`. Control 6's reply-side filter, using the SAME `may_receive_fact` predicate
+    // the request and delivery sides use, so there is one answer to "may this package see this
+    // topic" rather than three that can drift.
+    [[nodiscard]] contract::Json filter_topic_array(const contract::Json& in,
+                                                    const std::string& package_id,
+                                                    UnreadableEntry unreadable);
+
     ClientFactory factory_;
     // EMPTY in the two-argument construction = the e13c-1 deny-all build (see `attach_scope_for`).
     ScopeResolver scope_resolver_;
@@ -440,7 +461,6 @@ private:
     std::size_t refused_capacity_ = 0;
     std::size_t refused_subscriptions_ = 0;
     std::size_t refused_topics_ = 0;
-    std::size_t facts_published_ = 0;
     std::uint64_t events_buffered_ = 0;
     std::uint64_t events_filtered_ = 0;
 };

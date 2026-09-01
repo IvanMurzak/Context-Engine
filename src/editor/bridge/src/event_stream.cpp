@@ -137,21 +137,26 @@ std::size_t topic_segment_count(const std::string& name)
 // which the bridge does not (and must not) link, and its job is the on-disk byte form of AUTHORED
 // data. What this needs is only a stable EQUALITY key for an ephemeral fact, so a local, dependency-free
 // projection is the honest tool.
-std::string canonical_json(const Json& value)
+// APPENDS into a caller-owned buffer rather than returning a fresh string per node: this runs once
+// per accepted publish, and a by-value recursion allocates one string per array element and per
+// object member, then copies every byte again into its parent — O(nodes) allocations and O(depth x
+// size) copying for a payload bounded at 64 KiB. One buffer, each byte written once, byte-identical
+// output (which is the part that must not move: the dedup compares these bytes).
+void canonical_json(const Json& value, std::string& out)
 {
     switch (value.type())
     {
     case Json::Type::array:
     {
-        std::string out = "[";
+        out += '[';
         for (std::size_t i = 0; i < value.size(); ++i)
         {
             if (i != 0)
                 out += ',';
-            out += canonical_json(value.at(i));
+            canonical_json(value.at(i), out);
         }
         out += ']';
-        return out;
+        return;
     }
     case Json::Type::object:
     {
@@ -162,7 +167,7 @@ std::string canonical_json(const Json& value)
         std::sort(members.begin(), members.end(),
                   [](const std::pair<std::string, Json>* a, const std::pair<std::string, Json>* b)
                   { return a->first < b->first; });
-        std::string out = "{";
+        out += '{';
         bool first = true;
         for (const std::pair<std::string, Json>* member : members)
         {
@@ -174,15 +179,17 @@ std::string canonical_json(const Json& value)
             // character and produce two canonical forms of one payload.
             out += Json(member->first).dump(0);
             out += ':';
-            out += canonical_json(member->second);
+            canonical_json(member->second, out);
         }
         out += '}';
-        return out;
+        return;
     }
     default:
-        return value.dump(0);
+        out += value.dump(0);
+        return;
     }
 }
+
 } // namespace
 
 Json Event::to_json() const
@@ -485,7 +492,8 @@ EventStream::PackageFactResult EventStream::publish_package_fact(const std::stri
                                         : defect;
         return result;
     }
-    std::string canonical = canonical_json(payload);
+    std::string canonical;
+    canonical_json(payload, canonical);
     if (canonical.size() > kMaxPackageFactBytes)
     {
         ++package_facts_refused_;
