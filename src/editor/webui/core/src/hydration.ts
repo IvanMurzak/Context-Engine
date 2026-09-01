@@ -878,11 +878,9 @@ export class HydrationRuntime {
         if (this.#panelTitle === "") {
             return;
         }
-        const panelRoot = root.firstElementChild;
-        const firstChild = panelRoot?.firstElementChild ?? null;
+        const firstChild = root.firstElementChild?.firstElementChild;
         if (
-            firstChild !== null &&
-            firstChild.getAttribute("role") === "heading" &&
+            firstChild?.getAttribute("role") === "heading" &&
             (firstChild.textContent ?? "") === this.#panelTitle
         ) {
             firstChild.classList.add(VISUALLY_HIDDEN_CLASS);
