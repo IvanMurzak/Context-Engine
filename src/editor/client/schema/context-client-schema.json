@@ -882,7 +882,8 @@
       "deprecated": false,
       "params": [
         "ids",
-        "mode"
+        "mode",
+        "subject"
       ],
       "flags": [
         "json",
@@ -900,6 +901,27 @@
       "ns": "",
       "noun": "editor",
       "verb": "selection-get",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "subject"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "editor.selection-focus-get",
+      "ns": "",
+      "noun": "editor",
+      "verb": "selection-focus-get",
       "stability": "operational",
       "deprecated": false,
       "params": [],
@@ -1236,7 +1258,7 @@
           {
             "name": "event",
             "type": "string",
-            "description": "The event: started | reloaded | stopped (lifecycle), or selection-changed | camera-changed | play-state (editor session state)."
+            "description": "The event: started | reloaded | stopped (lifecycle), or selection-changed | selection-focus | camera-changed | play-state (editor session state)."
           },
           {
             "name": "origin",
@@ -1246,7 +1268,12 @@
           {
             "name": "ids",
             "type": "json",
-            "description": "selection-changed: the L-35 id-paths now selected (the whole selection, not a delta)."
+            "description": "selection-changed: the ids now selected FOR THAT SUBJECT (the whole selection, not a delta; L-35 id-paths for `entity`)."
+          },
+          {
+            "name": "subject",
+            "type": "string",
+            "description": "selection-changed: WHICH selection moved — entity | file | asset (or a package-declared <pkg>.<kind>); absent reads as entity. selection-focus: which live selection the human is now working on. EVERY consumer must filter on this: a `file` fact applied as entity id-paths resolves nothing and renders as an empty selection, silently."
           },
           {
             "name": "mode",

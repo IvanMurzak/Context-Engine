@@ -974,21 +974,43 @@ Registry::Registry()
     // shape the sibling `editor scene-tree` already established.
     verbs_.push_back(make_verb(
         "", "editor", "select",
-        "Set the daemon's editor SELECTION (M9 D7): the L-35 id-paths the human has selected, as "
-        "the panels already key by. Publishes `selection-changed {ids, mode, origin}` on the "
-        "`session` topic when the selection actually changes, so every other client converges; "
-        "`origin` carries the acting client's id for echo suppression.",
+        "Set the daemon's editor SELECTION for one SUBJECT KIND (M9 D7, typed by c1/D1): the ids the "
+        "human has selected, as the panels already key by. Selections of different subjects "
+        "COEXIST — selecting a file does not clear the entity selection. Publishes "
+        "`selection-changed {subject, ids, mode, origin}` on the `session` topic when that subject's "
+        "selection actually changes, so every other client converges; `origin` carries the acting "
+        "client's id for echo suppression. A change that leaves the subject non-empty also publishes "
+        "`selection-focus {subject, origin}` (D3).",
         /*params=*/
         {{"ids", "json", true,
-          "Array of L-35 id-path strings (slash-separated). May be empty (clear the selection)."},
+          "Array of id strings in the subject's vocabulary (L-35 id-paths for `entity`). May be "
+          "empty (clear that subject's selection)."},
          {"mode", "string", false,
-          "How to apply the ids: replace (default) | add | toggle | remove."}},
+          "How to apply the ids: replace (default) | add | toggle | remove."},
+         {"subject", "string", false,
+          "Which selection this addresses: entity (default) | file | asset. An unknown subject is "
+          "REFUSED, never coerced — a silent fallback would move a different selection than asked."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
         "", "editor", "selection-get",
-        "Read the daemon's current editor SELECTION (M9 D7) — the L-35 id-paths the human has "
-        "selected. This is how an agent answers 'what is the human looking at' from the contract.",
+        "Read the daemon's current editor SELECTION (M9 D7) — how an agent answers 'what is the "
+        "human looking at' from the contract. Answers BOTH `ids` (the named subject's ids, `entity` "
+        "by default — the pre-c1 member, kept so existing readers do not break) and `selections`, "
+        "the typed view as an ARRAY of {subject, ids} objects carrying their key. `--subject` "
+        "narrows what both report; it never changes the reply's shape.",
+        /*params=*/
+        {{"subject", "string", false,
+          "Narrow the reply to one subject: entity (default) | file | asset. An unknown subject is "
+          "refused."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "editor", "selection-focus-get",
+        "Read WHICH live selection the human is actually working on (M9 D3) — the subject kind the "
+        "last non-empty selection change focused. A tier-1 daemon fact deliberately: deciding it "
+        "from window-local panel focus would make the answer invisible to the CLI, to agents and to "
+        "a second window. Changes publish `selection-focus {subject, origin}` on the `session` topic.",
         /*params=*/{}, /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
     verbs_.push_back(make_verb(
@@ -1172,13 +1194,20 @@ Registry::Registry()
          payload_schema({
              schema_field("event", "string",
                           "The event: started | reloaded | stopped (lifecycle), or "
-                          "selection-changed | camera-changed | play-state (editor session state)."),
+                          "selection-changed | selection-focus | camera-changed | play-state "
+                          "(editor session state)."),
              schema_field("origin", "generation",
                           "Echo suppression: the id of the CLIENT whose call produced this fact "
                           "(the value `attach` returned as clientId); 0 = the daemon itself."),
              schema_field("ids", "json",
-                          "selection-changed: the L-35 id-paths now selected (the whole selection, "
-                          "not a delta)."),
+                          "selection-changed: the ids now selected FOR THAT SUBJECT (the whole "
+                          "selection, not a delta; L-35 id-paths for `entity`)."),
+             schema_field("subject", "string",
+                          "selection-changed: WHICH selection moved — entity | file | asset (or a "
+                          "package-declared <pkg>.<kind>); absent reads as entity. "
+                          "selection-focus: which live selection the human is now working on. "
+                          "EVERY consumer must filter on this: a `file` fact applied as entity "
+                          "id-paths resolves nothing and renders as an empty selection, silently."),
              schema_field("mode", "string",
                           "selection-changed: how the change was applied — replace | add | toggle | "
                           "remove."),

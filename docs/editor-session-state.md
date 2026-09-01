@@ -21,8 +21,9 @@ registered in the ONE registry, so CLI ≡ RPC ≡ MCP ≡ `describe` parity is 
 
 | verb | rpc method | what it does |
 |---|---|---|
-| `editor select {ids[], mode}` | `editor.select` | set the selection (L-35 id-paths); `mode` = `replace` (default) / `add` / `toggle` / `remove` |
-| `editor selection-get` | `editor.selection-get` | read the selection |
+| `editor select {ids[], mode, subject}` | `editor.select` | set one SUBJECT's selection; `mode` = `replace` (default) / `add` / `toggle` / `remove`, `subject` = `entity` (default) / `file` / `asset` |
+| `editor selection-get {subject}` | `editor.selection-get` | read the selection — `ids` **and** the typed `selections` array; `subject` narrows both |
+| `editor selection-focus-get` | `editor.selection-focus-get` | read WHICH selection the human is working on |
 | `editor camera-set {viewportId, transform, projection}` | `editor.camera-set` | set one viewport's camera (payloads carried **opaquely**) |
 | `editor cameras-get` | `editor.cameras-get` | read every viewport camera |
 | `editor play` / `pause` / `stop` / `step --ticks N` | `editor.play` / … | drive the L-51 play state over RPC |
@@ -41,7 +42,8 @@ Every real change publishes a fact on the **`session`** topic (additive payload 
 name is unchanged, so the contract freeze is satisfied):
 
 ```
-selection-changed { ids, mode, origin }
+selection-changed { subject, ids, mode, origin }
+selection-focus   { subject, origin }
 camera-changed    { viewportId, origin }
 play-state        { state, simTick, origin }
 ```
@@ -85,6 +87,64 @@ Two supporting invariants make it trustworthy, and both are tested:
    id and a fact still in flight can never be mis-attributed. (`editorkernel-test_kernel_server`
    asserts both halves: two live clients differ, *and* a reconnect's id is beyond every id issued.)
 
+## Selection is TYPED, and selections COEXIST (c1 — D1 / D2 / D3)
+
+Selection is always *"these ids **of this kind**"*. `subject` is **optional and defaults to
+`entity`**, which is what makes the whole thing additive — `protocolMajor` stays **1**.
+
+* **Contract-owned kinds: `entity`, `file`, `asset`.** The vocabulary is deliberately open: a package
+  declares `<pkg>.<kind>` in its manifest's `selection.subjects[]` (that declaration surface is a
+  later task). An **unknown subject on the wire is REFUSED, never coerced** — the same reasoning
+  `parse_selection_mode` carries, and sharper here: silently reading `fiel` as `entity` would move a
+  *different* selection than the caller named, leaving the caller's own untouched with nothing
+  reporting an error.
+* **Selections of different subjects are independent.** Selecting a file does **not** clear the entity
+  selection (the Unreal model). Each subject dedups on its own, so a no-op re-select of one publishes
+  nothing about any of them.
+* **`selection-focus` (D3) is the arbiter** of which live selection the human is actually working on.
+  It is a **tier-1 daemon fact**, deliberately: deciding it from tier-2 panel focus would make the
+  answer invisible to the CLI, to agents, and to a second window — and *"what is the human working
+  on"* is exactly the question tier 1 exists to answer. The rule is one line: a change that leaves its
+  subject **non-empty** focuses that subject; a change that **empties** one moves nothing (there is
+  nothing there to work on), and a no-op moves nothing either. Boot default: `entity`.
+
+### The reply is ADDITIVE, and that was a correction
+
+`editor.selection-get` answers **both**:
+
+```json
+{ "ids": ["root/child"],
+  "selections": [ { "subject": "entity", "ids": ["root/child"] },
+                  { "subject": "file",   "ids": ["src/a.scene.json"] } ] }
+```
+
+`ids` **stays** and still carries the `entity` selection, because a live reader
+(`attach_command.cpp`'s attach observer, among others) reads a removed member as **absent, not as an
+error** — replacing it with a bare array would have broken every such reader *silently*. The typed
+view arrives as the NEW `selections` member: an **array of objects carrying their key**, never
+map-keyed, matching the convention `cameras` already follows. `--subject` narrows what **both**
+report; it never changes the reply's shape. The one cost, stated plainly: `ids` is redundant with
+`selections[subject=="entity"]` until a major moves. That was accepted over a silent break.
+
+### Every consumer of `selection-changed` must filter on `subject`
+
+This is the hazard the typing introduces, and it **fails silently**. The Shell's `SessionFeed` is the
+sole consumer of the fact (the Inspector is driven transitively, through
+`SceneTreePanel::add_selection_listener`), and it renders **entities** — so a `file` fact reaching
+`SceneTreePanel::apply_selection` would have its project paths resolved as L-35 entity id-paths,
+matching nothing. The tree then shows *nothing selected*, which is indistinguishable from a correct
+empty result.
+
+Hence the filter, and hence the shape of its test: **both directions** — a `file` fact does not move
+the tree AND a sibling proves an `entity` fact does. One direction alone would pass with the feed
+entirely disconnected. A fact with **no** `subject` member reads as `entity`, the wire parameter's
+documented default.
+
+The Inspector's own share is the focus, not a filter: `panels::bind_selection_focus` re-points it at
+the entity selection when `entity` is focused and shows its no-selection placeholder when anything
+else is — through the same L-30-guarded seams the Scene tree's selection listener uses, so a focus
+move can no more destroy a staged edit than a foreign selection can.
+
 ## Play state (L-51)
 
 `edit` → authored truth, no live session. `playing` / `paused` → a live session whose runtime state
@@ -114,17 +174,47 @@ client** on the next boot. The Shell owns `config.json` / the dock layout and **
 
 ```json
 {
-  "version": 1,
-  "selection": { "ids": ["root/child", "root/other"] },
+  "version": 2,
+  "selections": [ { "subject": "entity", "ids": ["root/child", "root/other"] },
+                  { "subject": "file",   "ids": ["src/a.scene.json"] } ],
+  "selectionFocus": { "subject": "file" },
   "cameras": [ { "viewportId": "main", "transform": {…}, "projection": {…} } ]
 }
 ```
 
-* Cameras are an **array of objects carrying their key**, never a map-keyed object — the same
-  encoding discipline the authored-data conventions mandate, so the file stays diffable.
+* `selections` and `cameras` are both **arrays of objects carrying their key**, never map-keyed
+  objects — the same encoding discipline the authored-data conventions mandate, so the file stays
+  diffable and stable-ordered.
 * **Play state is deliberately not persisted.** A restarted daemon holds no live session, so
   restoring `playing` would be a lie about L-51 provenance. Boot is always `edit`.
 * Writes go through a temp file + rename, so a crash mid-write leaves the previous good file intact.
+
+### `version` 1 -> 2: a MIGRATION, because the gap did not fail the way it looks like it should
+
+Version 2 (c1) is the typed-selection shape above. A **v1** document (`selection: {ids}`) is
+**migrated losslessly** to `selections: [{subject: "entity", ids}]` — and the reason that branch
+exists is worth being exact about, because the obvious guess is wrong.
+
+The version check only ever fires **forward**: a *future* version, a non-number, or `< 1` is corrupt.
+An **older** version hits none of that — it passes the check, and every member is then read under a
+`contains` guard (the additive absorption this file was designed for). So without a migration branch a
+v1 file would be **silently accepted with the selection dropped**: the loader looks for `selections`,
+finds nothing, and reports nothing. Not a false alarm — *no alarm at all*, on a user's persisted
+session.
+
+Two consequences for anyone touching this:
+
+* **Everything else is unchanged.** A future version, a non-number and a malformed document keep the
+  quarantine-plus-defaults-plus-loud path exactly as it was; the migration must not swallow it.
+* **"Assert a v1 file is not quarantined" is vacuous** and must not be written as the test — it passes
+  with the migration deleted, because v1 was never quarantined. The falsifiable assertion is that a v1
+  file's **selection survives into `selections`**, which reddens the moment the branch is removed.
+  (`editorkernel-test_editor_session_state` carries that one, a v2 round-trip, and a `version: 99`
+  file that is still quarantined.)
+
+The persisted file validates **structure**, not the subject **vocabulary**: a session file can
+legitimately outlive the package that declared its subject, and refusing the document would quarantine
+the cameras along with it. The wire is where an undeclared subject is refused.
 
 ### Corrupt-file recovery is loud and non-blocking (07 §6)
 

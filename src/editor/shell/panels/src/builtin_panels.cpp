@@ -324,6 +324,36 @@ void bind_session_client(SessionFeed& feed, client::Client* client)
     feed.bind_client(client, client != nullptr ? client->client_id() : 0);
 }
 
+void bind_selection_focus(SessionFeed& session, InspectorFeed& inspector, SceneTreeFeed* scenetree)
+{
+    // Raw captures, safe by the SAME construction the Scene tree's own selection listener relies on:
+    // in a real bag all three live and die together, and a focus fact can only arrive from
+    // `apply_event`, which the owner loop stops calling before teardown (builtin_panels.h documents
+    // the member order that keeps that a non-event). The listener holds no ownership either way.
+    InspectorFeed* inspector_ptr = &inspector;
+    session.add_focus_listener(
+        [inspector_ptr, scenetree](const std::string& subject)
+        {
+            // A subject other than `entity` is one this panel cannot inspect, so it has no identity
+            // to show — rendering the last entity would be a claim about a selection nobody is
+            // looking at. `entity` re-points at whatever the Scene tree currently holds, which is
+            // nothing when its provider was refused. Both roads meet at the same clear/request pair
+            // the Scene tree's own selection listener uses, so the L-30 staged-gesture deferral
+            // binds this caller identically (inspector_feed.h § request / § request_clear).
+            const std::string identity = (subject == kSelectionSubjectEntity && scenetree != nullptr)
+                                             ? scenetree->panel().selection().identity
+                                             : std::string();
+            if (identity.empty())
+            {
+                (void)inspector_ptr->request_clear();
+            }
+            else
+            {
+                (void)inspector_ptr->request(identity);
+            }
+        });
+}
+
 void bind_write_client(BuiltinPanels& panels, client::Client* client)
 {
     // A bag whose gateway was never created (impossible from install_builtin_panels, possible from a
@@ -709,6 +739,15 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         {
             out.session->bind_scene_tree(&out.scenetree->panel(),
                                          gui::panels::scenetree::SceneTreePanel::kContributionId);
+        }
+
+        // c1/D3: the Inspector renders the FOCUSED subject. Wired AFTER the moves for the same
+        // reason `bind_scene_tree` is — the pointers must be into the feeds that will actually live
+        // in the bag. The Scene tree is optional here (its provider can be refused); the Inspector
+        // is not, because there is nothing to re-point without it.
+        if (out.inspector != nullptr)
+        {
+            bind_selection_focus(*out.session, *out.inspector, out.scenetree.get());
         }
     }
 

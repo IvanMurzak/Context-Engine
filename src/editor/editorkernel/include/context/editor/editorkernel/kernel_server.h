@@ -26,7 +26,8 @@
 //   * resource.read {handle, range} -> read a chunk of an oversized spooled result by its
 //                                   R-CLI-017 opaque handle (STABLE contract verb, served here
 //                                   because the store lives with the composed daemon); read.
-//   * editor.select / editor.selection-get / editor.camera-set / editor.cameras-get /
+//   * editor.select / editor.selection-get / editor.selection-focus-get / editor.camera-set /
+//     editor.cameras-get /
 //     editor.play|pause|stop|step -> the M9 e08a DAEMON SESSION STATE (D7 tier 1): the semantic
 //                                   human state — selection, cameras, play — held HERE so every
 //                                   client shares one truth. Each real change publishes a `session`

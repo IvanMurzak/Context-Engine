@@ -330,6 +330,30 @@ bool apply_session_event(SessionFeed& feed, const std::string& topic, const cont
 // applying our own. There is no id to get wrong if the client is the only argument.
 void bind_session_client(SessionFeed& feed, client::Client* client);
 
+// Wire the c1/D3 `selection-focus` CONSUMER: the Inspector renders the FOCUSED subject.
+//
+// The Inspector's whole vocabulary is composed ENTITIES, so "render the focused subject" has exactly
+// two readings here, and both are done through the feed's existing, L-30-guarded seams rather than a
+// second policy:
+//
+//   * focus moved to `entity`   -> re-point the Inspector at the entity selection the Scene tree
+//                                  currently renders (`InspectorFeed::request`), or clear it when
+//                                  there is none.
+//   * focus moved anywhere else -> the human is working on files/assets, which this panel cannot
+//                                  inspect, so it shows its no-selection placeholder
+//                                  (`InspectorFeed::request_clear`) instead of an entity nobody is
+//                                  looking at.
+//
+// Both calls DEFER under a staged gesture exactly as the Scene tree's selection listener does — a
+// focus move must not destroy an in-flight edit any more than a foreign selection may.
+//
+// `scenetree` may be null (its provider can be refused); the entity arm then finds no selection and
+// clears, which is the honest rendering of "no entity is selected here".
+//
+// This is the PRODUCTION wiring `install_builtin_panels` performs, exposed as a named seam so a test
+// can drive the real thing over its own feeds instead of re-implementing the policy beside it.
+void bind_selection_focus(SessionFeed& session, InspectorFeed& inspector, SceneTreeFeed* scenetree);
+
 // The SAME seam for the M9 e09b-2 WRITE path: point the Inspector's wire override-write gateway at
 // the daemon link's CURRENT client — `nullptr` to clear it. A no-op when no gateway is in the bag.
 //

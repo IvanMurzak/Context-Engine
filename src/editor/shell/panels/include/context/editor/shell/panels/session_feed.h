@@ -31,6 +31,21 @@
 // A stale id would suppress a DIFFERENT client's facts and apply our own — both failure modes silent.
 // So the id is derived FROM the client at the seam, and clearing the pointer clears the id with it.
 //
+// § THE SUBJECT FILTER (c1/D1) — LOAD-BEARING, AND ITS ABSENCE FAILS SILENTLY. Since selection is
+// typed per SUBJECT KIND and selections of different subjects coexist, this feed is no longer the
+// consumer of "the selection" — it is the consumer of the ENTITY selection. It is also the ONLY
+// consumer of `selection-changed` in the Shell (the Inspector is driven transitively, through
+// `SceneTreePanel::add_selection_listener`), so this one comparison is what keeps a `file` selection
+// out of `SceneTreePanel::apply_selection`, which would read its ids as L-35 entity id-paths.
+//
+// The failure mode without it is the reason the filter is tested BOTH WAYS: a file selection applied
+// to the scene tree resolves no rows, so the tree simply renders nothing selected — indistinguishable
+// from a correct empty result. A test asserting only "a file fact does not move the tree" would pass
+// with the whole feed disconnected, so a sibling asserts an ENTITY fact DOES move it.
+//
+// A fact with NO `subject` member reads as `entity`: absence is the documented default of the wire
+// parameter, so an older daemon (or a hand-written client) means exactly what it always meant.
+//
 // NOT ROUTED THROUGH THE IN-PROCESS SHIM. `gui/contract`'s shim calls `Dispatcher::attach` directly,
 // which has no connection and is therefore permanently `origin 0` — indistinguishable from the daemon
 // itself and from any other in-process consumer. e08a's own docs call this out as the constraint
@@ -46,6 +61,7 @@
 
 #include <cstddef>
 #include <cstdint>
+#include <functional>
 #include <optional>
 #include <string>
 #include <vector>
@@ -68,12 +84,26 @@ namespace playbar = gui::playbar;
 // cannot silently disagree — the kDiagnosticsTopic/kDerivationTopic pattern.
 inline constexpr const char* kSessionTopicName = "session";
 
-// The three fact kinds e08a publishes on it. `camera-changed` is recognised and deliberately IGNORED:
+// The fact kinds e08a publishes on it. `camera-changed` is recognised and deliberately IGNORED:
 // the viewport/camera UI is e11, and silently dropping an unknown fact would make a future one
 // indistinguishable from a bug.
 inline constexpr const char* kSelectionChangedEvent = "selection-changed";
 inline constexpr const char* kPlayStateEvent = "play-state";
 inline constexpr const char* kCameraChangedEvent = "camera-changed";
+// c1/D3: WHICH live selection the human is actually working on. A tier-1 daemon fact, not tier-2
+// panel focus, so the CLI and agents can see the same answer this Shell renders.
+inline constexpr const char* kSelectionFocusEvent = "selection-focus";
+
+// The DEFAULT selection subject (c1/D1) — and the only one this Shell's Scene tree can render, since
+// its ids are L-35 entity id-paths.
+//
+// ⚠ SPELLED HERE RATHER THAN INCLUDED. The daemon owns the vocabulary in
+// `editorkernel/editor_session_state.h`, which this library must NOT reach (D10: the Shell links no
+// EditorKernel module — the configure-time boundary gate refuses it). So this is a deliberate
+// MIRROR of a wire token, the same discipline `kSessionTopicName` above and the playbar's L-51
+// tokens already follow: the cross-process `editor-session-panels-t2` drill against a real daemon is
+// what proves the two spellings agree.
+inline constexpr const char* kSelectionSubjectEntity = "entity";
 
 class SessionFeed final : public scenetree::SelectionGateway, public playbar::PlayControlGateway
 {
@@ -105,8 +135,43 @@ public:
     // --- the subscriber half ----------------------------------------------------------------------
 
     // Consume one subscription event. Returns true when a panel's rendered surface actually changed.
-    // A non-`session` topic, an echo of our own write, and an unrecognised fact all return false.
+    // A non-`session` topic, an echo of our own write, and an unrecognised fact all return false —
+    // and so does a `selection-changed` fact for a subject this Shell's Scene tree cannot render
+    // (see § THE SUBJECT FILTER below).
     bool apply_event(const std::string& topic, const contract::Json& payload);
+
+    // --- the c1/D3 focus half ---------------------------------------------------------------------
+
+    // WHICH selection subject the daemon says the human is working on. `entity` until a
+    // `selection-focus` fact says otherwise — the same boot default the daemon holds, so an
+    // unattached Shell and a fresh daemon agree without a round trip.
+    //
+    // ⚠ IT IS A MIRROR, so it must be maintained on BOTH edges: a foreign fact moves it here, and
+    // `request_selection` moves it for OUR OWN write, whose focus fact is echo-suppressed. A mirror
+    // updated on only one edge does not merely go stale — the `subject == selection_focus_` dedup
+    // then swallows the next real move to the subject it wrongly names.
+    //
+    // ⚠ It is NOT hydrated at attach: a daemon that restored `selectionFocus` from
+    // `.editor/session.json` can already be on `file` when this Shell boots believing `entity`.
+    // Reconciling that needs an `editor.selection-focus-get` read on the attach path (the Shell
+    // hydrates no session state today, selection included).
+    [[nodiscard]] const std::string& selection_focus() const noexcept { return selection_focus_; }
+
+    // React to a focus MOVE. Called with the new subject, only when it actually changed, so a
+    // listener never has to dedup. The production listener re-points the Inspector (wired by
+    // `panels::bind_selection_focus`); a second one would be an ordinary additional consumer.
+    using FocusListener = std::function<void(const std::string& subject)>;
+    void add_focus_listener(FocusListener listener);
+
+    // How many `selection-changed` facts were dropped because they addressed a subject this Shell
+    // does not render. A counter rather than a silent skip: the failure this filter exists to prevent
+    // is INVISIBLE (a file selection fed to the scene tree as entity id-paths simply shows nothing
+    // selected, which is indistinguishable from a correct empty result), so the drop needs an
+    // observable of its own for a test to key on.
+    [[nodiscard]] std::size_t foreign_subject_facts() const noexcept
+    {
+        return foreign_subject_facts_;
+    }
 
     // --- the writer half (the two panel seams) ----------------------------------------------------
 
@@ -163,9 +228,13 @@ private:
     scenetree::SceneTreePanel* scene_tree_ = nullptr;
     std::string scene_tree_panel_id_;
 
+    std::string selection_focus_ = kSelectionSubjectEntity;
+    std::vector<FocusListener> focus_listeners_;
+
     std::size_t facts_applied_ = 0;
     std::size_t echoes_dropped_ = 0;
     std::size_t writes_issued_ = 0;
+    std::size_t foreign_subject_facts_ = 0;
 };
 
 } // namespace context::editor::shell::panels

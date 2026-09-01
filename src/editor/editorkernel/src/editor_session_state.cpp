@@ -26,7 +26,13 @@ constexpr const char* kPlayNotRunningCode = "play.not_running";
 // The persisted document version. Bumped only for a shape change the loader cannot absorb
 // additively; a document from a FUTURE version is treated as corrupt (quarantined, defaults loaded)
 // rather than half-applied.
-constexpr std::int64_t kSessionFileVersion = 1;
+//
+// 1 -> 2 (c1): `selection: {ids}` became `selections: [{subject, ids}]` + `selectionFocus:
+// {subject}`. That is exactly the shape change additive absorption CANNOT handle — a v1 file would
+// pass the version check, hit a `contains("selections")` that finds nothing, and lose the human's
+// selection in silence — so `apply_json` carries a real MIGRATION branch rather than relying on the
+// tolerance the previous bump-free years relied on.
+constexpr std::int64_t kSessionFileVersion = 2;
 
 // Deep equality by canonical rendering. contract::Json preserves insertion order and dumps
 // deterministically, so this is a total, allocation-cheap comparison for the small camera payloads —
@@ -66,6 +72,12 @@ const char* selection_mode_token(SelectionMode mode)
     return "replace";
 }
 
+bool is_contract_selection_subject(const std::string& subject)
+{
+    return subject == kSelectionSubjectEntity || subject == kSelectionSubjectFile ||
+           subject == kSelectionSubjectAsset;
+}
+
 const char* play_state_token(EditorPlayState state)
 {
     switch (state)
@@ -82,9 +94,34 @@ const char* play_state_token(EditorPlayState state)
 
 // --- selection -----------------------------------------------------------------------------------
 
+const std::vector<std::string>& EditorSessionState::selection(const std::string& subject) const
+{
+    // A subject with nothing selected answers an empty vector rather than being absent: "what is
+    // selected here" is always a well-formed question, and the empty answer is the honest one.
+    static const std::vector<std::string> kNone;
+    const auto it = selections_.find(subject);
+    return it == selections_.end() ? kNone : it->second;
+}
+
+bool EditorSessionState::set_selection_focus(const std::string& subject)
+{
+    if (subject.empty() || subject == selection_focus_)
+        return false;
+    selection_focus_ = subject;
+    return true;
+}
+
 bool EditorSessionState::apply_selection(const std::vector<std::string>& ids, SelectionMode mode)
 {
-    std::vector<std::string> next = selection_;
+    return apply_selection(kSelectionSubjectEntity, ids, mode).changed;
+}
+
+SelectionOutcome EditorSessionState::apply_selection(const std::string& subject,
+                                                     const std::vector<std::string>& ids,
+                                                     SelectionMode mode)
+{
+    const std::vector<std::string>& current = selection(subject);
+    std::vector<std::string> next = current;
 
     const auto contains = [&next](const std::string& id) {
         return std::find(next.begin(), next.end(), id) != next.end();
@@ -121,10 +158,22 @@ bool EditorSessionState::apply_selection(const std::vector<std::string>& ids, Se
         break;
     }
 
-    if (next == selection_)
-        return false;
-    selection_ = std::move(next);
-    return true;
+    SelectionOutcome out;
+    if (next == current)
+        return out; // a no-op: neither fact is published, per subject
+
+    out.changed = true;
+    const bool empty = next.empty();
+    if (empty)
+        selections_.erase(subject); // pruned, so `selections()` holds only LIVE selections
+    else
+        selections_[subject] = std::move(next);
+
+    // D3: a change that leaves something selected focuses this subject; one that leaves it empty
+    // moves nothing (see the header — there is nothing there to work on).
+    if (!empty)
+        out.focus_changed = set_selection_focus(subject);
+    return out;
 }
 
 // --- cameras -------------------------------------------------------------------------------------
@@ -219,12 +268,49 @@ PlayOutcome EditorSessionState::step(std::uint64_t ticks)
 
 // --- the persisted projection --------------------------------------------------------------------
 
-Json selection_ids_json(const EditorSessionState& state)
+namespace
 {
-    Json ids = Json::array();
-    for (const std::string& id : state.selection())
-        ids.push_back(Json(id));
-    return ids;
+// The ONE ids-array encoder. Both spellings of the selection wire — the bare `ids` array and the
+// `ids` member of a `{subject, ids}` entry — are the SAME array, so they are built here rather than
+// by two loops that agree only by inspection.
+Json ids_json(const std::vector<std::string>& ids)
+{
+    Json out = Json::array();
+    for (const std::string& id : ids)
+        out.push_back(Json(id));
+    return out;
+}
+
+// The ONE `{subject, ids}` entry encoder, so the persisted array and the wire array cannot drift.
+Json selection_entry_json(const std::string& subject, const std::vector<std::string>& ids)
+{
+    Json entry = Json::object();
+    entry.set("subject", Json(subject));
+    entry.set("ids", ids_json(ids));
+    return entry;
+}
+} // namespace
+
+Json selection_ids_json(const EditorSessionState& state, const std::string& subject)
+{
+    return ids_json(state.selection(subject));
+}
+
+Json selections_json(const EditorSessionState& state)
+{
+    Json out = Json::array();
+    for (const auto& [subject, ids] : state.selections()) // std::map => stable, sorted order
+        out.push_back(selection_entry_json(subject, ids));
+    return out;
+}
+
+Json selections_json(const EditorSessionState& state, const std::string& subject)
+{
+    Json out = Json::array();
+    const std::vector<std::string>& ids = state.selection(subject);
+    if (!ids.empty()) // a FILTER of the unnarrowed array, so an unselected subject answers []
+        out.push_back(selection_entry_json(subject, ids));
+    return out;
 }
 
 Json cameras_json(const EditorSessionState& state)
@@ -243,12 +329,13 @@ Json cameras_json(const EditorSessionState& state)
 
 Json EditorSessionState::to_json() const
 {
-    Json selection = Json::object();
-    selection.set("ids", selection_ids_json(*this));
+    Json focus = Json::object();
+    focus.set("subject", Json(selection_focus_));
 
     Json doc = Json::object();
     doc.set("version", Json(static_cast<std::int64_t>(kSessionFileVersion)));
-    doc.set("selection", std::move(selection));
+    doc.set("selections", selections_json(*this));
+    doc.set("selectionFocus", std::move(focus));
     doc.set("cameras", cameras_json(*this));
     return doc;
 }
@@ -266,26 +353,90 @@ bool EditorSessionState::apply_json(const Json& doc)
             return false;
     }
 
-    std::vector<std::string> selection;
-    if (doc.contains("selection"))
+    // The ids of one selection entry: an array of strings, de-duplicated in first-mention order —
+    // the same set semantics `apply_selection` enforces in memory, applied once for BOTH the v2
+    // `selections[]` reader and the v1 migration below.
+    const auto read_ids = [](const Json& array, std::vector<std::string>& out) {
+        if (!array.is_array())
+            return false;
+        for (std::size_t i = 0; i < array.size(); ++i)
+        {
+            if (!array.at(i).is_string())
+                return false;
+            const std::string& id = array.at(i).as_string();
+            if (std::find(out.begin(), out.end(), id) == out.end())
+                out.push_back(id);
+        }
+        return true;
+    };
+
+    std::map<std::string, std::vector<std::string>> selections;
+    if (doc.contains("selections"))
     {
+        // v2: an ARRAY of objects carrying their key (L-33), never map-keyed.
+        const Json& arr = doc.at("selections");
+        if (!arr.is_array())
+            return false;
+        for (std::size_t i = 0; i < arr.size(); ++i)
+        {
+            const Json& entry = arr.at(i);
+            if (!entry.is_object() || !entry.contains("subject") ||
+                !entry.at("subject").is_string() || entry.at("subject").as_string().empty())
+                return false;
+            // A document saying two different things about ONE subject is not readable — refusing it
+            // is the same discipline the rest of this loader applies to a wrong type. INSERTION
+            // ITSELF is the record of what the document mentioned, which is why an empty entry is
+            // inserted here rather than skipped: skipping it would let `[{file, []}, {file, [a]}]`
+            // through, accepted because the first thing it said was "nothing". The empties are
+            // pruned once, below.
+            auto [slot, inserted] =
+                selections.emplace(entry.at("subject").as_string(), std::vector<std::string>{});
+            if (!inserted)
+                return false;
+            if (entry.contains("ids") && !read_ids(entry.at("ids"), slot->second))
+                return false;
+        }
+        // The subject VOCABULARY is deliberately NOT validated here (see the header): a session file
+        // can outlive the package that declared its subject, and refusing the document would
+        // quarantine the cameras with it. The WIRE is where an undeclared subject is refused.
+    }
+    else if (doc.contains("selection"))
+    {
+        // v1 -> v2 MIGRATION (08 §3). `selection: {ids}` was the ENTITY selection and nothing else,
+        // so it maps losslessly onto one `selections` entry. Without this branch a v1 file would be
+        // accepted with its selection silently dropped — no quarantine, no diagnostic, which on a
+        // user's persisted session is the worse of the two failures.
         const Json& sel = doc.at("selection");
         if (!sel.is_object())
             return false;
-        if (sel.contains("ids"))
-        {
-            const Json& ids = sel.at("ids");
-            if (!ids.is_array())
-                return false;
-            for (std::size_t i = 0; i < ids.size(); ++i)
-            {
-                if (!ids.at(i).is_string())
-                    return false;
-                const std::string& id = ids.at(i).as_string();
-                if (std::find(selection.begin(), selection.end(), id) == selection.end())
-                    selection.push_back(id);
-            }
-        }
+        std::vector<std::string> ids;
+        if (sel.contains("ids") && !read_ids(sel.at("ids"), ids))
+            return false;
+        selections.emplace(kSelectionSubjectEntity, std::move(ids));
+    }
+
+    // Both readers above insert every subject their document MENTIONED, empty ones included, so that
+    // insertion could serve as the duplicate-subject check. Narrow to the LIVE selections here, once,
+    // giving the restored map the same invariant `apply_selection` maintains in memory: "is this
+    // subject in the map" and "does this subject have a selection" are the same question.
+    for (auto it = selections.begin(); it != selections.end();)
+    {
+        if (it->second.empty())
+            it = selections.erase(it);
+        else
+            ++it;
+    }
+
+    // The D3 focus. Absent => the boot default (`entity`), which is also what a migrated v1 document
+    // gets: v1 had exactly one selection, so `entity` is not a guess there.
+    std::string focus = kSelectionSubjectEntity;
+    if (doc.contains("selectionFocus"))
+    {
+        const Json& node = doc.at("selectionFocus");
+        if (!node.is_object() || !node.contains("subject") || !node.at("subject").is_string() ||
+            node.at("subject").as_string().empty())
+            return false;
+        focus = node.at("subject").as_string();
     }
 
     std::map<std::string, CameraState> cameras;
@@ -309,7 +460,8 @@ bool EditorSessionState::apply_json(const Json& doc)
         }
     }
 
-    selection_ = std::move(selection);
+    selections_ = std::move(selections);
+    selection_focus_ = std::move(focus);
     cameras_ = std::move(cameras);
     // Play state is never persisted (L-51: a restarted daemon holds no live session), so a restore
     // leaves the boot default in place rather than reviving a stale `playing`.
