@@ -1,0 +1,38 @@
+src/editor/webui/core/src/test/paneltitle.test.ts
+  s_782aa603d2bdb2::t_88d7b9d9fc4e7e 1-234
+src/editor/webui/core/src/hydration.ts
+  s_782aa603d2bdb2::t_18ef33f4f918ac 249-261
+  s_782aa603d2bdb2::t_f2ffdc0a5433d5 367
+  s_782aa603d2bdb2::t_2f1c87c81b2559 825
+  s_782aa603d2bdb2::t_c1c009d40d1cea 858-885,887-891
+  s_782aa603d2bdb2::t_7e2212fb836af0 289-290
+  s_782aa603d2bdb2::t_af0e6712a8c1b3 886
+  s_782aa603d2bdb2::t_8b7fd62d2f9486 47
+src/editor/webui/core/src/test/main.ts
+  s_782aa603d2bdb2::t_99d80b970c0403 54
+  s_782aa603d2bdb2::t_00749df82b268a 10
+src/editor/webui/kit/src/widgets.ts
+  s_782aa603d2bdb2::t_d5eccb11e7f9bf 60-71
+  s_782aa603d2bdb2::t_5fc7d26d10e2a0 59
+src/editor/webui/kit/styles/kit.css
+  s_782aa603d2bdb2::t_73d8546be67d2d 54-77
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_7bc96980cd458d 1712
+  s_782aa603d2bdb2::t_b12060daccc99f 705-711,722-723
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "f2f1769a407cf15976355b79d34a6c6b75f45d88",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
