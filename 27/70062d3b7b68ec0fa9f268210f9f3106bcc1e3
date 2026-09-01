@@ -1,0 +1,76 @@
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_782aa603d2bdb2::t_b425def0452223 333-356
+src/editor/editorkernel/include/context/editor/editorkernel/kernel_server.h
+  s_782aa603d2bdb2::t_5c879919f7f510 29-30
+src/editor/editorkernel/include/context/editor/editorkernel/editor_session_state.h
+  s_782aa603d2bdb2::t_19bb2de976ee5b 109-118
+  s_782aa603d2bdb2::t_63e5dfc3fa2720 217-224,229-236,240-241
+  s_782aa603d2bdb2::t_546a384922629f 62-87
+  s_782aa603d2bdb2::t_dc20249de8ab88 251-264
+  s_782aa603d2bdb2::t_00803323437def 156-182,185-192
+  s_782aa603d2bdb2::t_6874fcc178c770 193
+src/editor/shell/panels/include/context/editor/shell/panels/session_feed.h
+  s_782aa603d2bdb2::t_7243195e0ba04e 34-48,99
+  s_782aa603d2bdb2::t_cd7e3c1bff8c97 96-98
+  s_782aa603d2bdb2::t_7dc643159cbe52 100-102
+  s_52d2b8d10ba39b::t_f046b2f5ee55eb 64,87,93-95,103-106,138-140,143-165,221-223,227
+src/editor/editorkernel/src/editor_session_state.cpp
+  s_782aa603d2bdb2::t_a759d4cbdc7b1a 446-447
+  s_782aa603d2bdb2::t_20fd39ad9e89d5 29-35
+  s_782aa603d2bdb2::t_6812530a5759d7 271,274,279-309
+  s_782aa603d2bdb2::t_14593b1cf3db82 327-328,332-333
+  s_782aa603d2bdb2::t_d12ae2ea98d658 161-176
+  s_782aa603d2bdb2::t_49806ec5eef3eb 75-80
+  s_782aa603d2bdb2::t_3578d8791d983f 97-113,116-124
+  s_782aa603d2bdb2::t_5a062eb0e93175 351-369,371-373,375,377-387,389-391,393-422
+  s_782aa603d2bdb2::t_537662c1c728a9 310
+src/editor/editorkernel/src/kernel_server.cpp
+  s_782aa603d2bdb2::t_9b4a39679529b0 973-979,982-983,987-995,998-1002,1004,1009-1028,1031
+  s_782aa603d2bdb2::t_5556ee125322b2 428-455
+src/tests/integration/test_redteam_boundaries.cpp
+  s_782aa603d2bdb2::t_73fcc23f94e453 187
+docs/editor-session-state.md
+  s_782aa603d2bdb2::t_71b73e9a5b0db3 24-26,45-46,90-147,177-180,185-187,192-218
+src/editor/bridge/src/scope.cpp
+  s_782aa603d2bdb2::t_6ac9cb62a570e6 162-163,169-170
+src/editor/client/schema/context-client-schema.json
+  s_782aa603d2bdb2::t_d5cd3e083fdbdd 885-886,906-926,1261,1271-1276
+src/editor/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_faa3cfb957ba57 977-983,986-987,989-992,997-1013,1197-1198,1203-1210
+src/editor/editorkernel/tests/test_editor_session_state.cpp
+  s_782aa603d2bdb2::t_74a979eb01254a 41-44,47-49,148-252,414-484,525-540,568-570,575-576
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_782aa603d2bdb2::t_7a499cefd18711 982-984,1155-1246
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_782aa603d2bdb2::t_5b167a8d99cc9e 327-359,746-754
+src/editor/shell/panels/src/session_feed.cpp
+  s_782aa603d2bdb2::t_b57ad77bbebfb1 69-82,102-109,135-143,157-176
+src/editor/shell/panels/tests/test_session_feed.cpp
+  s_782aa603d2bdb2::t_87ba37cf649ded 20-21,46-47,49-51,82-130,261-352
+src/editor/webui/core/src/generated/client-schema.ts
+  s_782aa603d2bdb2::t_bf800c4a89d2c5 68,476,486-495,622,679,681-682
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2770062d3b7b68ec0fa9f268210f9f3106bcc1e3",
+  "prompts": {},
+  "sessions": {
+    "s_52d2b8d10ba39b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-af5cc3597b2289e37",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
