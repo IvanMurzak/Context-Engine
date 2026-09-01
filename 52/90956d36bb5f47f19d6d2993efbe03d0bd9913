@@ -1,0 +1,26 @@
+src/editor/shell/panels/tests/test_builtin_panels.cpp
+  s_782aa603d2bdb2::t_223405d4afaf9a 28
+  s_782aa603d2bdb2::t_e93648c75841bb 50
+  s_782aa603d2bdb2::t_463e20e7a40939 18-19,24
+  s_782aa603d2bdb2::t_ef219391ca93ed 651-669,671,673,675-697
+  s_782aa603d2bdb2::t_e1750f06feb2a3 1125
+  s_782aa603d2bdb2::t_ba1ac15b84905c 670,672,674
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_782aa603d2bdb2::t_5bd13469e82e88 804-811,814-818
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "5290956d36bb5f47f19d6d2993efbe03d0bd9913",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

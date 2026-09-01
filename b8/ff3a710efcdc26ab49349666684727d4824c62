@@ -1,0 +1,143 @@
+src/editor/gui/panels/builders/src/wire.cpp
+  s_782aa603d2bdb2::t_a6916ae0fee992 88-123
+src/editor/shell/panels/CMakeLists.txt
+  s_782aa603d2bdb2::t_ebc7f0f6fbd59b 29
+  s_782aa603d2bdb2::t_2d5ecc0b8b71c3 9-14,21
+  s_782aa603d2bdb2::t_dc12ac8c481a1c 48
+  s_782aa603d2bdb2::t_4496815fd6916f 66
+src/editor/shell/panels/tests/test_files_feed.cpp
+  s_782aa603d2bdb2::t_be2530740a4a3a 1-253
+src/editor/shell/app/editor_main.cpp
+  s_782aa603d2bdb2::t_2db7fde456fa1c 1127,1136-1140
+  s_782aa603d2bdb2::t_1da7636f899012 1164-1166
+  s_782aa603d2bdb2::t_3149607ae03bcc 850-851
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_782aa603d2bdb2::t_02a8b47b6392c7 412,414-415
+  s_782aa603d2bdb2::t_6655f710af623f 17
+  s_782aa603d2bdb2::t_c72dacea2d89dc 44
+  s_782aa603d2bdb2::t_bf96ec947bb15a 383-411,413,416-459
+src/editor/gui/panels/builders/tests/test_wire.cpp
+  s_782aa603d2bdb2::t_f080d6b45f8524 112-155
+  s_782aa603d2bdb2::t_b1b2ecbad90c22 19
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_782aa603d2bdb2::t_e61ae97bccc429 16,26-29
+  s_782aa603d2bdb2::t_fdb9b6bfc5e81b 172-176
+  s_782aa603d2bdb2::t_fa10a909713e7c 372-377
+  s_782aa603d2bdb2::t_036563734736c6 484-489
+  s_782aa603d2bdb2::t_d137f02db01b1b 522-525
+  s_782aa603d2bdb2::t_70489c2aef9f14 370-371,378
+  s_782aa603d2bdb2::t_35de073e36e44f 100-103
+src/editor/bridge/src/scope.cpp
+  s_782aa603d2bdb2::t_4213d1ae92937f 176-178
+src/editor/gui/panels/builders/CMakeLists.txt
+  s_782aa603d2bdb2::t_2cab717aafe014 15,23,26,31-32
+src/editor/gui/panels/files/CMakeLists.txt
+  s_782aa603d2bdb2::t_2857d9bbb0b50a 1-58
+src/editor/gui/contract/src/builtin_roster.cpp
+  s_782aa603d2bdb2::t_9c9b6117ceeb57 128-140
+src/editor/gui/panels/builders/include/context/editor/gui/panels/builders/wire.h
+  s_782aa603d2bdb2::t_7b49a98988afc7 44-50
+  s_782aa603d2bdb2::t_05eca1619e3e53 22
+src/editor/shell/panels/tests/test_session_feed.cpp
+  s_782aa603d2bdb2::t_0f7444f412ecae 262-268,277-279,281,300,309-360
+  s_782aa603d2bdb2::t_8591e58c33102a 24-25
+  s_782aa603d2bdb2::t_393348b88bb4c3 361-418
+  s_782aa603d2bdb2::t_cb5c85831c6fa7 53,63
+src/editor/gui/a11y/CMakeLists.txt
+  s_782aa603d2bdb2::t_a56d70ab874f8f 30-31
+src/editor/gui/panels/files/tests/files_test.h
+  s_782aa603d2bdb2::t_ee810098452ed0 1-27
+src/tests/integration/test_redteam_boundaries.cpp
+  s_782aa603d2bdb2::t_746f2af9c21dec 166-168
+src/editor/shell/panels/include/context/editor/shell/panels/session_feed.h
+  s_782aa603d2bdb2::t_e483a1b55d4329 151-154
+  s_782aa603d2bdb2::t_f2f52415a5b466 188-194
+  s_782aa603d2bdb2::t_e78f227f5cb837 109-110,119-121
+  s_782aa603d2bdb2::t_026d43096205ef 4-5
+  s_782aa603d2bdb2::t_facd524e67ddb1 35-42,44-54
+  s_782aa603d2bdb2::t_c83777c0b609f4 161-162
+  s_782aa603d2bdb2::t_6dacddf844a2b0 68,91
+  s_782aa603d2bdb2::t_b803005c76bd78 200,205-219
+  s_782aa603d2bdb2::t_a7519f8fbcc116 150,155-156
+  s_782aa603d2bdb2::t_db0f74cfe2042a 261-278,289-291
+  s_782aa603d2bdb2::t_4bf331d2e47507 220,292
+src/editor/gui/panels/files/src/files_model.cpp
+  s_782aa603d2bdb2::t_8d0a58aa85d372 1-43
+src/editor/gui/panels/files/include/context/editor/gui/panels/files/files_panel.h
+  s_782aa603d2bdb2::t_2cc65eceb98c38 1-139
+src/editor/gui/panels/files/tests/test_a11y.cpp
+  s_782aa603d2bdb2::t_68191f65d0d950 1-131
+src/editor/gui/panels/files/tests/test_files_model.cpp
+  s_782aa603d2bdb2::t_ee527fb525cde3 1-104
+src/editor/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_b7caabaf7444dd 961-978
+src/editor/gui/help/src/help_model.cpp
+  s_782aa603d2bdb2::t_9a8e87bfb8c68d 176-179
+src/editor/shell/panels/src/session_feed.cpp
+  s_782aa603d2bdb2::t_ca9555c17d50f3 293-336
+  s_782aa603d2bdb2::t_fdd93517a9c427 145-154,156-166,168,170-180,182-183
+  s_782aa603d2bdb2::t_e6c63ef23f2271 106-111
+src/editor/shell/panels/include/context/editor/shell/panels/files_feed.h
+  s_782aa603d2bdb2::t_bced2659fd5bd1 1-102
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_782aa603d2bdb2::t_52dab8dc02154e 625-628
+  s_782aa603d2bdb2::t_43f0685b864a56 106-111
+  s_782aa603d2bdb2::t_ebd50cdfbc66e3 788-812
+  s_782aa603d2bdb2::t_02c075dd550e8f 11
+  s_782aa603d2bdb2::t_0a2c447704c11a 364-373
+  s_782aa603d2bdb2::t_be29a2971d1e05 561-573
+src/editor/gui/panels/files/tests/test_files_panel.cpp
+  s_782aa603d2bdb2::t_2df0d9de59d39c 1-275
+src/editor/gui/a11y/src/registry.cpp
+  s_782aa603d2bdb2::t_226b7878fb2600 15
+  s_782aa603d2bdb2::t_7e72e5e3aa608f 59-62
+src/editor/editorkernel/src/kernel_server.cpp
+  s_782aa603d2bdb2::t_2739be9c74beec 16
+  s_782aa603d2bdb2::t_3bf3ba3f15864d 942-952,955-958,960-961,963-964,966-973
+  s_782aa603d2bdb2::t_a268c9f67dd8f6 953-954,959,962,965
+  s_782aa603d2bdb2::t_cfe2247e7d8e56 5,32,37
+src/editor/shell/panels/tests/test_builtin_panels.cpp
+  s_782aa603d2bdb2::t_ceb0ec2dcc283d 212-213,219-220
+  s_782aa603d2bdb2::t_a7dcee379a3b43 160-164,169
+  s_782aa603d2bdb2::t_f9e9f4e14a4184 186
+src/editor/gui/panels/builders/include/context/editor/gui/panels/builders/files_builder.h
+  s_782aa603d2bdb2::t_819c99cf8470c1 1-31
+src/editor/gui/panels/files/include/context/editor/gui/panels/files/files_model.h
+  s_782aa603d2bdb2::t_b642211868ff50 1-42,49-60
+  s_782aa603d2bdb2::t_07b9dd7369dbb8 43-48
+src/editor/gui/panels/files/src/files_panel.cpp
+  s_782aa603d2bdb2::t_6cfca280e782f4 1-167,172-173,175-202,204-211
+  s_782aa603d2bdb2::t_32a39fd5f5c7b8 168-171,174
+  s_782aa603d2bdb2::t_578607ba5ef94f 203
+src/editor/gui/a11y/coverage.manifest.jsonl
+  s_782aa603d2bdb2::t_05f05e9afa7583 15
+src/editor/shell/panels/src/files_feed.cpp
+  s_782aa603d2bdb2::t_2b9a59a91acd4f 1-164
+src/editor/gui/panels/builders/src/files_builder.cpp
+  s_782aa603d2bdb2::t_b65f7fa0b1086e 1-164
+src/editor/editorkernel/CMakeLists.txt
+  s_782aa603d2bdb2::t_7976e7337c7527 84-88
+  s_782aa603d2bdb2::t_177fec7ddc9dc6 40-48
+src/editor/gui/panels/CMakeLists.txt
+  s_782aa603d2bdb2::t_42bf933f5e54d2 11-12
+src/editor/client/schema/context-client-schema.json
+  s_782aa603d2bdb2::t_927e5d4b52a9cd 876-894
+src/editor/webui/core/src/generated/client-schema.ts
+  s_782aa603d2bdb2::t_9fad6f6573e645 66,470-479,633
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "b8ff3a710efcdc26ab49349666684727d4824c62",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

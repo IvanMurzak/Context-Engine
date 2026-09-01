@@ -1,0 +1,25 @@
+src/editor/assetdb/include/context/editor/assetdb/asset_database.h
+  s_782aa603d2bdb2::t_39506d344e80fe 107-113
+src/editor/editorkernel/src/kernel_server.cpp
+  s_782aa603d2bdb2::t_4aa80d126874d6 962-966,969
+src/editor/assetdb/src/asset_database.cpp
+  s_782aa603d2bdb2::t_9667109cccb875 72-77,80
+  s_782aa603d2bdb2::t_811ca72026b02a 117-124,209
+  s_782aa603d2bdb2::t_caca26c3ffa9e1 210-214,220-222
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "c19ffd16a57287907376b9b87e72cdafd43542c9",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
