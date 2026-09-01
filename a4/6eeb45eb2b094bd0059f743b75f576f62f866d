@@ -1,0 +1,23 @@
+src/editor/webui/core/src/test/chrome.test.ts
+  s_782aa603d2bdb2::t_3f46948ce83ba7 1071-1075
+src/editor/gui/contract/tests/test_roster.cpp
+  s_782aa603d2bdb2::t_005903445735e0 610-613
+src/editor/gui/contract/include/context/editor/gui/contract/extension.h
+  s_782aa603d2bdb2::t_97da658884d2ef 271-282
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a46eeb45eb2b094bd0059f743b75f576f62f866d",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
