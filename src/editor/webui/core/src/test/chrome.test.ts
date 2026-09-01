@@ -1044,8 +1044,10 @@ export const chromeTests: readonly TestCase[] = [
                 kind: "panel",
                 title: "Problems",
                 icon: "",
-                contractVersion: 2,
-                dock: { zone: "right", singleton: true, minWidth: 0, minHeight: 0 },
+                contractVersion: 3,
+                dock: { zone: "right", minWidth: 0, minHeight: 0 },
+                instances: { mode: "singleton", max: 0 },
+                path: "Diagnostics",
                 content: { type: "uitree", entry: "" },
                 state: { schemaVersion: 1 },
                 capabilities: [],
@@ -1066,7 +1068,11 @@ export const chromeTests: readonly TestCase[] = [
                     focused: true,
                     window: "secondary",
                 },
-                "panel.list": { contractMajor: 2, panels: [rosterPanel] },
+                // 3, matching `rosterPanel.contractVersion` above: the envelope states the roster's
+                // major and the entry is a v3 manifest, so a 2 here would be a fixture describing a
+                // wire shape the Shell cannot emit. (`parsePanelRoster` does not gate on it today,
+                // which is exactly why it has to be kept honest by hand.)
+                "panel.list": { contractMajor: 3, panels: [rosterPanel] },
                 "window.seed": {
                     seeded: true,
                     panelId: "builtin.problems",

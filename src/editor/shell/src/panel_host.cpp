@@ -41,25 +41,39 @@ namespace ut = gui::uitree;
     return true;
 }
 
-// The manifest-v2 projection of one roster entry (04 §3). `hosted`, `gestures` and `state` are HOST
-// facts rather than manifest ones: they say what THIS build can actually do with the panel, which is
-// what lets the editor list its whole roster honestly while e05d3 is still in flight.
+// The manifest-v3 projection of one roster entry (04 §3 + 04 §2). `hosted`, `gestures` and `state`
+// are HOST facts rather than manifest ones: they say what THIS build can actually do with the panel,
+// which is what lets the editor list its whole roster honestly while e05d3 is still in flight.
 [[nodiscard]] contract::Json project_dock(const gc::DockDefaults& dock)
 {
     contract::Json out = contract::Json::object();
     out.set("zone", contract::Json(gc::dock_zone_token(dock.default_zone)));
-    out.set("singleton", contract::Json(dock.singleton));
+    // ⚠ `singleton` LIVED HERE UNTIL MANIFEST v3 and is gone — it is now `instances.mode`, a sibling
+    // of `dock` rather than a member of it, because "how many copies may exist" was never a DOCKING
+    // fact. The wire moved with the C++ struct in the same change, and `panels.ts`'s `readDock` moved
+    // with both: a projection that kept emitting a member the struct no longer holds could only ever
+    // synthesise it, which is how a manifest starts lying about what it declared.
     out.set("minWidth", contract::Json(dock.min_width));
     out.set("minHeight", contract::Json(dock.min_height));
     return out;
 }
 
-[[nodiscard]] contract::Json project_capabilities(const std::vector<std::string>& capabilities)
+// The manifest-v3 `instances` block (04 §2). `max` is emitted unconditionally — 0 on the two modes
+// that may not state one — so the reader never has to distinguish "absent" from "zero".
+[[nodiscard]] contract::Json project_instances(const gc::InstanceSpec& instances)
+{
+    contract::Json out = contract::Json::object();
+    out.set("mode", contract::Json(gc::instance_mode_token(instances.mode)));
+    out.set("max", contract::Json(instances.max));
+    return out;
+}
+
+[[nodiscard]] contract::Json project_string_array(const std::vector<std::string>& values)
 {
     contract::Json out = contract::Json::array();
-    for (const std::string& capability : capabilities)
+    for (const std::string& value : values)
     {
-        out.push_back(contract::Json(capability));
+        out.push_back(contract::Json(value));
     }
     return out;
 }
@@ -256,6 +270,24 @@ contract::Json PanelHost::list() const
         panel.set("icon", contract::Json(m.icon));
         panel.set("contractVersion", contract::Json(static_cast<std::uint64_t>(m.contract_version)));
         panel.set("dock", project_dock(m.dock));
+        // --- manifest v3 (04 §2) ------------------------------------------------------------------
+        // DECLARATIVE ONLY, and inert on this side of the wire until their consumers land: `instances`
+        // is read by c3's instance runtime, `path` by d1's Window menu, `selection`/`events` by d2's
+        // package fact bus. They are projected NOW, with the contract that introduced them, because
+        // `read_package_manifest` is the C++ INVERSE of this projection (package_store.h) — a member
+        // parsed on one side and not emitted on the other is exactly the drift that invariant exists
+        // to forbid.
+        panel.set("instances", project_instances(m.instances));
+        panel.set("path", contract::Json(m.path));
+
+        contract::Json selection = contract::Json::object();
+        selection.set("subjects", project_string_array(m.selection.subjects));
+        panel.set("selection", std::move(selection));
+
+        contract::Json events = contract::Json::object();
+        events.set("publishes", project_string_array(m.events.publishes));
+        events.set("subscribes", project_string_array(m.events.subscribes));
+        panel.set("events", std::move(events));
 
         contract::Json content = contract::Json::object();
         content.set("type", contract::Json(gc::content_type_token(m.content.type)));
@@ -267,7 +299,7 @@ contract::Json PanelHost::list() const
                   contract::Json(static_cast<std::uint64_t>(m.state.schema_version)));
         panel.set("state", state);
 
-        panel.set("capabilities", project_capabilities(m.capabilities));
+        panel.set("capabilities", project_string_array(m.capabilities));
         // The manifest-declared commands (04 §3), the editor-core command registry's source (c)
         // (M9 e07b). Empty for every built-in uitree panel (they declare on the C++ model); an
         // iframe contribution carries its own here.

@@ -204,15 +204,25 @@ struct PackageStoreScan
 //
 //     { "id": "<pkg>.<name>", "kind": "panel", "title": "...", "icon": "...",
 //       "target": "",            // parsed, NOT projected — see the note under rule (e)
-//       "contractVersion": 2,
-//       "dock":    { "zone": "left|right|top|bottom|center", "singleton": bool,
+//       "contractVersion": 3,
+//       "dock":    { "zone": "left|right|top|bottom|center",
 //                    "minWidth": int, "minHeight": int },
+//       "instances": { "mode": "singleton|limited|unlimited", "max": int },
+//       "path":    "Scene/Debug",
+//       "selection": { "subjects": [ "<pkg>.<kind>", ... ] },
+//       "events":  { "publishes": [ "<pkg>.<topic>", ... ],
+//                    "subscribes": [ "<other-pkg>.<topic>", ... ] },
 //       "content": { "type": "iframe", "entry": "context-ext://<pkg>/panel.html" },
 //       "state":   { "schemaVersion": int },
 //       "capabilities": [ "read_query", ... ],
 //       "commands": [ { "id": "...", "title": "...", "when": "..." } ] }
 //
-// FIVE VALIDATION RULES, and each one is a refusal a package could otherwise turn into an escalation:
+// ⚠ `dock.singleton` was REMOVED by manifest v3 (kContractMajor 2 -> 3): `instances.mode:"singleton"`
+// replaces it exactly. Since (e) refuses any stated `contractVersion` that is not the current major,
+// a v2 manifest is refused outright rather than half-read — so there is no "old shape still accepted"
+// path to document, and none to test for.
+//
+// SEVEN VALIDATION RULES, and each one is a refusal a package could otherwise turn into an escalation:
 //
 //   (a) `contributions` must be a non-empty array of objects, each with a non-empty `id`, and every
 //       id must be UNIQUE within the manifest and NAMESPACED to the package (`<pkg-id>.` prefix, or
@@ -233,16 +243,39 @@ struct PackageStoreScan
 //   (e) `contractVersion`, when present, must equal `gui::contract::kContractMajor`. The
 //       compatibility window is a single major (extension.h), so accepting another value here would
 //       only defer the registry's own refusal to a point where the diagnostic is worse.
+//   (f) `instances.mode`, when present, must be on the CLOSED v3 vocabulary. This FAILS CLOSED where
+//       `dock.zone` does not, and the difference is the cost of being wrong: an unrecognised zone
+//       costs a panel its first position, while an unrecognised instance mode would decide how many
+//       live copies of it may exist. Absent is legal and means `singleton` — the restrictive answer.
+//       The same rule covers the v3 NAME LISTS: `selection.subjects`, `events.publishes` and
+//       `events.subscribes` are each read STRICTLY — present-but-not-an-array, or an array holding a
+//       non-string, is a refusal, never an entry quietly dropped. That is the reasoning (d) states
+//       for capabilities, one member over: a dropped name presents the package to a consent surface
+//       as declaring LESS than it wrote down. (Absent stays legal and means "declared nothing".)
+//   (g) THE REGISTRY'S OWN STRUCTURAL VERDICT, asked rather than restated. After (a)-(f) the parsed
+//       contribution is handed to `gui::contract::manifest_defect` — the SAME function
+//       `ExtensionRegistry::register_contribution` refuses on — and any diagnostic it returns is a
+//       refusal here. That is what makes THE SCAN'S PROMISE BELOW structurally true rather than
+//       hand-maintained: v3 alone added `instances` coherence, the `path` display-text form, and the
+//       D2/D4 namespacing of `selection.subjects[]` / `events.{publishes,subscribes}[]`, and a
+//       hand-copied second opinion on any of them could drift into accepting a package the registry
+//       then rejects. (The namespacing rules are stated against the DECLARING package id, which this
+//       reader supplies as `Contribution::package_id` from the package DIRECTORY — never from the
+//       manifest text, so a package cannot name its own namespace.)
 //
-// Everything else is read permissively with a default (title defaults to the id, icon/`when` to
-// empty, dock to `center`), matching `parsePanelManifest`: the cost of a wrong default there is
+// Everything else — i.e. everything OUTSIDE rules (a)-(g) — is read permissively with a default
+// (title defaults to the id, icon/`when`/`path` to empty, dock to `center`), matching
+// `parsePanelManifest`: the cost of a wrong default there is
 // cosmetic, and a parser that refuses a manifest over a missing `icon` is a parser package authors
 // route around. `kind` is matched against `gc::contribution_kind_token` itself rather than a second
 // hand-written table, so the accepted tokens are exactly the ones the projection emits
 // (`panel` / `inspector` / `gizmo` / `asset-kind-editor` — note the HYPHENS).
 //
-// ⚠ `target` IS THE ONE FIELD READ HERE THAT THE PROJECTION DOES NOT WRITE, so this parser is the
-// inverse of `PanelHost::list` for every field EXCEPT that one, and saying so is the point: `target`
+// ⚠ `target` IS THE ONE MANIFEST FIELD READ HERE THAT THE PROJECTION DOES NOT WRITE, so this parser
+// is the inverse of `PanelHost::list` for every field EXCEPT that one. (`Contribution::package_id`
+// is the other asymmetry and is NOT a counter-example: it is provenance this reader DERIVES, not a
+// manifest member it reads, which is exactly why the projection has nothing to emit for it.)
+// Saying so is the point: `target`
 // is only meaningful for the `inspector` / `gizmo` / `asset-kind-editor` kinds, `ExtensionRegistry`
 // resolves those by matching the FIRST contribution with a given `(kind, target)`, and there is no
 // duplicate-target refusal anywhere. So a package declaring `{"kind":"inspector","target":"Transform"}`

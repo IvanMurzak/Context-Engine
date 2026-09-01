@@ -15,7 +15,9 @@ export const panelsTests: readonly TestCase[] = [
                 title: "Problems",
                 icon: "warning",
                 contractVersion: 3,
-                dock: { zone: "bottom", singleton: true, minWidth: 120, minHeight: 80 },
+                dock: { zone: "bottom", minWidth: 120, minHeight: 80 },
+                instances: { mode: "limited", max: 4 },
+                path: "Scene/Debug",
                 content: { type: "uitree" },
                 state: { schemaVersion: 2 },
                 capabilities: ["read", "focus"],
@@ -29,7 +31,9 @@ export const panelsTests: readonly TestCase[] = [
             assertEqual(manifest?.title, "Problems", "title");
             assertEqual(manifest?.contentType, "uitree", "contentType");
             assertEqual(manifest?.dock.zone, "bottom", "dock.zone");
-            assertEqual(manifest?.dock.singleton, true, "dock.singleton");
+            assertEqual(manifest?.instances.mode, "limited", "instances.mode");
+            assertEqual(manifest?.instances.max, 4, "instances.max");
+            assertEqual(manifest?.path, "Scene/Debug", "path");
             assertEqual(manifest?.schemaVersion, 2, "schemaVersion (read off state)");
             assertEqual(manifest?.capabilities, ["read", "focus"], "capabilities");
             assertEqual(manifest?.hosted, true, "hosted");
@@ -65,6 +69,70 @@ export const panelsTests: readonly TestCase[] = [
                 false,
                 "null -> false",
             );
+        },
+    },
+    {
+        // Manifest v3 (c2). `instances` is the member that replaced `dock.singleton`, and its parser
+        // is the ONE in this file that fails closed to the RESTRICTIVE value rather than the
+        // permissive one — because what it decides is how many live copies of a panel may exist, not
+        // where a panel first appears. Pinned in both directions: a stated mode survives, and every
+        // not-a-known-mode shape lands on `singleton`.
+        name: "parsePanelManifest: `instances` fails CLOSED to singleton (the copy-count seam)",
+        run: () => {
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "unlimited" } })?.instances.mode,
+                "unlimited",
+                "a stated mode must survive the parse",
+            );
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "limited", max: 3 } })?.instances,
+                { mode: "limited", max: 3 },
+                "limited carries its ceiling",
+            );
+            for (const bad of [
+                undefined,
+                { mode: "many" },
+                { mode: "SINGLETON" },
+                { mode: 1 },
+                "unlimited",
+                null,
+            ]) {
+                assertEqual(
+                    parsePanelManifest({ id: "p", instances: bad })?.instances.mode,
+                    "singleton",
+                    `an unusable instances (${JSON.stringify(bad)}) must fail closed`,
+                );
+            }
+            // A negative ceiling is clamped to "unstated", matching the C++ registry's refusal of one.
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "limited", max: -4 } })?.instances
+                    .max,
+                0,
+                "a negative max is not a ceiling",
+            );
+            // A ceiling is dropped off every mode but `limited`, mirroring the C++ registry, which
+            // REFUSES a stray `max` rather than ignoring it. It matters most where the mode itself
+            // failed closed: a `max` surviving that fallback would hand the c3 instance runtime a
+            // limit no manifest the registry accepts could have declared.
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "many", max: 5 } })?.instances,
+                { mode: "singleton", max: 0 },
+                "a failed-closed mode carries no ceiling",
+            );
+            assertEqual(
+                parsePanelManifest({ id: "p", instances: { mode: "unlimited", max: 5 } })?.instances
+                    .max,
+                0,
+                "max is meaningful only for limited",
+            );
+            // `path` is display text with an empty default (= top level), read permissively.
+            assertEqual(parsePanelManifest({ id: "p" })?.path, "", "absent path -> top level");
+            assertEqual(
+                parsePanelManifest({ id: "p", path: "Scene/Debug" })?.path,
+                "Scene/Debug",
+                "path round-trips",
+            );
+            assertEqual(parsePanelManifest({ id: "p", path: 7 })?.path, "", "a non-string path");
         },
     },
     {

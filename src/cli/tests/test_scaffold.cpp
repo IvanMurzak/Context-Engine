@@ -229,7 +229,13 @@ int main()
             CHECK(c.at("content").at("type").as_string() == "iframe");
             CHECK(c.at("content").at("entry").as_string() ==
                   "context-ext://" + package_id + "/" + kExtensionPanelEntryFileName);
-            CHECK(c.at("dock").at("singleton").as_bool() == true);
+            CHECK(!c.at("dock").contains("singleton"));
+            CHECK(c.at("instances").at("mode").as_string() == "singleton");
+            // `max` is ABSENT, not 0: the registry refuses a `max` stated on any mode but `limited`,
+            // so a template writing one "for completeness" would teach a shape that gets a real
+            // package rejected.
+            CHECK(!c.at("instances").contains("max"));
+            CHECK(c.at("path").as_string() == "Packages");
             CHECK(c.at("state").at("schemaVersion").as_int() == 1);
             CHECK(c.at("capabilities").size() == 1);
             CHECK(c.at("capabilities").at(0).as_string() == "read_query");

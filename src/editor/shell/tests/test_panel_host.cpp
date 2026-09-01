@@ -46,9 +46,14 @@ gc::Contribution make_contribution(std::string id, std::string title, std::uint3
     c.title = std::move(title);
     c.icon = "test-icon";
     c.dock.default_zone = gc::DockZone::bottom;
-    c.dock.singleton = true;
     c.dock.min_width = 111;
     c.dock.min_height = 222;
+    // Manifest v3 (04 §2). `limited` with a real ceiling on purpose: `singleton` is the DEFAULT, so a
+    // fixture using it could not tell a projection that reads the manifest from one that emits a
+    // constant.
+    c.instances.mode = gc::InstanceMode::limited;
+    c.instances.max = 3;
+    c.path = "Test/Synthetic";
     c.content.type = gc::ContentType::uitree;
     c.state.schema_version = schema_version;
     c.capabilities = {gc::kCapabilityReadQuery};
@@ -180,6 +185,16 @@ void lists_every_rostered_panel_hosted_or_not()
         CHECK(hosted->at("title").as_string() == "Alpha");
         CHECK(hosted->at("dock").at("zone").as_string() == "bottom");
         CHECK(hosted->at("dock").at("minWidth").as_int() == 111);
+        // Manifest v3 on the WIRE. `dock.singleton` is GONE from the projection — asserted as an
+        // absence because a stale renderer reading it would otherwise see `false` for every panel and
+        // silently treat the whole roster as multi-instance.
+        CHECK(!hosted->at("dock").contains("singleton"));
+        CHECK(hosted->at("instances").at("mode").as_string() == "limited");
+        CHECK(hosted->at("instances").at("max").as_int() == 3);
+        CHECK(hosted->at("path").as_string() == "Test/Synthetic");
+        CHECK(hosted->at("selection").at("subjects").size() == 0);
+        CHECK(hosted->at("events").at("publishes").size() == 0);
+        CHECK(hosted->at("events").at("subscribes").size() == 0);
         CHECK(hosted->at("content").at("type").as_string() == "uitree");
         CHECK(hosted->at("state").at(gc::kStateSchemaVersionKey).as_int() == 1);
         CHECK(hosted->at("capabilities").size() == 1);

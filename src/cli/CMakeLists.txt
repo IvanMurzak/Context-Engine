@@ -52,6 +52,18 @@ target_link_libraries(context_cli
 # depend on the `context` binary); CMake resolves the target name at generate time regardless.
 target_link_libraries(context_cli PRIVATE context_client)
 
+# editor-UX c2 (R-EDIT-001 manifest v3): the `extension-panel` template writes the contract major into
+# the manifest it scaffolds, and that value must BE `gui::contract::kContractMajor` rather than a copy
+# of it — the discipline a single-major compatibility window demands of every in-repo consumer. PUBLIC,
+# because scaffold.h (a public CLI header) names the constant, so anything including it needs the
+# contract's include path too. This is the "single link edge" scaffold.h's MIRROR LIST predicted:
+# context_gui_contract is pure C++ over context_bridge, which context_cli already links, and it pulls
+# in NOTHING of the Shell (no present path, no X11/AppKit) — so the CLI-spawns-under-the-Shell
+# dependency direction the other four mirrors exist to protect is untouched. `context_gui_contract` is
+# defined by a LATER add_subdirectory(editor/gui) in src/CMakeLists.txt; CMake resolves the target name
+# at generate time regardless, exactly as it does for context_client above.
+target_link_libraries(context_cli PUBLIC context_gui_contract)
+
 # `context set` / `context query --overrides` (M2 composed write path, src/editor/compose/ +
 # src/editor/filesync/): PRIVATE — set_command.cpp is the only consumer, driving compose's IO-free
 # plan_write()/override_hygiene() and filesync's R-FILE-004 atomic_write + content_hash.

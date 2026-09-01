@@ -62,8 +62,12 @@ using shelltest::write_file;
       "kind": "panel",
       "title": "Hello Panel",
       "icon": "puzzle",
-      "contractVersion": 2,
-      "dock": { "zone": "right", "singleton": true, "minWidth": 240, "minHeight": 120 },
+      "contractVersion": )" + std::to_string(gc::kContractMajor) + R"(,
+      "dock": { "zone": "right", "minWidth": 240, "minHeight": 120 },
+      "instances": { "mode": "limited", "max": 4 },
+      "path": "Packages/Hello",
+      "selection": { "subjects": [ ")" + id + R"(.thing" ] },
+      "events": { "publishes": [ ")" + id + R"(.brush" ], "subscribes": [ "other-pkg.thing" ] },
       "content": { "type": "iframe", "entry": "context-ext://)" + id + R"(/panel.html" },
       "state": { "schemaVersion": 3 },
       "capabilities": [ "read_query", "ui_events" ],
@@ -154,9 +158,22 @@ void test_manifest_happy_path()
         CHECK(c.icon == "puzzle");
         CHECK(c.contract_version == gc::kContractMajor);
         CHECK(c.dock.default_zone == gc::DockZone::right);
-        CHECK(c.dock.singleton);
         CHECK(c.dock.min_width == 240);
         CHECK(c.dock.min_height == 120);
+        // Manifest v3 (04 §2), round-tripped off the manifest TEXT rather than off a default: the
+        // declaring package id is PROVENANCE the reader supplies (the directory name), never a member
+        // the manifest could state for itself.
+        CHECK(c.package_id == "hello-panel");
+        CHECK(c.instances.mode == gc::InstanceMode::limited);
+        CHECK(c.instances.max == 4);
+        CHECK(c.path == "Packages/Hello");
+        CHECK(c.selection.subjects == std::vector<std::string>{"hello-panel.thing"});
+        CHECK(c.events.publishes == std::vector<std::string>{"hello-panel.brush"});
+        // A SUBSCRIPTION NAMES ANOTHER PACKAGE'S TOPIC — the D4 asymmetry, pinned here because it is
+        // the one place the namespacing rule is NOT "under the declaring package". If `subscribes`
+        // were held to the same rule as `publishes`, this fixture would be refused and cross-package
+        // broadcast could never be declared at all.
+        CHECK(c.events.subscribes == std::vector<std::string>{"other-pkg.thing"});
         CHECK(c.content.type == gc::ContentType::iframe);
         CHECK(c.content.entry == "context-ext://hello-panel/panel.html");
         CHECK(c.state.schema_version == 3);
@@ -244,8 +261,16 @@ void test_manifest_defaults_are_permissive()
         CHECK(c.icon.empty());
         CHECK(c.kind == gc::ContributionKind::panel);
         CHECK(c.dock.default_zone == gc::DockZone::center);
-        CHECK(!c.dock.singleton);
         CHECK(c.dock.min_width == 0 && c.dock.min_height == 0);
+        // An ABSENT `instances` block is the RESTRICTIVE answer, not a permissive one: a manifest that
+        // says nothing about copies gets the mode that cannot surprise anybody. `path` defaults to
+        // empty, which means top level.
+        CHECK(c.instances.mode == gc::InstanceMode::singleton);
+        CHECK(c.instances.max == 0);
+        CHECK(c.path.empty());
+        CHECK(c.selection.subjects.empty());
+        CHECK(c.events.publishes.empty());
+        CHECK(c.events.subscribes.empty());
         CHECK(c.state.schema_version == 1);
         CHECK(c.capabilities.empty());
         CHECK(c.commands.empty());
@@ -478,6 +503,116 @@ void test_manifest_refusals()
 })");
     CHECK(!read_staged(store, "ver", package, code, message));
     CHECK(code == shell::kErrManifestInvalid);
+    // THE IMMEDIATELY-PREVIOUS MAJOR, which is the case a single-major window is really about. `1` is
+    // two majors back and would be refused by almost any wrong rule; `2` is the value that was legal
+    // yesterday, so it is the one that catches a "be lenient with the last major" relaxation.
+    write_file(store / "ver2" / shell::kPackageManifestFileName, R"({
+  "id": "ver2",
+  "contributions": [
+    { "id": "ver2", "contractVersion": 2,
+      "content": { "type": "iframe", "entry": "context-ext://ver2/i.html" } }
+  ]
+})");
+    CHECK(!read_staged(store, "ver2", package, code, message));
+    CHECK(code == shell::kErrManifestInvalid);
+
+    // --- rule (f): instances.mode is a CLOSED vocabulary, and FAILS CLOSED ----------------------
+    // Contrast `dock.zone` above, which falls back to `center`: an unrecognised zone costs a panel its
+    // first position, while an unrecognised instance mode would decide how many live copies exist.
+    write_file(store / "inst-mode" / shell::kPackageManifestFileName, R"({
+  "id": "inst-mode",
+  "contributions": [
+    { "id": "inst-mode", "instances": { "mode": "many" },
+      "content": { "type": "iframe", "entry": "context-ext://inst-mode/i.html" } }
+  ]
+})");
+    CHECK(!read_staged(store, "inst-mode", package, code, message));
+    CHECK(code == shell::kErrManifestInvalid);
+    CHECK(shelltest::mentions(message, "instances.mode"));
+
+    // --- rule (g): the REGISTRY'S verdict, reached through this reader ---------------------------
+    // Each of these is refused by `gui::contract::manifest_defect`, not by a check written here — which
+    // is the point of delegating: the scan cannot report as ACCEPTED a package registration would then
+    // reject. Every case carries the diagnostic the registry produced, so the refusal is legible.
+    struct V3Refusal
+    {
+        const char* dir;
+        const char* member;  // the JSON text spliced into the contribution
+        const char* mention; // a fragment of the registry's own diagnostic
+    };
+    const V3Refusal v3_refusals[] = {
+        // instances.mode/max coherence, both directions.
+        {"lim-nomax", R"("instances": { "mode": "limited" })", "positive maximum"},
+        {"lim-zero", R"("instances": { "mode": "limited", "max": 0 })", "positive maximum"},
+        {"lim-neg", R"("instances": { "mode": "limited", "max": -3 })", "positive maximum"},
+        {"max-single", R"("instances": { "mode": "singleton", "max": 2 })", "only for"},
+        {"max-unlim", R"("instances": { "mode": "unlimited", "max": 2 })", "only for"},
+        // `path` is DISPLAY text: no leading/trailing slash, no empty segment.
+        {"path-lead", R"("path": "/Scene")", "leading or trailing"},
+        {"path-trail", R"("path": "Scene/")", "leading or trailing"},
+        {"path-empty-seg", R"("path": "Scene//Debug")", "empty segment"},
+        {"path-blank-seg", R"("path": "Scene/ /Debug")", "empty segment"},
+        // D2: a PACKAGE may not claim an unnamespaced, contract-owned selection subject. This is the
+        // sharpest of the set — `entity` is a real contract-owned kind, so admitting it would let a
+        // package speak for the editor's own selection vocabulary.
+        {"subj-bare", R"("selection": { "subjects": [ "entity" ] })", "namespaced"},
+        {"subj-other", R"("selection": { "subjects": [ "other-pkg.tile" ] })", "namespaced"},
+        {"subj-dup", R"("selection": { "subjects": [ "subj-dup.a", "subj-dup.a" ] })", "twice"},
+        {"subj-shape", R"("selection": { "subjects": [ "Subj-Shape.A" ] })", "lowercase"},
+        // D4: a package publishes only under its OWN namespace...
+        {"pub-other", R"("events": { "publishes": [ "other-pkg.brush" ] })", "namespaced"},
+        // ...but SUBSCRIBES may name another package's topic, so the rule there is weaker — not
+        // absent. An unnamespaced name, and the reserved editor namespace, are still refused.
+        {"sub-bare", R"("events": { "subscribes": [ "brush" ] })", "any package"},
+        {"sub-editor", R"("events": { "subscribes": [ "editor.ui.focus" ] })", "reserved"},
+        {"pub-editor", R"("events": { "publishes": [ "editor.selection" ] })", "reserved"},
+    };
+    for (const V3Refusal& tc : v3_refusals)
+    {
+        const std::string dir = tc.dir;
+        write_file(store / dir / shell::kPackageManifestFileName,
+                   R"({"id":")" + dir + R"(","contributions":[{"id":")" + dir + R"(",)" +
+                       tc.member + R"(,"content":{"type":"iframe","entry":"context-ext://)" + dir +
+                       R"(/i.html"}}]})");
+        CHECK(!read_staged(store, dir, package, code, message));
+        CHECK(code == shell::kErrManifestInvalid);
+        CHECK(shelltest::mentions(message, tc.mention));
+    }
+    // A `selection.subjects` that is not an array, and a non-string entry inside one: refused rather
+    // than silently skipped, for the reason rule (d) states about capabilities — dropping a declared
+    // name presents the package as asking for less than it wrote down.
+    for (const char* member : {R"("selection": { "subjects": "mine" })",
+                               R"("selection": { "subjects": [ 7 ] })",
+                               R"("events": { "publishes": [ null ] })"})
+    {
+        write_file(store / "arr-bad" / shell::kPackageManifestFileName,
+                   R"({"id":"arr-bad","contributions":[{"id":"arr-bad",)" + std::string(member) +
+                       R"(,"content":{"type":"iframe","entry":"context-ext://arr-bad/i.html"}}]})");
+        CHECK(!read_staged(store, "arr-bad", package, code, message));
+        CHECK(code == shell::kErrManifestInvalid);
+    }
+    // NON-VACUITY for the whole (g) family: the SAME shapes, correctly namespaced under the declaring
+    // package, are ACCEPTED. Without this, every case above would pass just as well if the reader
+    // refused every manifest carrying a v3 member at all.
+    write_file(store / "ok-v3" / shell::kPackageManifestFileName, R"({
+  "id": "ok-v3",
+  "contributions": [
+    { "id": "ok-v3",
+      "instances": { "mode": "limited", "max": 3 },
+      "path": "Scene/Debug",
+      "selection": { "subjects": [ "ok-v3.tile" ] },
+      "events": { "publishes": [ "ok-v3.brush" ], "subscribes": [ "other-pkg.thing" ] },
+      "content": { "type": "iframe", "entry": "context-ext://ok-v3/i.html" } }
+  ]
+})");
+    CHECK(read_staged(store, "ok-v3", package, code, message));
+    CHECK(package.contributions.size() == 1);
+    if (package.contributions.size() == 1)
+    {
+        CHECK(package.contributions.front().instances.mode == gc::InstanceMode::limited);
+        CHECK(package.contributions.front().instances.max == 3);
+        CHECK(package.contributions.front().path == "Scene/Debug");
+    }
 
     // --- a nonsensical state schema version -----------------------------------------------------
     write_file(store / "st" / shell::kPackageManifestFileName, R"({
