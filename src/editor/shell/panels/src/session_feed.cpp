@@ -66,18 +66,22 @@ namespace
     return ids;
 }
 
-// The `subject` of a selection fact. ABSENT reads as `entity` — the documented default of the wire
-// parameter, so an older daemon or a hand-written client means what it always meant. A non-string
-// member is NOT coerced: it is answered as an empty subject, which matches nothing and is therefore
-// dropped, rather than being read as the one subject this Shell does apply.
+// The `subject` of a `selection-changed` fact. ABSENT reads as `entity` — the documented default of
+// the wire parameter, so an older daemon or a hand-written client means what it always meant. That
+// DEFAULT is the only policy this helper adds; the mechanical read is `wire_read.h`'s shared
+// `read_string`, which already answers a non-string member as empty — and empty is what we want
+// there, since it matches nothing and is therefore dropped rather than being read as the one
+// subject this Shell does apply.
+//
+// `selection-focus` deliberately does NOT come through here: absence means something different on
+// that fact, so it calls `read_string` directly (see apply_event).
 [[nodiscard]] std::string read_subject(const contract::Json& payload)
 {
     if (!payload.contains("subject"))
     {
         return kSelectionSubjectEntity;
     }
-    const contract::Json& raw = payload.at("subject");
-    return raw.is_string() ? raw.as_string() : std::string();
+    return read_string(payload, "subject");
 }
 
 } // namespace
@@ -161,13 +165,14 @@ bool SessionFeed::apply_event(const std::string& topic, const contract::Json& pa
         // precisely the case a consumer needs to be told about (the Inspector stops showing an entity
         // nobody is working on). An empty/absent subject is not a focus claim and moves nothing.
         //
-        // ⚠ ABSENT IS READ DIFFERENTLY HERE THAN ON `selection-changed`, deliberately. There,
-        // absence is the wire parameter's documented default (`entity`) because an OLDER daemon
-        // published the fact without the member. `selection-focus` is NEW in c1 — no daemon ever
-        // published it without a `subject` — so an absent member is a MALFORMED fact, and reading it
-        // as `entity` would move the focus off whatever the human is really working on.
-        const std::string subject =
-            payload.contains("subject") ? read_subject(payload) : std::string();
+        // ⚠ ABSENT IS READ DIFFERENTLY HERE THAN ON `selection-changed`, deliberately — which is why
+        // this reads the member directly instead of through `read_subject`. There, absence is the
+        // wire parameter's documented default (`entity`) because an OLDER daemon published the fact
+        // without the member. `selection-focus` is NEW in c1 — no daemon ever published it without a
+        // `subject` — so an absent member is a MALFORMED fact, and reading it as `entity` would move
+        // the focus off whatever the human is really working on. `read_string` answers BOTH absent
+        // and non-string as empty, which is exactly the "not a focus claim" the guard below refuses.
+        const std::string subject = read_string(payload, "subject");
         if (subject.empty() || subject == selection_focus_)
         {
             return false;

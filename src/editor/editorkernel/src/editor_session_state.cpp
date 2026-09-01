@@ -268,28 +268,33 @@ PlayOutcome EditorSessionState::step(std::uint64_t ticks)
 
 // --- the persisted projection --------------------------------------------------------------------
 
-Json selection_ids_json(const EditorSessionState& state, const std::string& subject)
-{
-    Json ids = Json::array();
-    for (const std::string& id : state.selection(subject))
-        ids.push_back(Json(id));
-    return ids;
-}
-
 namespace
 {
+// The ONE ids-array encoder. Both spellings of the selection wire — the bare `ids` array and the
+// `ids` member of a `{subject, ids}` entry — are the SAME array, so they are built here rather than
+// by two loops that agree only by inspection.
+Json ids_json(const std::vector<std::string>& ids)
+{
+    Json out = Json::array();
+    for (const std::string& id : ids)
+        out.push_back(Json(id));
+    return out;
+}
+
 // The ONE `{subject, ids}` entry encoder, so the persisted array and the wire array cannot drift.
 Json selection_entry_json(const std::string& subject, const std::vector<std::string>& ids)
 {
     Json entry = Json::object();
     entry.set("subject", Json(subject));
-    Json wire = Json::array();
-    for (const std::string& id : ids)
-        wire.push_back(Json(id));
-    entry.set("ids", std::move(wire));
+    entry.set("ids", ids_json(ids));
     return entry;
 }
 } // namespace
+
+Json selection_ids_json(const EditorSessionState& state, const std::string& subject)
+{
+    return ids_json(state.selection(subject));
+}
 
 Json selections_json(const EditorSessionState& state)
 {
@@ -366,11 +371,6 @@ bool EditorSessionState::apply_json(const Json& doc)
     };
 
     std::map<std::string, std::vector<std::string>> selections;
-    // Every subject the document MENTIONS, pruned or not. Deliberately not `selections` itself: an
-    // empty entry is pruned rather than inserted, so keying the duplicate check on the map would let
-    // `[{file, []}, {file, [a]}]` through — a document saying two things about one subject, accepted
-    // because the first thing it said was "nothing".
-    std::vector<std::string> mentioned;
     if (doc.contains("selections"))
     {
         // v2: an ARRAY of objects carrying their key (L-33), never map-keyed.
@@ -383,18 +383,18 @@ bool EditorSessionState::apply_json(const Json& doc)
             if (!entry.is_object() || !entry.contains("subject") ||
                 !entry.at("subject").is_string() || entry.at("subject").as_string().empty())
                 return false;
-            const std::string& subject = entry.at("subject").as_string();
             // A document saying two different things about ONE subject is not readable — refusing it
-            // is the same discipline the rest of this loader applies to a wrong type.
-            if (std::find(mentioned.begin(), mentioned.end(), subject) != mentioned.end())
+            // is the same discipline the rest of this loader applies to a wrong type. INSERTION
+            // ITSELF is the record of what the document mentioned, which is why an empty entry is
+            // inserted here rather than skipped: skipping it would let `[{file, []}, {file, [a]}]`
+            // through, accepted because the first thing it said was "nothing". The empties are
+            // pruned once, below.
+            auto [slot, inserted] =
+                selections.emplace(entry.at("subject").as_string(), std::vector<std::string>{});
+            if (!inserted)
                 return false;
-            mentioned.push_back(subject);
-            std::vector<std::string> ids;
-            if (entry.contains("ids") && !read_ids(entry.at("ids"), ids))
+            if (entry.contains("ids") && !read_ids(entry.at("ids"), slot->second))
                 return false;
-            // Pruned exactly like the in-memory invariant: the map holds only LIVE selections.
-            if (!ids.empty())
-                selections.emplace(subject, std::move(ids));
         }
         // The subject VOCABULARY is deliberately NOT validated here (see the header): a session file
         // can outlive the package that declared its subject, and refusing the document would
@@ -412,8 +412,19 @@ bool EditorSessionState::apply_json(const Json& doc)
         std::vector<std::string> ids;
         if (sel.contains("ids") && !read_ids(sel.at("ids"), ids))
             return false;
-        if (!ids.empty())
-            selections.emplace(kSelectionSubjectEntity, std::move(ids));
+        selections.emplace(kSelectionSubjectEntity, std::move(ids));
+    }
+
+    // Both readers above insert every subject their document MENTIONED, empty ones included, so that
+    // insertion could serve as the duplicate-subject check. Narrow to the LIVE selections here, once,
+    // giving the restored map the same invariant `apply_selection` maintains in memory: "is this
+    // subject in the map" and "does this subject have a selection" are the same question.
+    for (auto it = selections.begin(); it != selections.end();)
+    {
+        if (it->second.empty())
+            it = selections.erase(it);
+        else
+            ++it;
     }
 
     // The D3 focus. Absent => the boot default (`entity`), which is also what a migrated v1 document

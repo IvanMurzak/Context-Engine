@@ -122,10 +122,7 @@ namespace
     Json data = Json::object();
     data.set("inspector", std::move(model));
     data.set("rawHash", Json(std::string("4242")));
-    Json envelope = Json::object();
-    envelope.set("ok", Json(true));
-    envelope.set("data", std::move(data));
-    return envelope;
+    return clientmock::MockChannel::ok_envelope(std::move(data));
 }
 
 [[nodiscard]] Json play_fact(std::uint64_t origin, const char* state, std::uint64_t sim_tick)

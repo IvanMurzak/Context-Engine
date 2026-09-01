@@ -331,27 +331,24 @@ void bind_selection_focus(SessionFeed& session, InspectorFeed& inspector, SceneT
     // `apply_event`, which the owner loop stops calling before teardown (builtin_panels.h documents
     // the member order that keeps that a non-event). The listener holds no ownership either way.
     InspectorFeed* inspector_ptr = &inspector;
-    SceneTreeFeed* tree_ptr = scenetree;
     session.add_focus_listener(
-        [inspector_ptr, tree_ptr](const std::string& subject)
+        [inspector_ptr, scenetree](const std::string& subject)
         {
-            if (subject != kSelectionSubjectEntity)
-            {
-                // The human is working on something this panel cannot inspect. Showing the last
-                // entity would be a claim about a selection nobody is looking at.
-                (void)inspector_ptr->request_clear();
-                return;
-            }
-            const std::string identity =
-                tree_ptr == nullptr ? std::string() : tree_ptr->panel().selection().identity;
+            // A subject other than `entity` is one this panel cannot inspect, so it has no identity
+            // to show — rendering the last entity would be a claim about a selection nobody is
+            // looking at. `entity` re-points at whatever the Scene tree currently holds, which is
+            // nothing when its provider was refused. Both roads meet at the same clear/request pair
+            // the Scene tree's own selection listener uses, so the L-30 staged-gesture deferral
+            // binds this caller identically (inspector_feed.h § request / § request_clear).
+            const std::string identity = (subject == kSelectionSubjectEntity && scenetree != nullptr)
+                                             ? scenetree->panel().selection().identity
+                                             : std::string();
             if (identity.empty())
             {
                 (void)inspector_ptr->request_clear();
             }
             else
             {
-                // The same seam the Scene tree's selection listener uses, so the L-30 staged-gesture
-                // deferral binds this caller identically (inspector_feed.h § request).
                 (void)inspector_ptr->request(identity);
             }
         });

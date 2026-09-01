@@ -178,8 +178,11 @@ public:
     // true for BOTH facts.
     SelectionOutcome apply_selection(const std::string& subject,
                                      const std::vector<std::string>& ids, SelectionMode mode);
-    // The pre-c1 spelling, kept because `entity` is the default subject and every existing caller
-    // means exactly that. Returns the `changed` half.
+    // The pre-c1 spelling, acting on the default `entity` subject. ⚠ It reports only the `changed`
+    // half and DISCARDS `focus_changed`, which is the conflation `SelectionOutcome` above says a
+    // caller must not make — so it is kept for the tests that pin pre-c1 selection semantics, and a
+    // caller that publishes wire facts wants the typed overload. The daemon (kernel_server.cpp) uses
+    // the typed one for exactly that reason.
     bool apply_selection(const std::vector<std::string>& ids, SelectionMode mode);
 
     // --- selection focus (D3) -------------------------------------------------------------------
