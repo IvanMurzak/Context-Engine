@@ -91,33 +91,12 @@
     cursor: default;
 }
 
-/* `:not([aria-disabled="true"]):not(:disabled)` on every hover/active rule below: the ARIA menu
- * pattern (07 §2, `app.css:389-391`) keeps a disabled item FOCUSABLE and fully mouse-interactive, so
- * without this exclusion a disabled `<li aria-disabled="true">` would still step to panel2/panel3 on
- * hover/press — indistinguishable from an enabled row except for its ink and cursor. Native
- * `:disabled` is excluded too for the same reason, defensively, even though most engines already
- * refuse to match `:hover`/`:active` on a disabled form control. */
-.ctx-widget-listitem:hover:not([aria-disabled="true"]):not(:disabled),
-.ctx-widget-treeitem:hover:not([aria-disabled="true"]):not(:disabled) {
-    background: var(--ctx-colors-panel2);
-}
-
-/* Pressed (a3, 07 §2): one further step than hover, via a DEDICATED theme token (`panel3`) — never a
- * `calc()` over `panel2`, which would be a raw-value bypass wearing a token's clothes (the file
- * header's own rule). Declaration ORDER matters: `:active` must follow `:hover` in the sheet so a
- * genuine click — which matches both pseudo-classes on the same element at once — resolves to the
- * pressed step rather than the hover step at equal specificity. */
-.ctx-widget-listitem:active:not([aria-disabled="true"]):not(:disabled),
-.ctx-widget-treeitem:active:not([aria-disabled="true"]):not(:disabled) {
-    background: var(--ctx-colors-panel3);
-}
-
 /* --- button (`<button>`) ----------------------------------------------------------------------- *
  *
  * `font: inherit` first, so the browser's own control font never leaks in ahead of the tokens the
- * document root carries. The hover step is `panel2` — the elevation model is border + SURFACE STEP,
- * never a shadow (06 section 1 / TOKENS.md section 4), so a hover that brightened by opacity would be
- * off-model as well as off-token. */
+ * document root carries. Its `:hover`/`:active` steps are declared together with listitem/treeitem's
+ * below — the elevation model, the pressed token, and the disabled exclusion are identical across all
+ * three interactive roles. */
 .ctx-widget-button {
     font: inherit;
     padding: 2px 8px;
@@ -128,12 +107,28 @@
     cursor: pointer;
 }
 
+/* `:not([aria-disabled="true"]):not(:disabled)` on every hover/active rule below: the ARIA menu
+ * pattern (07 §2, `app.css:389-391`) keeps a disabled item FOCUSABLE and fully mouse-interactive, so
+ * without this exclusion a disabled element would still step to panel2/panel3 on hover/press —
+ * indistinguishable from an enabled one except for its ink and cursor. Native `:disabled` is excluded
+ * too for the same reason, defensively, even though most engines already refuse to match
+ * `:hover`/`:active` on a disabled form control. One shared pair of rules across all three
+ * interactive roles (listitem, treeitem, button): the elevation model is border + SURFACE STEP, never
+ * a shadow (06 section 1 / TOKENS.md section 4), identically for all three — the same idiom the
+ * disabled/colour-transition sections below use for their own wider role set. */
+.ctx-widget-listitem:hover:not([aria-disabled="true"]):not(:disabled),
+.ctx-widget-treeitem:hover:not([aria-disabled="true"]):not(:disabled),
 .ctx-widget-button:hover:not([aria-disabled="true"]):not(:disabled) {
     background: var(--ctx-colors-panel2);
 }
 
-/* Pressed (a3, 07 §2) — see the listitem/treeitem pair above for why the token, the ordering, and
- * the disabled exclusion. */
+/* Pressed (a3, 07 §2): one further step than hover, via a DEDICATED theme token (`panel3`) — never a
+ * `calc()` over `panel2`, which would be a raw-value bypass wearing a token's clothes (the file
+ * header's own rule). Declaration ORDER matters: `:active` must follow `:hover` in the sheet so a
+ * genuine click — which matches both pseudo-classes on the same element at once — resolves to the
+ * pressed step rather than the hover step at equal specificity. */
+.ctx-widget-listitem:active:not([aria-disabled="true"]):not(:disabled),
+.ctx-widget-treeitem:active:not([aria-disabled="true"]):not(:disabled),
 .ctx-widget-button:active:not([aria-disabled="true"]):not(:disabled) {
     background: var(--ctx-colors-panel3);
 }

@@ -34,7 +34,6 @@ import {
     BUILTIN_LIGHT,
     REDUCED_MOTION_QUERY,
     ThemeEngine,
-    TOKEN_VARIABLE_PREFIX,
     type ThemeDocument,
 } from "../theme.js";
 import { detectDockview, type DockviewApi, type DockviewContentRenderer } from "../dockview.js";
@@ -339,7 +338,7 @@ export const themeDomTests: readonly TestCase[] = [
                 );
                 const panel2Value = window
                     .getComputedStyle(window.document.documentElement)
-                    .getPropertyValue(`${TOKEN_VARIABLE_PREFIX}colors-panel2`);
+                    .getPropertyValue("--ctx-colors-panel2");
                 for (const variable of OVERRIDDEN_ON_HOVER) {
                     tab.style.setProperty(variable, panel2Value);
                 }

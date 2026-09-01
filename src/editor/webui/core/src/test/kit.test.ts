@@ -103,6 +103,9 @@ const COLOUR_EXPECTATIONS: readonly ColourExpectation[] = [
     { role: "textbox", property: "borderTopColor", token: "line" },
 ];
 
+/** The three roles kit.css gives a `:hover`/`:active` step (a3, 07 §2) — shared by both cases below. */
+const PRESSED_ROLES = ["listitem", "treeitem", "button"] as const;
+
 /** Every widget class mounted at once, on its real tag, inside a real (laid-out) container. */
 interface MountedWidgets {
     readonly elements: ReadonlyMap<string, HTMLElement>;
@@ -436,11 +439,11 @@ export const kitTests: readonly TestCase[] = [
             const mounted = mountWidgets();
             try {
                 applyToDocument(engine, BUILTIN_DARK);
-                const sheet = kitStyleSheet();
-                for (const role of ["listitem", "treeitem", "button"] as const) {
+                const rules = [...kitStyleSheet().cssRules];
+                for (const role of PRESSED_ROLES) {
                     const widgetClass = WIDGET_CLASSES[role];
                     for (const pseudo of [":hover", ":active"] as const) {
-                        const rule = [...sheet.cssRules].find(
+                        const rule = rules.find(
                             (candidate) => candidate.cssText.includes(`.${widgetClass}${pseudo}`),
                         ) as CSSStyleRule | undefined;
                         assert(rule !== undefined, `kit.css declares .${widgetClass}${pseudo}`);
@@ -480,10 +483,10 @@ export const kitTests: readonly TestCase[] = [
                 applyToDocument(engine, BUILTIN_DARK);
 
                 // Half 1 — the served rule, on every role that has `:hover`.
-                const sheet = kitStyleSheet();
-                for (const role of ["listitem", "treeitem", "button"] as const) {
+                const rules = [...kitStyleSheet().cssRules];
+                for (const role of PRESSED_ROLES) {
                     const widgetClass = WIDGET_CLASSES[role];
-                    const activeRule = [...sheet.cssRules].find(
+                    const activeRule = rules.find(
                         (rule) => rule.cssText.includes(`.${widgetClass}:active`),
                     ) as CSSStyleRule | undefined;
                     assert(activeRule !== undefined, `kit.css declares .${widgetClass}:active`);
