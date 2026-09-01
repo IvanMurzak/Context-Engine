@@ -1,0 +1,52 @@
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_28e6980742f62e 1554
+  s_782aa603d2bdb2::t_f5ad70e4b53b5a 1346-1369,1379
+  s_782aa603d2bdb2::t_ff462dfac06b22 1541-1553,1555-1558
+  s_782aa603d2bdb2::t_a54d54782491fa 1522,1526-1530
+  s_782aa603d2bdb2::t_7c355704702632 1336-1337
+src/editor/webui/core/src/test/panelinstances.test.ts
+  s_782aa603d2bdb2::t_7db112270c50bf 33,43
+  s_782aa603d2bdb2::t_ed90ae796bf738 564-659
+src/editor/shell/tests/test_panel_host.cpp
+  s_782aa603d2bdb2::t_c86181a778e40f 1015,1019-1021
+  s_782aa603d2bdb2::t_c952789e5575a3 1002-1014,1016-1018,1022-1052,1080-1091
+  s_782aa603d2bdb2::t_a55eff9d8c4e1a 1057-1068,1072,1075-1076
+  s_782aa603d2bdb2::t_6af1f592686c1b 1116
+  s_782aa603d2bdb2::t_9ec61f6186bf3d 1053-1056,1069-1071,1073-1074,1077-1079
+src/editor/shell/include/context/editor/shell/panel_host.h
+  s_782aa603d2bdb2::t_81376761dd5aee 469-480
+src/editor/shell/src/panel_host.cpp
+  s_782aa603d2bdb2::t_d0ee27bbf06d03 437-439,441-457
+  s_782aa603d2bdb2::t_b116df91be18d6 440
+  s_b1a0a0b1864061::t_ee2a768f59854c 895-898,951-954,994-998,1031-1035,1071-1074
+src/editor/webui/core/src/boot.ts
+  s_782aa603d2bdb2::t_921bda38704375 1794
+  s_782aa603d2bdb2::t_c2cb8d3f55facc 1790-1793
+  s_782aa603d2bdb2::t_99cff277ff1272 1771-1778
+src/editor/webui/core/src/test/extpanel.test.ts
+  s_782aa603d2bdb2::t_bbf0c24e00c266 983-1014
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "336a2a5c96d98c40c2443131359a9d42b6ae82c8",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    },
+    "s_b1a0a0b1864061": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "agent-a21816dab3a7d5a8a",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
