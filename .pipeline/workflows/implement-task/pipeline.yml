@@ -5,6 +5,7 @@ description: Implement one Context-Engine task in an isolated run worktree, hard
 
 execution: sequential
 isolation: run
+runner: manager
 base_branch: main
 
 steps:
