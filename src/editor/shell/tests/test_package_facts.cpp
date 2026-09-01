@@ -14,6 +14,7 @@
 //   publish auth     undeclared / mis-namespaced      <->  declared + namespaced PUBLISHES
 //   the grant        ungranted subscribe REFUSED      <->  a CONSENTED one is admitted AND delivers
 //   the filter       a foreign fact is DROPPED        <->  a granted one arrives on the same pump
+//   the reply        the snapshot/catchup is STRIPPED <->  a consented one carries the same fact
 //
 // THE DAEMON HALF IS DRIVEN THROUGH THE REAL `Dispatcher` + `EventStream`, never a stand-in: D5's
 // dedup, retention and reentrancy are properties of the shipping bus or they are properties of
@@ -755,6 +756,71 @@ void the_pump_drops_unconsented_facts_and_delivers_granted_ones()
     CHECK(second.events.size() == 1 && second.events[0].at("subId").as_string() == "sub-1");
 }
 
+// PAIR 6b — THE SUBSCRIBE **REPLY**, the path neither of the other two applications can see.
+// `subscribe` answers with the daemon's current-state snapshot, and since d2 that snapshot carries
+// `packageFacts` (D5 rule 2); a reconnect with `sinceSeq` also gets the replayed `catchup` ring,
+// which the daemon does NOT filter by the subscription's topics. Unfiltered, ONE allowlisted
+// `subscribe` hands a package every retained foreign fact the daemon holds — cheaper than the pump
+// path, because the snapshot arrives whether or not anything is ever published afterwards.
+void the_subscribe_reply_carries_only_consented_facts()
+{
+    World world("reply");
+    // Open the session on a publish of the package's OWN topic, so the wire exists to be
+    // re-programmed BEFORE the subscribe under test runs.
+    CHECK(world.facts->publish("beta-paint", "beta-paint.stroke", fact("dot")).error_code.empty());
+    CHECK(world.wires.channels.size() == 1);
+    if (world.wires.channels.empty())
+    {
+        return;
+    }
+    world.wires.channels[0]->on(
+        "subscribe",
+        [](const clientmock::Request&)
+        {
+            const auto entry = [](const std::string& topic, const std::string& value)
+            {
+                Json out = Json::object();
+                out.set("topic", Json(topic));
+                out.set("payload", fact(value));
+                return out;
+            };
+            Json facts = Json::array();
+            facts.push_back(entry("beta-paint.stroke", "dot"));   // its own
+            facts.push_back(entry("acme-tilemap.brush", "pencil")); // another package's
+            Json snapshot = Json::object();
+            snapshot.set("packageFacts", std::move(facts));
+            Json catchup = Json::array();
+            catchup.push_back(entry("acme-tilemap.brush", "pencil"));
+            catchup.push_back(entry("session", "selection")); // contract-owned: never this filter's
+            Json data = Json::object();
+            data.set("subId", Json(std::string("sub-1")));
+            data.set("snapshot", std::move(snapshot));
+            data.set("catchup", std::move(catchup));
+            return clientmock::MockChannel::ok_envelope(std::move(data));
+        });
+
+    // UNCONSENTED: the foreign fact is stripped from BOTH halves of the reply, while the package's
+    // own fact and the daemon's own stream travel untouched.
+    const BridgeResult first = world.sessions->forward("beta-paint", "subscribe", Json::object());
+    CHECK(first.error_code.empty());
+    const Json& kept = first.value.at("data").at("snapshot").at("packageFacts");
+    CHECK(kept.size() == 1);
+    CHECK(kept.size() == 1 && kept.at(0).at("topic").as_string() == "beta-paint.stroke");
+    const Json& replayed = first.value.at("data").at("catchup");
+    CHECK(replayed.size() == 1);
+    CHECK(replayed.size() == 1 && replayed.at(0).at("topic").as_string() == "session");
+    CHECK(world.sessions->events_filtered() == 2);
+
+    // THE SIBLING: consent, and the IDENTICAL reply now carries the foreign fact through — without
+    // it the assertions above would pass just as happily against a filter that dropped everything.
+    (void)world.grants->decide("beta-paint", {std::string(gc::kCapabilityPackageEvents)});
+    const BridgeResult second = world.sessions->forward("beta-paint", "subscribe", Json::object());
+    CHECK(second.error_code.empty());
+    CHECK(second.value.at("data").at("snapshot").at("packageFacts").size() == 2);
+    CHECK(second.value.at("data").at("catchup").size() == 2);
+    CHECK(world.sessions->events_filtered() == 2); // unchanged — nothing was filtered this round
+}
+
 // The LOUD pair still travels once the filter is in the path — the e13c-2 property this task must
 // not have quietly broken.
 void an_overflow_and_a_daemon_gap_are_still_loud_through_the_filter()
@@ -812,6 +878,7 @@ int main()
     a_cross_package_subscribe_needs_consent_and_a_consented_one_is_admitted();
     a_grant_cannot_exceed_what_the_manifest_declared();
     the_pump_drops_unconsented_facts_and_delivers_granted_ones();
+    the_subscribe_reply_carries_only_consented_facts();
     an_overflow_and_a_daemon_gap_are_still_loud_through_the_filter();
     SHELL_TEST_MAIN_END();
 }

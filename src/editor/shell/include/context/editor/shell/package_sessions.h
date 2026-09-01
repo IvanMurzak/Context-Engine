@@ -293,7 +293,10 @@ public:
     //    declared cannot be published on by anyone.
     //  * `may_subscribe` — may `package_id` RECEIVE facts on `topic`? True for its own topics; true
     //    for another package's only when the manifest declared it in `events.subscribes[]` AND the
-    //    operator consented. It is consulted TWICE, deliberately (see `forward` and `pump`).
+    //    operator consented. It is consulted on all THREE paths a fact can reach a package by,
+    //    deliberately: the `subscribe` REQUEST (`forward`, the good diagnostic), the `subscribe`
+    //    REPLY (`forward` again — the D5 snapshot and the replayed `catchup`, neither of which the
+    //    pump ever sees), and every delivered event (`pump`).
     //
     // std::function rather than a `PackageFactHost&`, for control 1's stated reason: this class must
     // not acquire a dependency on the consent subsystem to open a session, and a value-returning

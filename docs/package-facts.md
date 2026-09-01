@@ -104,12 +104,17 @@ prompt — its own fact is not somebody else's data.
 ### Why the grant needs the delivery filter to bind
 
 `subscribe` with an **empty** topic list means *every* topic, and that request names nothing to refuse.
-So the consent gate is applied **twice**:
+So the consent gate is applied on **all three** paths a fact can reach a package by:
 
 - in `PackageSessionHost::forward`, refusing a `subscribe` that NAMES an unconsented topic (this is
-  the half that produces a good diagnostic, `panel.daemon.topic_not_granted`); and
+  the half that produces a good diagnostic, `panel.daemon.topic_not_granted`);
+- in `PackageSessionHost::forward` again, over the subscribe **reply** — the snapshot's
+  `packageFacts` and, for a `sinceSeq` reconnect, the replayed `catchup` array. Neither travels
+  through the pump, and `replay_since` does not apply the subscription's topic filter at all, so an
+  unfiltered reply would deliver every retained foreign fact in one call — the cheaper bypass, since
+  the snapshot arrives whether or not anything is published afterwards; and
 - in `PackageSessionHost::pump`, dropping any package-namespaced event the package is not entitled to
-  **before** it reaches the buffer (this is the half that actually binds).
+  **before** it reaches the buffer (this is the half that binds the live stream).
 
 A policy-dropped fact is **not** a gap: `gapped` means "your cursor is worthless, re-snapshot", and a
 package that was never entitled to a topic has lost nothing it could act on. Drops are counted

@@ -276,11 +276,19 @@ std::uint64_t EventStream::emit(const std::string& topic, Json payload)
     // `forward_log` — outside the guard, which is exactly the shape that produces a loop nobody can
     // see. RAII rather than a flag pair, so a throwing listener cannot leave the stream permanently
     // "publishing" and refuse every later fact.
+    //
+    // ⚠ IT RESTORES THE PREVIOUS VALUE RATHER THAN CLEARING. A listener that publishes anything at
+    // all (a settle, a forwarded log) nests one `emit` inside another, and a scope that cleared on
+    // exit would DISARM the guard for the whole remainder of the outer fan-out — so the very next
+    // listener could publish a package fact from inside a handler and be accepted, which is the loop
+    // D5 rule 3 exists to refuse. Save-and-restore makes the flag mean "some fan-out is live",
+    // whatever the nesting depth.
     struct PublishScope
     {
         bool& flag;
-        explicit PublishScope(bool& f) : flag(f) { flag = true; }
-        ~PublishScope() { flag = false; }
+        const bool previous;
+        explicit PublishScope(bool& f) : flag(f), previous(f) { flag = true; }
+        ~PublishScope() { flag = previous; }
         PublishScope(const PublishScope&) = delete;
         PublishScope& operator=(const PublishScope&) = delete;
     } scope(publishing_);

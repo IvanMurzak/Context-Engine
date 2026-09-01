@@ -448,7 +448,7 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
     ++calls_forwarded_;
     std::string call_error;
     bool rejected_by_daemon = false;
-    const std::optional<contract::Json> result =
+    std::optional<contract::Json> result =
         client->call(method, params, call_error, &rejected_by_daemon);
     if (!result.has_value())
     {
@@ -463,6 +463,76 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
                                        ? "the daemon refused '" + method + "' for package '" +
                                              package_id + "'"
                                        : "'" + method + "' could not be delivered to the daemon");
+    }
+
+    // ⚠ CONTROL 6's THIRD APPLICATION — THE SUBSCRIBE **REPLY**, which neither of the other two can
+    // see. `subscribe` answers with the daemon's CURRENT-STATE snapshot, and since d2 that snapshot
+    // carries `packageFacts` (D5 rule 2 — retention doubles as snapshot-on-subscribe); a reconnect
+    // carrying `sinceSeq` also gets the replayed `catchup` ring, which `replay_since` does NOT filter
+    // by the subscription's topics. Neither travels through `pump()`, so relaying the reply verbatim
+    // would hand a package every retained foreign fact the daemon holds in ONE allowlisted call —
+    // the consent gate bypassed rather than applied, and by the cheaper of the two paths, since the
+    // snapshot arrives whether or not any further event is ever published. Filtered here with the
+    // SAME predicate the delivery filter uses, so there is one answer to "may this package see this
+    // topic" rather than two that can drift.
+    //
+    // A filtered ENTRY IS NOT A GAP, for the pump filter's reason: `gapped` orders a re-snapshot, and
+    // re-snapshotting would only reproduce the same filtered reply. Counted in `events_filtered()`
+    // instead, which stays the one wiring signal for a human.
+    if (method == "subscribe" && result->is_object() && result->contains("data") &&
+        result->at("data").is_object())
+    {
+        contract::Json data = result->at("data");
+        if (data.contains("snapshot") && data.at("snapshot").is_object() &&
+            data.at("snapshot").contains("packageFacts") &&
+            data.at("snapshot").at("packageFacts").is_array())
+        {
+            contract::Json snapshot = data.at("snapshot");
+            const contract::Json& facts = snapshot.at("packageFacts");
+            contract::Json kept = contract::Json::array();
+            for (std::size_t i = 0; i < facts.size(); ++i)
+            {
+                const contract::Json& entry = facts.at(i);
+                // A malformed entry is DROPPED rather than passed through: an entry whose topic this
+                // Shell cannot read is one it cannot police either, and the deny direction is the
+                // only one that stays a control if the reply's shape ever moves.
+                if (entry.is_object() && entry.contains("topic") && entry.at("topic").is_string() &&
+                    may_receive_fact(package_id, entry.at("topic").as_string()))
+                {
+                    kept.push_back(entry);
+                }
+                else
+                {
+                    ++events_filtered_;
+                }
+            }
+            snapshot.set("packageFacts", std::move(kept));
+            data.set("snapshot", std::move(snapshot));
+        }
+        if (data.contains("catchup") && data.at("catchup").is_array())
+        {
+            const contract::Json& catchup = data.at("catchup");
+            contract::Json kept = contract::Json::array();
+            for (std::size_t i = 0; i < catchup.size(); ++i)
+            {
+                const contract::Json& event = catchup.at(i);
+                // The replayed events are the WIRE envelope, so an entry with no readable topic is a
+                // shape this Shell does not model — passed through exactly as `pump()` passes one,
+                // since `may_receive_fact` is about package topics and nothing else.
+                if (!event.is_object() || !event.contains("topic") ||
+                    !event.at("topic").is_string() ||
+                    may_receive_fact(package_id, event.at("topic").as_string()))
+                {
+                    kept.push_back(event);
+                }
+                else
+                {
+                    ++events_filtered_;
+                }
+            }
+            data.set("catchup", std::move(kept));
+        }
+        result->set("data", std::move(data));
     }
 
     // CONTROL 5's LEDGER, maintained from the DAEMON's own answer rather than from the request: the
@@ -542,7 +612,6 @@ BridgeResult PackageSessionHost::publish_fact(const std::string& package_id,
     contract::Json params = contract::Json::object();
     params.set("topic", contract::Json(topic));
     params.set("payload", payload);
-    ++facts_published_;
     std::string call_error;
     bool rejected_by_daemon = false;
     const std::optional<contract::Json> result =
@@ -559,6 +628,12 @@ BridgeResult PackageSessionHost::publish_fact(const std::string& package_id,
                                        : "the fact on '" + topic +
                                              "' could not be delivered to the daemon");
     }
+    // COUNTED ON THE DAEMON'S ANSWER, not on the attempt: the accessor documents this as a fact the
+    // daemon ACCEPTED (a D5 dedup counts — it was accepted and deliberately emitted nothing), so
+    // incrementing before the call would fold every `topic_undeclared` / `fact_too_large` /
+    // `fact_reentrant` refusal into the same number and leave it unable to answer the question it
+    // exists for.
+    ++facts_published_;
     return BridgeResult::ok(*result);
 }
 
