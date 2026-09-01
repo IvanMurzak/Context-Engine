@@ -782,6 +782,8 @@ export const panelPortTests: readonly TestCase[] = [
                 state: { read: (): unknown => null, write: (): void => {} },
                 // e13c-1: no daemon in this tier, so the fan-in refuses honestly. The port-level
                 // properties this case pins are unaffected by which verbs answer.
+                factPublish: () =>
+                    Promise.resolve({ ok: true, result: { changed: true, seq: 1 } }),
                 daemonCall: () =>
                     Promise.resolve({ ok: false, code: "panel.daemon.unavailable", message: "no daemon" }),
                 request: () => Promise.resolve({ ok: true, result: null }),
@@ -923,6 +925,8 @@ export const panelPortTests: readonly TestCase[] = [
                     },
                 },
                 // e13c-1: as above — this case is about theme + state over the real port.
+                factPublish: () =>
+                    Promise.resolve({ ok: true, result: { changed: true, seq: 1 } }),
                 daemonCall: () =>
                     Promise.resolve({ ok: false, code: "panel.daemon.unavailable", message: "no daemon" }),
                 request: () => Promise.resolve({ ok: true, result: null }),

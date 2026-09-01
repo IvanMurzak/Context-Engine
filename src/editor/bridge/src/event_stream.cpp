@@ -5,8 +5,11 @@
 #include <algorithm>
 #include <atomic>
 #include <chrono>
+#include <cstddef>
 #include <string>
+#include <string_view>
 #include <utility>
+#include <vector>
 
 namespace context::editor::bridge
 {
@@ -72,6 +75,113 @@ bool path_within_scope(const std::string& path, const std::string& scope)
         return true;
     return path.size() > scope.size() && path.compare(0, scope.size(), scope) == 0 &&
            path[scope.size()] == '/';
+}
+
+// --- the package fact bus's helpers (editor-UX d2, D4/D5) ---------------------------------------
+
+// Is `segment` a `[a-z0-9][a-z0-9-]*` name segment? BYTE-FOR-BYTE the grammar
+// `gui/contract/src/registry.cpp`'s `is_name_segment` enforces on a manifest's declared names, and
+// deliberately so: this bus refuses at publish exactly what the registry refused at registration, so
+// a topic can never be declarable in a manifest and unpublishable here (or the reverse). The two
+// cannot share a function — the gui contract library is not on the daemon's closure — so they are
+// held together by this note and by the shell suite, which drives one topic through both.
+bool is_topic_segment(std::string_view segment)
+{
+    if (segment.empty())
+        return false;
+    const auto first = static_cast<unsigned char>(segment.front());
+    if (!((first >= 'a' && first <= 'z') || (first >= '0' && first <= '9')))
+        return false;
+    for (const char ch : segment)
+    {
+        const auto c = static_cast<unsigned char>(ch);
+        if (!((c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-'))
+            return false;
+    }
+    return true;
+}
+
+// How many dot-separated segments `name` has, or 0 when any of them is malformed. A leading dot, a
+// trailing dot and a doubled dot all produce an EMPTY segment, which `is_topic_segment` refuses — so
+// the three need no cases of their own (registry.cpp § is_segmented_name states the same).
+std::size_t topic_segment_count(const std::string& name)
+{
+    std::size_t count = 0;
+    std::size_t start = 0;
+    while (true)
+    {
+        const std::size_t dot = name.find('.', start);
+        const std::string_view segment(name.data() + start,
+                                       (dot == std::string::npos ? name.size() : dot) - start);
+        if (!is_topic_segment(segment))
+            return 0;
+        ++count;
+        if (dot == std::string::npos)
+            return count;
+        start = dot + 1;
+    }
+}
+
+// A CANONICAL serialization of `value`: identical to `dump(0)` except that object members are
+// emitted in sorted key order, recursively.
+//
+// ⚠ THIS IS WHAT MAKES D5's DEDUP — AND THEREFORE THE CYCLE BREAKER — ROBUST. `Json` preserves
+// INSERTION order (json.h says so), so `{"a":1,"b":2}` and `{"b":2,"a":1}` dump to different bytes
+// while being the same state. Comparing raw dumps would let a package defeat the whole loop
+// protection by accident: any producer that builds its payload from an unordered map re-emits the
+// same fact with a different member order on every hop, every publish reads as a CHANGE, and the
+// A -> B -> A mirror spins exactly as it would with no dedup at all. Sorting here costs one
+// serialization per publish and removes that entire failure mode.
+//
+// It is deliberately NOT the R-FILE-001 canonical serializer: that one lives in `src/editor/serializer`,
+// which the bridge does not (and must not) link, and its job is the on-disk byte form of AUTHORED
+// data. What this needs is only a stable EQUALITY key for an ephemeral fact, so a local, dependency-free
+// projection is the honest tool.
+std::string canonical_json(const Json& value)
+{
+    switch (value.type())
+    {
+    case Json::Type::array:
+    {
+        std::string out = "[";
+        for (std::size_t i = 0; i < value.size(); ++i)
+        {
+            if (i != 0)
+                out += ',';
+            out += canonical_json(value.at(i));
+        }
+        out += ']';
+        return out;
+    }
+    case Json::Type::object:
+    {
+        std::vector<const std::pair<std::string, Json>*> members;
+        members.reserve(value.object_members().size());
+        for (const std::pair<std::string, Json>& member : value.object_members())
+            members.push_back(&member);
+        std::sort(members.begin(), members.end(),
+                  [](const std::pair<std::string, Json>* a, const std::pair<std::string, Json>* b)
+                  { return a->first < b->first; });
+        std::string out = "{";
+        bool first = true;
+        for (const std::pair<std::string, Json>* member : members)
+        {
+            if (!first)
+                out += ',';
+            first = false;
+            // The KEY is emitted through Json's own string dumper so escaping stays one
+            // implementation — a hand-rolled quote here would diverge on the first control
+            // character and produce two canonical forms of one payload.
+            out += Json(member->first).dump(0);
+            out += ':';
+            out += canonical_json(member->second);
+        }
+        out += '}';
+        return out;
+    }
+    default:
+        return value.dump(0);
+    }
 }
 } // namespace
 
@@ -158,9 +268,32 @@ std::uint64_t EventStream::emit(const std::string& topic, Json payload)
     ring_.push_back(e);
     prune_ring();
 
+    // ⚠ THE GUARD SPANS THE WHOLE FAN-OUT, AND IT IS SET FOR **EVERY** PUBLISH — a settle, a
+    // forwarded kernel log, a session fact, a package fact. D5's reentrancy rule is "a publish
+    // issued from inside an event handler is refused", and the only honest reading of "inside a
+    // handler" is "while this stream is delivering". Arming it only around `publish_package_fact`
+    // would leave the reachable in-process re-entry — a kernel EventBus handler running under
+    // `forward_log` — outside the guard, which is exactly the shape that produces a loop nobody can
+    // see. RAII rather than a flag pair, so a throwing listener cannot leave the stream permanently
+    // "publishing" and refuse every later fact.
+    struct PublishScope
+    {
+        bool& flag;
+        explicit PublishScope(bool& f) : flag(f) { flag = true; }
+        ~PublishScope() { flag = false; }
+        PublishScope(const PublishScope&) = delete;
+        PublishScope& operator=(const PublishScope&) = delete;
+    } scope(publishing_);
+
     for (Subscriber* sub : subscribers_)
         if (sub != nullptr && sub->accepts(e))
             sub->offer(e);
+
+    // A COPY of the listener vector, for the reason every fan-out over a mutable container needs
+    // one: a listener may add or drop one, which would invalidate the iterator mid-delivery.
+    for (const PublishListener& listener : std::vector<PublishListener>(publish_listeners_))
+        if (listener)
+            listener(e);
 
     return e.seq;
 }
@@ -218,12 +351,199 @@ void EventStream::remove_subscriber(Subscriber* sub)
     }
 }
 
+void EventStream::add_publish_listener(PublishListener listener)
+{
+    if (listener)
+        publish_listeners_.push_back(std::move(listener));
+}
+
+// --- the package fact bus (editor-UX d2, D4/D5) --------------------------------------------------
+
+std::string EventStream::package_topic_defect(const std::string& topic)
+{
+    if (topic.empty())
+        return "a package topic name is empty";
+    if (topic.size() > kMaxPackageTopicLength)
+        return "package topic \"" + topic.substr(0, kMaxPackageTopicLength) +
+               "…\" exceeds " + std::to_string(kMaxPackageTopicLength) + " bytes";
+    const std::size_t segments = topic_segment_count(topic);
+    if (segments == 0)
+        return "\"" + topic + "\" is not a valid topic name (lowercase dotted segments)";
+    // THE TWO-SEGMENT FLOOR IS THE CONTRACT-TOPIC DEFENCE, not a style rule — see the header. Every
+    // core topic (`files`, `derivation`, `diagnostics`, `session`, `clients`, `log`) is one bare
+    // segment, so refusing a single-segment name is what makes it structurally impossible for a
+    // package to forge a `session` fact through this bus.
+    if (segments < 2)
+        return "\"" + topic +
+               "\" is not namespaced under any package (a package fact topic is "
+               "\"<package-id>.<name>\"; an unnamespaced name is contract-owned)";
+    return {};
+}
+
+EventStream::PackageTopic* EventStream::find_package_topic(const std::string& topic)
+{
+    for (PackageTopic& entry : package_topics_)
+        if (entry.name == topic)
+            return &entry;
+    return nullptr;
+}
+
+const EventStream::PackageTopic* EventStream::find_package_topic(const std::string& topic) const
+{
+    for (const PackageTopic& entry : package_topics_)
+        if (entry.name == topic)
+            return &entry;
+    return nullptr;
+}
+
+bool EventStream::declare_package_topic(const std::string& topic, std::string& error)
+{
+    error.clear();
+    if (const std::string defect = package_topic_defect(topic); !defect.empty())
+    {
+        error = defect;
+        return false;
+    }
+    // IDEMPOTENT, AND THE RETAINED VALUE SURVIVES. A re-declare happens on every reconnect of every
+    // package that owns the topic; resetting the value there would silently drop the retained state
+    // a late subscriber depends on, which is D5 rule 2 undone by the bookkeeping rather than by the
+    // delivery.
+    if (find_package_topic(topic) != nullptr)
+        return true;
+    if (package_topics_.size() >= kMaxPackageTopics)
+    {
+        error = "the package-topic registry is full (" + std::to_string(kMaxPackageTopics) +
+                " topics); \"" + topic + "\" was not registered";
+        return false;
+    }
+    PackageTopic entry;
+    entry.name = topic;
+    package_topics_.push_back(std::move(entry));
+    return true;
+}
+
+std::vector<std::string> EventStream::package_topics() const
+{
+    std::vector<std::string> out;
+    out.reserve(package_topics_.size());
+    for (const PackageTopic& entry : package_topics_)
+        out.push_back(entry.name);
+    std::sort(out.begin(), out.end());
+    return out;
+}
+
+bool EventStream::is_package_topic_declared(const std::string& topic) const
+{
+    return find_package_topic(topic) != nullptr;
+}
+
+const Json* EventStream::retained_package_fact(const std::string& topic) const
+{
+    const PackageTopic* entry = find_package_topic(topic);
+    return (entry != nullptr && entry->has_value) ? &entry->value : nullptr;
+}
+
+EventStream::PackageFactResult EventStream::publish_package_fact(const std::string& topic,
+                                                                 Json payload)
+{
+    PackageFactResult result;
+    // ⚠ D5 RULE 3 IS CHECKED FIRST, BEFORE THE TOPIC IS EVEN LOOKED UP. A reentrant publish must be
+    // refused for BEING reentrant, not for whatever else happens to be wrong with it — a package
+    // author who gets `package.topic_undeclared` from inside a handler debugs a manifest that is
+    // fine, and the loop the guard exists to name stays invisible.
+    if (publishing_)
+    {
+        ++package_facts_refused_;
+        result.error_code = kErrPackageFactReentrant;
+        result.message = "a package fact may not be published from inside an event handler (the "
+                         "publish on \"" +
+                         topic +
+                         "\" was refused): a fact is a STATE, and a handler that publishes in "
+                         "response to one is the loop shape D5 makes diagnosable";
+        return result;
+    }
+    PackageTopic* entry = find_package_topic(topic);
+    if (entry == nullptr)
+    {
+        ++package_facts_refused_;
+        // The GRAMMAR defect is reported when there is one, because "malformed" and "nobody
+        // declared it" send an author to two different files, and a single code would make one of
+        // them read the wrong one.
+        const std::string defect = package_topic_defect(topic);
+        result.error_code = defect.empty() ? kErrPackageTopicUndeclared : kErrPackageTopicInvalid;
+        result.message = defect.empty() ? ("no package declared the topic \"" + topic +
+                                           "\" on this daemon (a topic is registered from its "
+                                           "declaring package's manifest at load)")
+                                        : defect;
+        return result;
+    }
+    std::string canonical = canonical_json(payload);
+    if (canonical.size() > kMaxPackageFactBytes)
+    {
+        ++package_facts_refused_;
+        result.error_code = kErrPackageFactTooLarge;
+        result.message = "the fact published on \"" + topic + "\" is " +
+                         std::to_string(canonical.size()) + " bytes, over the " +
+                         std::to_string(kMaxPackageFactBytes) +
+                         "-byte per-topic ceiling; nothing was retained or delivered";
+        return result;
+    }
+    // ⚠ D5 RULE 1 — THE CYCLE BREAKER. A repeat is ACCEPTED and emits NOTHING: no seq is consumed,
+    // no ring entry is written, no subscriber is offered anything. That is what makes a refusal, a
+    // dedup and "the publish never happened" indistinguishable from every subscriber's side, and it
+    // is what makes an A -> B -> A mirror converge after ONE round.
+    if (entry->has_value && entry->canonical == canonical)
+    {
+        ++package_facts_deduplicated_;
+        result.accepted = true;
+        result.changed = false;
+        return result;
+    }
+    entry->has_value = true;
+    entry->value = payload;
+    entry->canonical = std::move(canonical);
+    result.accepted = true;
+    result.changed = true;
+    result.seq = emit(topic, std::move(payload));
+    return result;
+}
+
 Json EventStream::snapshot() const
 {
     Json out = Json::object();
     out.set("incarnationId", Json(incarnation_id_));
     out.set("generation", Json(generation_));
     out.set("lastSeq", Json(last_seq_));
+    // D5 RULE 2 — SNAPSHOT-ON-SUBSCRIBE, WHICH FALLS OUT OF RETENTION RATHER THAN BEING A SECOND
+    // MECHANISM. A panel mounted mid-session reads the CURRENT value of every package topic out of
+    // its own `subscribe` reply, so "subscribe, then separately ask for current state" — the race
+    // the `editor.ui` bus's model exists to remove — does not reappear here.
+    //
+    // An ARRAY OF OBJECTS CARRYING THEIR KEY, never a map keyed by topic: the convention the camera
+    // array and c1's `selections` already follow, and the one that keeps a topic name pure data
+    // rather than a JSON member name. Only topics with a value appear — a DECLARED topic nobody has
+    // published on is deliberately absent, which is what makes "a topic with no publish yet
+    // delivers nothing" an assertion that can fail.
+    //
+    // ⚠ SORTED, so two daemons holding the same facts answer byte-identically regardless of the
+    // order packages happened to register in. The registry is insertion-ordered (declaration order
+    // is load order, which is directory order), so an unsorted projection would make this reply
+    // depend on the filesystem.
+    std::vector<const PackageTopic*> valued;
+    for (const PackageTopic& entry : package_topics_)
+        if (entry.has_value)
+            valued.push_back(&entry);
+    std::sort(valued.begin(), valued.end(),
+              [](const PackageTopic* a, const PackageTopic* b) { return a->name < b->name; });
+    Json facts = Json::array();
+    for (const PackageTopic* entry : valued)
+    {
+        Json fact = Json::object();
+        fact.set("topic", Json(entry->name));
+        fact.set("payload", entry->value);
+        facts.push_back(std::move(fact));
+    }
+    out.set("packageFacts", std::move(facts));
     return out;
 }
 

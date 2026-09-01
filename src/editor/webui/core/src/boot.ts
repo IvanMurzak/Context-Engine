@@ -107,6 +107,7 @@ import {
     PackageEventPump,
     type PackageEventBatch,
 } from "./packageevents.js";
+import { makePackageFactPublish } from "./packagefacts.js";
 import { createNotificationHost, type NotificationHost } from "./notifications.js";
 import {
     SETTINGS_PANEL_ID,
@@ -722,6 +723,12 @@ async function startPanels(
                     // per binding — never handed a package id at call time — so `bridge.call` has no
                     // argument by which one package could ride another's baseline session.
                     daemonCall: makePackageDaemonCall(bridge, binding.packageId),
+                    // THE d2 FACT PUBLISHER, with THIS panel's package closed over — the same
+                    // structural property as `daemonCall` above, so `bridge.facts.publish` has no
+                    // argument by which one package could publish under another's name. The topic
+                    // itself is checked against that package's MANIFEST at the Shell, which is the
+                    // only layer that has read one.
+                    factPublish: makePackageFactPublish(bridge, binding.packageId),
                     request: binding.request,
                 }),
         });

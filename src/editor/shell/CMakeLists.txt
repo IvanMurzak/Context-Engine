@@ -60,6 +60,9 @@ add_library(context_editor_shell STATIC
     src/package_grants.cpp    # e13c-4: the PERSISTED per-package grant store + the L-49 install-consent
                               #         surface - the one producer of a non-default SandboxPolicy, and
                               #         what the derived AttachOptions::scope is read from (08 §2-§3)
+    src/package_facts.cpp     # editor-UX d2: the PACKAGE FACT BUS's Shell half - panel.facts.publish,
+                              #         the events.publishes[] declaration check, and the CONSENTED
+                              #         cross-package subscription grant (D4/D5; 02 §C / 05 §3)
     src/editor_state_bridge.cpp  # e05d2: the editor.state.*/editor.regions.* surface (03 §1 / §6)
     src/keybindings_bridge.cpp   # e07c: the keybindings.get read/watch surface (05 §6 / 03 §6)
     src/user_config.cpp          # e06d: ~/.context/config.json - the SHELL is its single writer (C-F14)
@@ -260,6 +263,10 @@ set(_context_shell_tests
                        #         registry's independent refusal of a hand-built violation, the
                        #         consent surface, and the DERIVED attach scope proved against the
                        #         REAL dispatcher in BOTH directions
+    test_package_facts     # editor-UX d2: publish authorization (declared/undeclared, namespaced/not),
+                       #         the consented cross-package subscribe in BOTH directions + the
+                       #         manifest clamp, the delivery filter, and D5's dedup / snapshot /
+                       #         reentrancy driven through the REAL dispatcher + event stream
     test_editor_state_bridge  # e05d2: layout/panels publish+restore round-trip + region-map emission
     test_keybindings_bridge   # e07c: file read/watch/generation + keybindings.get over the router
     test_themes_bridge        # e06b: directory watch/generation + themes.get over the router

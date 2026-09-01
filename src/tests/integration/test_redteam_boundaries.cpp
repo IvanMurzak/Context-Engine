@@ -194,6 +194,20 @@ int main()
             {"editor.pause", Scope::session_control},
             {"editor.stop", Scope::session_control},
             {"editor.step", Scope::session_control},
+            // editor-UX d2 — the PACKAGE FACT BUS, on the read/query BASELINE, and this row is a
+            // DECISION rather than a default (scope.cpp states it at length). A package's daemon
+            // session attaches at the deny-all baseline, so a higher classification would make the
+            // bus reachable only by a package the operator had also granted `session_control` —
+            // i.e. the authority to drive play state and the human's selection, bought to broadcast
+            // a fact. What keeps the baseline honest is that neither verb can touch anything a
+            // scope protects: the topic grammar refuses every unnamespaced (contract-owned) name,
+            // so no client at any scope can forge a `session` / `files` / `diagnostics` fact
+            // (asserted in editor-shell-test_package_facts, against the real dispatcher);
+            // `declare` confers nothing on its own; and both are bounded against exhaustion. The
+            // "may THIS package publish THAT topic" question is the Shell's, because the daemon has
+            // never read a manifest.
+            {"events.declare", Scope::read_query},
+            {"events.publish", Scope::read_query},
         };
         for (const contract::VerbSpec& v : contract::Registry::instance().verbs())
         {

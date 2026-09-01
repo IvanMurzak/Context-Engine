@@ -504,11 +504,22 @@ WRITE_NOTICE_CONSTANTS = (
 # files name that hazard in their own headers (`package_events.h` § kPanelEventsPollMethod,
 # `packageevents.ts` § PANEL_EVENTS_POLL_METHOD) and neither could catch it alone: the C++ constant is
 # pinned by its own suite and the TS one by its own, and nothing compared them until this entry.
+# The editor-UX d2 PACKAGE FACT PUBLISH route joins them, and its symptom is the third distinct one
+# in the family. A drift makes every `bridge.facts.publish` answer `unknown_method`, which
+# `PanelPortBridge` maps onto `verb_not_granted` — INDISTINGUISHABLE, from inside the frame, from "this
+# build has no fact bus at all". So every publishing package goes silent, every consented subscriber
+# keeps waiting for a fact that is never sent, and — because a package fact is a STATE with retention —
+# the last value each subscriber saw stays on screen forever, which reads as stale data rather than as
+# a broken channel. Both halves name the parity in their own headers (`package_facts.h`
+# § kPanelFactsPublishMethod, `packagefacts.ts` § PANEL_FACTS_PUBLISH_METHOD) and neither can catch it
+# alone: the C++ side is pinned by its own suite and the TS side by its own.
 PACKAGE_SESSION_CONSTANTS = (
     ("panel.daemon.call fan-in method", "package_sessions.h", "kPanelDaemonCallMethod",
      "PANEL_DAEMON_CALL_METHOD"),
     ("panel.events.poll fan-out drain method", "package_events.h", "kPanelEventsPollMethod",
      "PANEL_EVENTS_POLL_METHOD"),
+    ("panel.facts.publish package-fact publish method", "package_facts.h",
+     "kPanelFactsPublishMethod", "PANEL_FACTS_PUBLISH_METHOD"),
 )
 
 # The M9 e13c-4 INSTALL-CONSENT READ joins them for the same reason, and its symptom is the inverse of

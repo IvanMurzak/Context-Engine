@@ -209,6 +209,18 @@ inline constexpr const char* kCapabilityFileWrite = "file_write";
 inline constexpr const char* kCapabilitySessionControl = "session_control";
 inline constexpr const char* kCapabilityBuildInstall = "build_install";
 inline constexpr const char* kCapabilityUiEvents = "ui_events";
+// The editor-UX d2 (D4) PACKAGE FACT grant: may this contribution SUBSCRIBE to ANOTHER package's
+// declared fact topic? Like `ui_events` it corresponds to NO daemon scope — a package fact rides the
+// ordinary baseline subscription, and the Shell decides which topics reach which package
+// (package_facts.h) — so granting it can never widen a package's daemon session.
+//
+// ⚠ IT IS ONE TOKEN FOR "may subscribe to foreign topics AT ALL", NOT one per topic, and the
+// per-topic answer is the MANIFEST's: the grant is clamped to `events.subscribes[]`, which the
+// registry already forces to be namespaced under SOMEBODY. Two clamps, and both are needed — a
+// per-topic token vocabulary would put package-chosen strings into the closed capability set, which
+// is exactly what `capability_supported` exists to prevent, while the token alone would let a
+// consented package subscribe to a topic it never declared an interest in.
+inline constexpr const char* kCapabilityPackageEvents = "package_events";
 
 // Is `capability` on the closed manifest capability allowlist above?
 [[nodiscard]] bool capability_supported(const std::string& capability);

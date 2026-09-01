@@ -171,6 +171,26 @@ Scope required_scope_for(const std::string& rpc_method)
         rpc_method == "editor.play" || rpc_method == "editor.pause" ||
         rpc_method == "editor.stop" || rpc_method == "editor.step")
         return Scope::session_control;
+    // The editor-UX d2 PACKAGE FACT BUS (`events.declare` / `events.publish`) is deliberately NOT
+    // listed above: both stay on the read/query BASELINE, and that is a decision with a reason, not
+    // an omission.
+    //
+    // A package's daemon session attaches at the deny-all baseline (`kPackageSessionScope`, "read"),
+    // so classifying either verb higher would make the bus unreachable from the only caller it
+    // exists for unless an operator granted a package `session_control` — i.e. the authority to
+    // drive play state and the human's selection — in exchange for a broadcast fact. That trade is
+    // strictly worse for the operator than the baseline.
+    //
+    // What makes the baseline honest here is that neither verb can reach anything a scope protects.
+    // `EventStream::package_topic_defect` refuses every single-segment name, and every
+    // contract-owned topic (`files`, `derivation`, `diagnostics`, `session`, `clients`, `log`) IS a
+    // single segment — so no client, at any scope, can forge a core fact through this surface.
+    // `declare` confers nothing on its own, `publish` writes no authored file and touches no session
+    // state, and both are bounded against exhaustion (event_stream.h § the bounds). The
+    // package-level authorization question ("may THIS package publish THAT topic") is the Shell's,
+    // where the manifests are (package_facts.h) — R-SEC-007's dispatcher gate is not the right
+    // control for a fact whose owner the daemon cannot see.
+    //
     // describe, the operational `query` read, the M9 e05d3 editor-panel reads (`editor.scene-tree` /
     // `editor.inspect` — composed-world projections the Shell's panels hydrate from; they plan no
     // write and touch no session), the M9 e1 `editor.files` project-file-tree read (same reasoning:

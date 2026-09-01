@@ -1040,6 +1040,47 @@ const std::vector<ErrorCode>& catalog()
          "unsupported version; it was renamed aside and the window layout, panel state and session "
          "undo history were reset to defaults.",
          false, kExitValidation, "R-BRIDGE-008"},
+        // --- editor-UX d2: the PACKAGE FACT BUS (D4/D5) -----------------------------------------
+        // The five refusals `events.declare` / `events.publish` can answer with. The STRINGS are
+        // defined in src/editor/bridge/include/context/editor/bridge/event_stream.h as
+        // bridge::kErrPackageTopic* / kErrPackageFact* (the promote-a-local-string pattern of
+        // bridge::kAttachDeniedCode and the install.* family), so the bridge stays off this layer
+        // while the codes remain introspectable through `describe`.
+        //
+        // ⚠ THEY ARE FIVE RATHER THAN ONE ON PURPOSE, and the split is the same one
+        // `package_sessions.h` states for its own refusals: a malformed topic is a manifest bug, an
+        // undeclared one is a load-order/installation fact, a full registry and an oversized fact
+        // are bounds a package can design around, and a reentrant publish is a LOOP the author has
+        // to see to fix. Collapsing them would make all five read as "it did not work", which is
+        // exactly the state D5 rule 3 exists to lift a package author out of.
+        //
+        // All five are deterministic (retriable=false) — the same call re-refuses — and
+        // validation-class rather than permission-class: none of them is a scope or consent
+        // refusal (`scope.denied` and `consent_required` remain the codes for those), they are
+        // statements that the REQUEST cannot be honoured as written. Additive-only (protocolMajor
+        // stays 1): NEW rows at the END, nothing reordered or renamed.
+        {"package.topic_invalid",
+         "The package fact topic is not a valid `<package-id>.<name>` — lowercase dotted segments, "
+         "at least two, within the length bound. An unnamespaced name is contract-owned and can "
+         "never be published on by a package.",
+         false, kExitValidation, "R-CLI-013"},
+        {"package.topic_undeclared",
+         "No package registered that fact topic on this daemon; a topic is registered from its "
+         "declaring package's manifest at load, and the bus is deny-by-default (publishing never "
+         "creates a topic).",
+         false, kExitValidation, "R-CLI-013"},
+        {"package.topic_capacity",
+         "The daemon's package-topic registry is full; the topic was not registered.",
+         false, kExitValidation, "R-CLI-013"},
+        {"package.fact_too_large",
+         "The published package fact exceeds the per-topic retained-payload ceiling; nothing was "
+         "retained and nothing was delivered.",
+         false, kExitValidation, "R-CLI-013"},
+        {"package.fact_reentrant",
+         "A package fact was published from INSIDE an event handler. A fact is a state, not an "
+         "edge, and a handler that publishes in response to one is the loop shape the bus refuses "
+         "rather than hangs on; publish from outside the handler instead.",
+         false, kExitValidation, "R-CLI-013"},
     };
     return the_catalog;
 }

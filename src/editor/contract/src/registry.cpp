@@ -1126,6 +1126,56 @@ Registry::Registry()
          {"seq", "generation", true, "The highest event seq the client has processed."}},
         /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
 
+    // --- editor-UX d2: the PACKAGE FACT BUS (D4/D5, design 02 §C / 05 §3) -------------------------
+    // How two independent packages exchange facts WITHOUT depending on each other: a package
+    // declares a topic in its manifest, the loader REGISTERS it here, the package publishes a STATE
+    // onto it, and any consented subscriber receives it over the ordinary R-CLI-015 subscription
+    // above. Registered in the ONE registry so `describe` enumerates the surface and CLI ≡ RPC ≡ MCP
+    // parity holds (R-CLI-009) — a package topic then appears in `describe`'s `eventTopics` LIVE,
+    // through the same `TopicSpec` shape the engine topics use.
+    //
+    // Operational, like every other daemon-served verb here: the bus is state a LIVE daemon holds,
+    // so a one-shot CLI invocation is refused `contract.operational_only`. Additive under
+    // protocolMajor 1 — NEW verbs at this anchor, nothing reordered or renamed, and the freeze gate
+    // excludes operational verbs so neither joins the frozen v1 surface.
+    //
+    // ⚠ BOTH SIT ON THE read/query BASELINE, WHICH IS A DECISION AND NOT AN OVERSIGHT. A package's
+    // daemon session attaches at the deny-all baseline (`kPackageSessionScope`), so classifying
+    // either as `session_control` would make the whole bus unreachable from the one caller it exists
+    // for, unless the operator granted a package the authority to drive play state and selection —
+    // an enormous grant to buy a broadcast fact. What keeps the baseline safe is that NEITHER verb
+    // can touch anything a scope protects: the grammar refuses every unnamespaced (contract-owned)
+    // topic, so no client can forge a `session` / `files` / `diagnostics` fact; `declare` confers
+    // nothing on its own (a topic with no value delivers nothing); and both are bounded against
+    // exhaustion (event_stream.h § the bounds). The "may THIS package publish THAT topic" question
+    // is the Shell's, because the daemon has never read a manifest (package_facts.h).
+    verbs_.push_back(make_verb(
+        "", "events", "declare",
+        "Register package FACT TOPICS on the daemon's package-topic registry (editor-UX D4). A "
+        "topic must be `<package-id>.<name>` — lowercase dotted segments, at least two — so it can "
+        "never collide with a contract-owned topic. Idempotent, and a re-declare keeps the retained "
+        "value. Declaring confers nothing on its own: an undeclared topic simply cannot be "
+        "published on, which is what makes the bus deny-by-default.",
+        /*params=*/
+        {{"topics", "json", true, "Array of package topic names to register."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
+    verbs_.push_back(make_verb(
+        "", "events", "publish",
+        "Publish one package FACT onto a declared topic (editor-UX D4/D5). A fact is a STATE, not "
+        "an edge: the daemon RETAINS the last value per topic and refuses to publish a repeat "
+        "(answering `changed:false` and emitting nothing), which is what makes an A -> B -> A "
+        "mirroring pair converge after one round instead of looping — origin echo suppression "
+        "cannot, because two packages hold different origins. Retention doubles as "
+        "snapshot-on-subscribe: `subscribe`'s snapshot carries `packageFacts`, so a panel opened "
+        "later sees current state with no subscribe-then-ask race. Publishing from inside an event "
+        "handler is REFUSED with a diagnostic. ACCEPTED COST: pure edge events are not expressible "
+        "— model them as state (a counter, a token).",
+        /*params=*/
+        {{"topic", "string", true, "The declared package topic to publish on."},
+         {"payload", "json", true, "The fact's value — a STATE, deduplicated against the retained one."}},
+        /*flags=*/{}, /*implemented=*/true, /*stability=*/"operational"));
+
     verbs_.push_back(make_verb(
         "", "", "reconcile",
         "Fold external (out-of-band) edits into the derived world: drain watcher hints and force "

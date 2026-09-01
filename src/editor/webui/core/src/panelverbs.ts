@@ -196,6 +196,26 @@ export const PANEL_VERB_EVENTS_UNSUBSCRIBE = "bridge.events.unsubscribe";
 export const PANEL_VERB_EVENTS_ACK = "bridge.events.ack";
 
 /**
+ * Publish ONE package FACT on a topic this package DECLARED (editor-UX d2, D4/D5).
+ *
+ * Params `{topic, payload}`; answers the daemon's own `{topic, changed, seq}`.
+ *
+ * WARNING: `changed:false` IS A SUCCESS, NOT A REFUSAL, and a package author who reads it as one
+ * will build a retry loop around the very mechanism that exists to stop one. A package fact is a
+ * STATE: the daemon retains the last value per topic and refuses a REPEAT, which is what makes an
+ * A -> B -> A mirroring pair converge after one round (origin echo suppression cannot do it — two
+ * packages hold separate daemon sessions and therefore different origins). The accepted cost is
+ * that pure EDGE events are not expressible; model an edge as state (a counter, a token).
+ *
+ * WARNING: ITS OWN VERB, NOT `bridge.call("events.publish", …)`, AND THAT IS THE SECURITY CONTENT
+ * OF D4. `bridge.call` forwards its method and params VERBATIM to the Shell allowlist, so an
+ * allowlist entry would let a panel publish on ANY registered topic — another package's included —
+ * with the declaration check standing beside the path rather than on it. The Shell's
+ * `panel.facts.publish` handler is the one door and checks the topic against the manifest it read.
+ */
+export const PANEL_VERB_FACTS_PUBLISH = "bridge.facts.publish";
+
+/**
  * The HOST -> PANEL verb: "run this command of yours".
  *
  * NO `bridge.` PREFIX, deliberately — see the file header's two-directions note. This is what the
@@ -531,6 +551,45 @@ export interface PanelDaemonOutcome {
 export type PanelDaemonCall = (method: string, params: unknown) => Promise<PanelDaemonOutcome>;
 
 /**
+ * The longest `topic` a `bridge.facts.publish` request may name.
+ *
+ * MATCHED TO the daemon's own `kMaxPackageTopicLength` (event_stream.h) rather than picked here: a
+ * bound tighter than the daemon's would refuse a topic a manifest could legally declare, and a
+ * looser one would forward a string the daemon then refuses — either way the two layers would
+ * disagree about what a legal topic is, which is how a package ends up unable to publish something
+ * its own manifest declared. Bounded at all for `PANEL_DAEMON_METHOD_MAX_LENGTH`'s reason: an
+ * untrusted peer chooses the string, it is echoed in refusals, and it travels to the Shell.
+ */
+export const PANEL_FACT_TOPIC_MAX_LENGTH = 128;
+
+/**
+ * What ONE `bridge.facts.publish` came back as — a VALUE, never a rejection (`PanelDaemonOutcome`'s
+ * contract, for the same reason).
+ */
+export interface PanelFactOutcome {
+    readonly ok: boolean;
+    /** Present when `ok`. The daemon's `{topic, changed, seq}`, unwrapped by the Shell bridge. */
+    readonly result?: unknown;
+    /**
+     * Present when NOT `ok` — the SHELL's or the DAEMON's own machine-readable code
+     * (`panel.facts.topic_not_declared`, `package.fact_reentrant`, `package.fact_too_large`, …),
+     * verbatim. The five refusals need five different fixes, so none is re-classified here.
+     */
+    readonly code?: string;
+    /** Present when NOT `ok`. SHELL-AUTHORED prose; the daemon's own message is never relayed. */
+    readonly message?: string;
+}
+
+/**
+ * Publish one fact on THIS PANEL's package (editor-UX d2).
+ *
+ * TAKES NO PACKAGE ARGUMENT — the same structural property as `PanelDaemonCall` above, and the same
+ * reason: `boot.ts` binds one per panel with the package already closed over, so no request can
+ * publish under another package's name.
+ */
+export type PanelFactPublish = (topic: string, payload: unknown) => Promise<PanelFactOutcome>;
+
+/**
  * What ONE `bridge.ui.subscribe` answered (M9 e13c-4). `diagnostic` is empty exactly when accepted.
  *
  * MIRRORS `PackageUiSubscribeResult` (packageui.ts) STRUCTURALLY rather than importing it, for the
@@ -699,6 +758,17 @@ export interface PanelVerbContext {
      * see the file header's fan-in note.
      */
     readonly daemonCall: PanelDaemonCall;
+    /**
+     * THIS PANEL's package FACT publisher (editor-UX d2) — supplied per renderer by `boot.ts`, with
+     * the package already closed over.
+     *
+     * A CLOSURE, not a lookup, for the reason `daemonCall` is one: `bridge.facts.publish` takes no
+     * package argument precisely because THIS FUNCTION is the scope, so no request can publish
+     * under another package's name. Which TOPICS it may carry is the Shell's manifest check, not
+     * this module's — a second copy here would be a drift, and a drift between the two reads as a
+     * grant.
+     */
+    readonly factPublish: PanelFactPublish;
     /** Issue a request DOWN this panel's port (the `commands.invoke` direction). */
     readonly request: (verb: string, params?: unknown) => Promise<PanelBridgeReply>;
 }
@@ -1116,6 +1186,48 @@ export function makePanelBridgeVerbs(context: PanelVerbContext): PanelVerbTable 
             PANEL_VERB_EVENTS_ACK,
             async (params: unknown): Promise<unknown> => await forwardDaemon("ack", params),
         ],
+        // --- the package FACT publish (editor-UX d2, D4/D5) ---------------------------------------
+        [
+            PANEL_VERB_FACTS_PUBLISH,
+            async (params: unknown): Promise<unknown> => {
+                const topic = readFactTopic(params);
+                if (topic === "") {
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.malformedRequest,
+                        `bridge.facts.publish requires a 'topic' string of 1..${String(
+                            PANEL_FACT_TOPIC_MAX_LENGTH,
+                        )} characters`,
+                    );
+                }
+                // WARNING: AN ABSENT `payload` IS REFUSED, NOT DEFAULTED, and this is the one place
+                // that differs from `bridge.call`'s treatment of absent `params`. There, "no
+                // arguments" is a real call. Here a fact with no value is not a fact — and
+                // defaulting it to `null` would RETAIN null on the daemon, which then deduplicates
+                // against the author's next deliberate null and makes their first real publish
+                // vanish.
+                if (!isRecordValue(params) || !("payload" in params)) {
+                    throw new PanelVerbRefusal(
+                        PANEL_BRIDGE_REFUSALS.malformedRequest,
+                        "bridge.facts.publish requires a 'payload'",
+                    );
+                }
+                const outcome = await context.factPublish(topic, params["payload"]);
+                if (!outcome.ok) {
+                    // The SHELL's / daemon's own code, RELAYED — `daemonRefusalCode` is the one
+                    // place that decides how a foreign code crosses this boundary, so the fact bus
+                    // rides it rather than growing a second, drifting mapping.
+                    throw new PanelVerbRefusal(
+                        daemonRefusalCode(outcome.code ?? ""),
+                        daemonRefusalMessage(outcome.code ?? "", outcome.message ?? ""),
+                    );
+                }
+                // RETURNED WHOLE and UNWRAPPED, like `bridge.call`: `{topic, changed, seq}` is the
+                // daemon's own shape, and `changed` is the answer a publisher is actually asking
+                // for (design 05 section 1: the writer learns its outcome from the REPLY, never
+                // from the fact). Filtering it here would take that away.
+                return outcome.result;
+            },
+        ],
     ]);
 
     return { verbs, dispose };
@@ -1258,4 +1370,26 @@ function readDaemonMethod(params: unknown): string {
  */
 function readDaemonParams(params: unknown): unknown {
     return isRecordValue(params) ? params["params"] : undefined;
+}
+
+/**
+ * Read `{ topic }` off a `bridge.facts.publish` request. `""` for any other shape.
+ *
+ * FAIL-CLOSED AND TOTAL, in the discipline `readDaemonMethod` follows. It checks only LENGTH, never
+ * the topic GRAMMAR: the namespacing rule (`<package-id>.<name>`, under YOUR package) is decided
+ * where the package's identity actually lives — the Shell, against the manifest it read — and a
+ * grammar copy here would be a second opinion that could only ever disagree. It would also be a
+ * WEAKER one: this module cannot see the package id, so it could check the shape and never the
+ * ownership, which is the half that matters.
+ */
+function readFactTopic(params: unknown): string {
+    if (!isRecordValue(params)) {
+        return "";
+    }
+    const topic = params["topic"];
+    return typeof topic === "string" &&
+        topic.length > 0 &&
+        topic.length <= PANEL_FACT_TOPIC_MAX_LENGTH
+        ? topic
+        : "";
 }
