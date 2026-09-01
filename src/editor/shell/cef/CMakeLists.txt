@@ -353,17 +353,6 @@ context_configure_shell_cef_smoke(
     TIMEOUT 240
     BUNDLE_ID "dev.context.editor.shell.iframe.smoke")
 
-# --- the LIVE TWO-WINDOW DAEMON-BACKED INSPECTOR FAN-OUT smoke (editor-cef-smoke-shell-inspector-fanout)
-# M9 e09e-3, THE KEYSTONE of e09: design 05 §8's canonical flow end to end. The FIRST smoke in this
-# family to spawn a daemon — through the production `DaemonLifecycle`, which is why it needs
-# CONTEXT_BINARY below — and the first to drive an edit from a REAL DOM event rather than from a
-# `PanelHost::invoke` call: an `input` on the rendered `<input>` stages, a `change` commits, the
-# daemon's own `derivation.settled` fans out, and window B's LIVE DOM is read back to prove the value
-# reached the surface a human sees. Its CEF-free sibling is `editor-session-concurrent-cas-t2`
-# (test_e09b_concurrent_cas.cpp § 5), which proves the same fan-out and L-30 deferral over two bare
-# bags; the .cpp header states exactly what this one adds. TWO sequential live boots plus the daemon
-# spawn, the DOM round trips and the settle waits — 420, the three-boot budget, because the daemon
-# spawn + the six DOM drives cost about as much as a third boot.
 # --- the LIVE HTML5 DRAG-AND-DROP smoke (ctest editor-cef-smoke-shell-osrdrag) --------------------
 # M9 b1 (D11): the DoD line no other tier can reach — a REAL renderer's `dragstart` reaches
 # `CefRenderHandler::StartDragging` (the member whose unimplemented default returned false, which the
@@ -388,6 +377,17 @@ context_configure_shell_cef_smoke(
     TIMEOUT 240
     BUNDLE_ID "dev.context.editor.shell.osrdrag.smoke")
 
+# --- the LIVE TWO-WINDOW DAEMON-BACKED INSPECTOR FAN-OUT smoke (editor-cef-smoke-shell-inspector-fanout)
+# M9 e09e-3, THE KEYSTONE of e09: design 05 §8's canonical flow end to end. The FIRST smoke in this
+# family to spawn a daemon — through the production `DaemonLifecycle`, which is why it needs
+# CONTEXT_BINARY below — and the first to drive an edit from a REAL DOM event rather than from a
+# `PanelHost::invoke` call: an `input` on the rendered `<input>` stages, a `change` commits, the
+# daemon's own `derivation.settled` fans out, and window B's LIVE DOM is read back to prove the value
+# reached the surface a human sees. Its CEF-free sibling is `editor-session-concurrent-cas-t2`
+# (test_e09b_concurrent_cas.cpp § 5), which proves the same fan-out and L-30 deferral over two bare
+# bags; the .cpp header states exactly what this one adds. TWO sequential live boots plus the daemon
+# spawn, the DOM round trips and the settle waits — 420, the three-boot budget, because the daemon
+# spawn + the six DOM drives cost about as much as a third boot.
 add_executable(context_editor_shell_inspector_fanout_smoke src/cef_shell_inspector_fanout_smoke.cpp)
 SET_EXECUTABLE_TARGET_PROPERTIES(context_editor_shell_inspector_fanout_smoke)
 context_configure_shell_cef_smoke(
