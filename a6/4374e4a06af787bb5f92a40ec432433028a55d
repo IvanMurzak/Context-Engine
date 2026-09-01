@@ -1,0 +1,92 @@
+src/editor/shell/src/package_store.cpp
+  s_782aa603d2bdb2::t_6da726884cb5ea 123-124,409-474
+  s_782aa603d2bdb2::t_a70e7e493c31df 121,589-606
+  s_782aa603d2bdb2::t_d836fd6462a54b 12,63-66,96-120,122,125-127,392
+src/cli/include/context/cli/scaffold.h
+  s_782aa603d2bdb2::t_d25b501660f4ee 30-32,34,39-51,56-60
+  s_782aa603d2bdb2::t_0a921869582b4f 86-97
+src/cli/src/scaffold.cpp
+  s_782aa603d2bdb2::t_bc58ed8ea2ecc9 172,182-189
+  s_782aa603d2bdb2::t_1fbda60455ffcd 217-221
+  s_782aa603d2bdb2::t_a0e2f9d1f2f964 190
+docs/shell.md
+  s_782aa603d2bdb2::t_55d13c6f27b94d 546-565
+src/editor/gui/contract/src/extension.cpp
+  s_782aa603d2bdb2::t_8df3e6bdb82451 58-73
+  s_782aa603d2bdb2::t_828fa159a5fef9 1
+src/cli/CMakeLists.txt
+  s_782aa603d2bdb2::t_d9cc0496087046 55-66
+src/editor/gui/contract/src/builtin_roster.cpp
+  s_782aa603d2bdb2::t_c7ee978e1edb13 72-73,75-76
+  s_782aa603d2bdb2::t_3abda4383e2061 143
+  s_782aa603d2bdb2::t_6b7a53bc653a17 36-41,43,54-55
+  s_782aa603d2bdb2::t_0f9abfec2bb774 120-121,125,130,134-135
+  s_782aa603d2bdb2::t_c791e530daf282 88-90,93-95,100,104-107,109-110
+  s_782aa603d2bdb2::t_fc7e546e685e7f 152-153
+  s_782aa603d2bdb2::t_591796ae999a70 2
+src/editor/gui/contract/include/context/editor/gui/contract/registry.h
+  s_782aa603d2bdb2::t_05e68a05a64697 31-39
+src/editor/gui/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_bcf7cf28106d9f 256,258,260,262,264,300-314,316-319,321,368,388
+  s_782aa603d2bdb2::t_e70a40be58442c 58-254,323,366
+  s_782aa603d2bdb2::t_b100937884979c 255,257,259,261,263,265-266,315,320,322,324,365,367,369
+src/editor/gui/contract/include/context/editor/gui/contract/extension.h
+  s_782aa603d2bdb2::t_3b4c9a90e061ab 10-14
+  s_782aa603d2bdb2::t_49f434847fd748 102-106,115-168
+  s_782aa603d2bdb2::t_bd4ab2b5e06efd 38-51
+  s_782aa603d2bdb2::t_72fc98d39f07c8 271-280
+  s_782aa603d2bdb2::t_82e26907e03571 242-259
+  s_782aa603d2bdb2::t_4a0b8d90b049d9 169
+src/editor/shell/src/panel_host.cpp
+  s_782aa603d2bdb2::t_8c3a2e14cfc65d 44-46,51-55,61-71,74,76
+  s_782aa603d2bdb2::t_8514128d7daa71 273-290
+  s_782aa603d2bdb2::t_b9b1c3b357cb47 302
+src/editor/shell/include/context/editor/shell/package_store.h
+  s_782aa603d2bdb2::t_f4978f00e5175f 207-208,210-214,220-225
+  s_782aa603d2bdb2::t_b81675624cc2bc 268-272
+  s_782aa603d2bdb2::t_4d9d6e4a5e6d27 246-259,261-262
+src/cli/tests/test_scaffold.cpp
+  s_782aa603d2bdb2::t_a3469a788718d9 232-238
+src/editor/gui/contract/tests/test_roster.cpp
+  s_782aa603d2bdb2::t_7f8d42741f7488 1-5,17,27-29,36-45,53,55,61-72,75-77,108-116,140-168,192-198,214-219,264-483,607-617
+src/editor/shell/cef/src/cef_shell_iframe_smoke.cpp
+  s_782aa603d2bdb2::t_44327d4cc65cc2 322,333-334
+src/editor/shell/tests/test_package_grants.cpp
+  s_782aa603d2bdb2::t_43d54fb213b19d 94,102,121
+src/editor/shell/tests/test_package_store.cpp
+  s_782aa603d2bdb2::t_6d2365146fe557 65-70,163-176,265-273,506-615
+src/editor/shell/tests/test_panel_host.cpp
+  s_782aa603d2bdb2::t_40c3aa3f8a155e 51-56,188-197
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_cc0325cced6ddc 1075,1091-1095
+src/editor/webui/core/src/panels.ts
+  s_782aa603d2bdb2::t_6da83e41012a0f 76-96,113-122,248-263,321-322
+src/editor/webui/core/src/test/chrome.test.ts
+  s_782aa603d2bdb2::t_7c73a2f7e466cc 1047-1050
+src/editor/webui/core/src/test/extpanel.test.ts
+  s_782aa603d2bdb2::t_e63a40972733ba 66-69
+src/editor/webui/core/src/test/layoutrestore.test.ts
+  s_782aa603d2bdb2::t_45d3b8694a2da4 28-31
+src/editor/webui/core/src/test/panels.test.ts
+  s_782aa603d2bdb2::t_b8d7a081d54c06 18-20,34-36,74-122
+src/editor/webui/core/src/test/panelstate.test.ts
+  s_782aa603d2bdb2::t_4e4ea271e0d3d2 68-71
+src/tests/integration/test_e13e_ext_scaffold.cpp
+  s_782aa603d2bdb2::t_ae3822c79ae341 19-23,30-37,294-296,371-372,397-402
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "a64374e4a06af787bb5f92a40ec432433028a55d",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
