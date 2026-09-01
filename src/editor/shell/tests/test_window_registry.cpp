@@ -80,6 +80,7 @@ public:
 
     [[nodiscard]] const char* name() const override { return "counting"; }
     void resize(render::Extent2D, DpiScale) override {}
+    void set_client_origin(PointI) override {}
     void send_pointer(const PointerDispatch&, const PointerEvent&) override {}
     void send_key(const KeyEvent&) override {}
     void set_focus(bool) override {}

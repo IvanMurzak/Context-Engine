@@ -541,6 +541,23 @@ public:
     }
 
     [[nodiscard]] WindowPlacement placement() const override;
+
+    // AN HONEST ZERO, deliberately not a guessed conversion (a1).
+    //
+    // There is nothing to convert FROM yet: the CEF browser on macOS is created windowless with NO
+    // NSView owner (`cef_shell.cpp`'s `SetAsWindowless(0)` on every non-Windows platform), so no OSR
+    // view is positioned against this window at all, and the live half of the screen mapping rides
+    // the Windows/Linux CEF smokes (design 03 §a1). And there is nothing to convert THROUGH: the
+    // point-vs-pixel + bottom-left-vs-top-left flip Chromium expects for macOS screen DIP
+    // coordinates is verified by no job in this repo, and this file is one no local gate compiles —
+    // exactly the combination `dpi.h` says must not carry a guess.
+    //
+    // Returning the origin reproduces today's behaviour EXACTLY (the un-overridden CEF default
+    // treats view coordinates as screen coordinates), so this changes nothing on macOS rather than
+    // changing it wrongly. It lands with the NSView owner, in the same change that makes a macOS
+    // OSR browser real.
+    [[nodiscard]] PointI client_origin() const override { return PointI{}; }
+
     void apply_placement(const WindowPlacement& placement) override;
 
     void close() override

@@ -83,6 +83,69 @@ struct PointI
 [[nodiscard]] PointI to_logical_point(PointI physical, DpiScale scale);
 [[nodiscard]] PointI to_physical_point(PointI logical, DpiScale scale);
 
+// ------------------------------------------------------- the OSR screen mapping (a1, audit D12)
+//
+// WHERE THE VIEW SITS ON SCREEN. An OSR browser gets none of this from the OS: the host must
+// answer it, and CEF asks through two `CefRenderHandler` members that do NOT share a coordinate
+// convention. Read verbatim from the pinned `cef_render_handler.h`
+// (`tools/cef-prebuilt.json` -> CEF 149.0.6+g0d0eeb6+chromium-149.0.7827.201):
+//
+//   * `GetScreenPoint` (:87-100) — "the translation from view DIP coordinates to screen
+//     coordinates. Windows/Linux should provide screen device (pixel) coordinates and MacOS should
+//     provide screen DIP coordinates" — the SAME per-platform split `osr_screen_extent` encodes.
+//   * `GetRootScreenRect` (:70-78) — "the root window rectangle in screen DIP coordinates" —
+//     DIP on EVERY platform, no split.
+//
+// APPLYING THE SPLIT TO BOTH IS THE MISTAKE THIS PAIR EXISTS TO PREVENT: it multiplies the root
+// rect by the scale factor on Windows/Linux, and — like every other bug in this family — is
+// invisible at scale 1.0, where the two conventions coincide.
+//
+// Both take the window's CLIENT origin on screen, in the platform's own screen convention (the
+// same predicate as `screen_rect_is_dip` above: device pixels on Windows/Linux, DIP on macOS).
+// THE CLIENT ORIGIN, NEVER THE WINDOW RECT: a frameless window's client is inset from its window
+// rect (`win32_frameless_client_insets` in window.h), and feeding the window origin here puts
+// every context menu that inset away from the cursor. `IWindowBackend::client_origin()` is the one
+// source of that value — each backend answers it from the live OS, so a MAXIMIZED window (whose
+// persisted `WindowPlacement` holds the RESTORE rect, not where it currently is) stays correct.
+
+// A screen rectangle with a SIGNED origin. `render::Rect2D`'s origin is UNSIGNED — it is a texel
+// rect — and cannot express a window on a monitor left of or above the primary one, which is an
+// ordinary multi-monitor arrangement rather than an edge case; a clamping conversion would move
+// such a window silently to 0 instead of reporting where it is.
+struct ScreenRect
+{
+    PointI origin;
+    render::Extent2D size;
+
+    [[nodiscard]] bool operator==(const ScreenRect& other) const
+    {
+        return origin == other.origin && size.width == other.size.width &&
+               size.height == other.size.height;
+    }
+};
+
+// View DIP -> screen, for `CefRenderHandler::GetScreenPoint`. The offset from the client origin is
+// scaled to DEVICE pixels wherever the platform's screen coordinates are device pixels, and passed
+// through untouched where they are DIP.
+[[nodiscard]] PointI osr_screen_point(PointI view_dip, PointI client_origin, DpiScale scale,
+                                      bool screen_coords_are_dip);
+
+// The root window rect for `CefRenderHandler::GetRootScreenRect` — ALWAYS DIP, on every platform.
+//
+// Note the asymmetry, which is the whole point: the OUTPUT never scales (`logical_size` is already
+// DIP and is returned as-is), while the INPUT origin is converted DOWN to DIP on the platforms
+// whose screen coordinates are device pixels. Multiplying the size by the scale factor — i.e.
+// giving this member `osr_screen_extent`'s treatment — is the error the header's wording rules out.
+//
+// The rect reported is the CLIENT rect on screen rather than the outer window rect: the header
+// defines `GetViewRect` as this member's fallback ("if this method returns false the rectangle
+// from GetViewRect will be used"), so the honest correction of that fallback for a windowless
+// browser whose view IS the whole client area is the same rect, moved to where it really is. That
+// also keeps the two members mutually consistent by construction — `osr_screen_point({0, 0}, …)`
+// is exactly this rect's origin expressed in the platform's own convention.
+[[nodiscard]] ScreenRect osr_root_screen_rect(PointI client_origin, render::Extent2D logical_size,
+                                              DpiScale scale, bool screen_coords_are_dip);
+
 #if defined(_WIN32)
 
 // The resolution state of the dynamically-loaded user32 DPI entry points (win32_window.cpp).

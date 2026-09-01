@@ -108,6 +108,30 @@ public:
     [[nodiscard]] virtual DpiScale dpi() const = 0;
     [[nodiscard]] virtual bool alive() const = 0;
 
+    // The CLIENT area's top-left ON SCREEN, in the platform's own screen convention — device
+    // pixels on Windows/Linux, DIP on macOS, the same predicate `osr_screen_extent` /
+    // `osr_screen_point` take (dpi.h). The other half of the OSR geometry contract next to
+    // `client_size()`: an off-screen browser is told its view size by `resize()` and WHERE that
+    // view is by this, and without the second it reports view coordinates as screen coordinates —
+    // which is the offset context menu (a1, docs/shell.md § 16).
+    //
+    // ⚠ NOT DERIVABLE FROM `placement()`, which is why this is its own seam rather than
+    // arithmetic over the persisted rect:
+    //   * Win32 `placement()` reports `WINDOWPLACEMENT::rcNormalPosition` — the RESTORE rect. A
+    //     maximized window is not there, so a placement-derived origin is wrong in the single most
+    //     common window state;
+    //   * it is the WINDOW rect, while the client of a frameless window is inset from it
+    //     (`win32_frameless_client_insets`);
+    //   * macOS keeps placement in Cocoa POINTS with a BOTTOM-left screen origin, deliberately
+    //     un-converted (see `CocoaWindowBackend::placement`), so no portable arithmetic over it
+    //     exists at all.
+    // Each backend therefore answers from the live OS, exactly as `client_size()` does.
+    //
+    // PURE, like the chrome VERBS and for the same reason: a default of `{0, 0}` is not a neutral
+    // fallback here, it is a silent re-introduction of the very bug — the platform that forgot to
+    // override would go on placing menus at the screen origin, and nothing would say so.
+    [[nodiscard]] virtual PointI client_origin() const = 0;
+
     // Drain pending OS events into `out` (appending). Returns false once the window is gone —
     // the owner loop's termination condition.
     virtual bool pump(std::vector<ShellEvent>& out) = 0;
@@ -213,6 +237,15 @@ public:
     void set_appearance(bool dark) override { appearance_dark_ = dark; }
     [[nodiscard]] WindowPlacement placement() const override { return placement_; }
     void apply_placement(const WindowPlacement& placement) override;
+    // COMPUTED from the placement plus the modelled frame inset — never a second stored copy of
+    // where the window is, so a `moved` event (which the pump applies to `placement_`) moves this
+    // too. The default inset is zero, i.e. "the client IS the window rect", which is the honest
+    // model of a backend with no frame; `set_client_inset` models the frameless Win32 window whose
+    // client is inset from its window rect, so the a1 wiring is exercisable on every leg.
+    [[nodiscard]] PointI client_origin() const override
+    {
+        return PointI{placement_.x + client_inset_.x, placement_.y + client_inset_.y};
+    }
     void close() override { alive_ = false; }
 
     // --- driving it ------------------------------------------------------------------------------
@@ -222,6 +255,10 @@ public:
     // caller that wants to exercise the GPU composite against a fake backend sets one.
     void set_native_window(render::NativeWindowDesc native) { native_ = native; }
     void set_dpi(DpiScale scale) { dpi_ = scale; }
+    // How far the client area sits inside the window rect — the portable model of the frameless
+    // Win32 client (`win32_frameless_client_insets`). Off by default; a test that sets it is
+    // asserting that the OSR screen mapping lands on the CLIENT origin, not the window origin.
+    void set_client_inset(PointI inset) { client_inset_ = inset; }
 
     [[nodiscard]] const std::string& title() const { return title_; }
     [[nodiscard]] int redraw_requests() const { return redraw_requests_; }
@@ -239,6 +276,7 @@ private:
     render::Extent2D size_;
     DpiScale dpi_;
     WindowPlacement placement_;
+    PointI client_inset_;
     std::string title_;
     std::vector<ShellRegion> chrome_regions_;
     std::optional<bool> appearance_dark_;

@@ -77,6 +77,20 @@ public:
     // would lay the document out at the wrong size on any non-100% monitor.
     virtual void resize(render::Extent2D logical_size, DpiScale dpi) = 0;
 
+    // WHERE that view sits on screen (a1): the window's CLIENT origin, in the platform's own screen
+    // convention — device pixels on Windows/Linux, DIP on macOS (`IWindowBackend::client_origin`,
+    // and the same predicate `osr_screen_point` takes in dpi.h).
+    //
+    // The second half of the OSR geometry contract, and separate from `resize()` on purpose: a
+    // window that MOVES has not resized, and routing the origin through `resize()` would drive
+    // CEF's `WasResized()` — a full re-layout and repaint — on every step of a window drag. An
+    // off-screen browser cannot ask the OS where it is, so without this it answers CEF's
+    // `GetScreenPoint` with view coordinates and every native menu opens at the wrong place
+    // (docs/shell.md § 16).
+    //
+    // PURE, like `resize`: a default that quietly dropped the origin would be the bug itself.
+    virtual void set_client_origin(PointI origin) = 0;
+
     virtual void send_pointer(const PointerDispatch& dispatch, const PointerEvent& event) = 0;
     virtual void send_key(const KeyEvent& event) = 0;
     virtual void set_focus(bool focused) = 0;
@@ -209,6 +223,7 @@ public:
     [[nodiscard]] const char* name() const override { return "scripted"; }
 
     void resize(render::Extent2D logical_size, DpiScale dpi) override;
+    void set_client_origin(PointI origin) override;
     void send_pointer(const PointerDispatch& dispatch, const PointerEvent& event) override;
     void send_key(const KeyEvent& event) override;
     void set_focus(bool focused) override;
@@ -243,6 +258,11 @@ public:
     [[nodiscard]] render::Extent2D last_logical_size() const { return last_logical_size_; }
     [[nodiscard]] DpiScale last_dpi() const { return last_dpi_; }
     [[nodiscard]] int resize_count() const { return resize_count_; }
+    // The a1 screen-mapping observable. The COUNT is what keeps the assertion honest in the other
+    // direction: a window that moved must push, and an idle pump must not — an origin re-pushed
+    // every iteration would drive a CEF callback storm nothing in the value alone would reveal.
+    [[nodiscard]] PointI last_client_origin() const { return last_client_origin_; }
+    [[nodiscard]] int client_origin_pushes() const { return client_origin_pushes_; }
     [[nodiscard]] bool focused() const { return focused_; }
     [[nodiscard]] bool alive() const { return alive_; }
 
@@ -268,7 +288,9 @@ private:
     std::vector<std::string> scripts_;
     render::Extent2D last_logical_size_{};
     DpiScale last_dpi_;
+    PointI last_client_origin_{};
     int resize_count_ = 0;
+    int client_origin_pushes_ = 0;
     bool focused_ = false;
     bool alive_ = true;
 };

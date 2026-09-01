@@ -314,6 +314,7 @@ public:
     void set_maximized(bool maximized) override;
 
     [[nodiscard]] WindowPlacement placement() const override;
+    [[nodiscard]] PointI client_origin() const override;
     void apply_placement(const WindowPlacement& placement) override;
 
     void close() override;
@@ -638,6 +639,21 @@ WindowPlacement X11WindowBackend::placement() const
     placement.monitor = std::string("x11:") + DisplayString(conn.display) + "." +
                         std::to_string(conn.screen);
     return placement;
+}
+
+PointI X11WindowBackend::client_origin() const
+{
+    // The window's own top-left in ROOT coordinates IS the client origin here: X11 puts the WM's
+    // decorations on a PARENT window, so translating this window's (0, 0) to the root lands on the
+    // first pixel the browser's view occupies — no frame inset to subtract, unlike Win32. Same
+    // `root_origin()` the placement uses, for the same reason its header note gives: a reparenting
+    // WM makes the window's own x/y frame-relative, which walks a titlebar up-and-left.
+    //
+    // Device pixels, which is the convention the Windows/Linux half of `osr_screen_point` takes.
+    // Unlike Win32's placement this is the LIVE rect, so it is already correct while maximized.
+    PointI origin;
+    (void)root_origin(origin.x, origin.y);
+    return origin;
 }
 
 void X11WindowBackend::apply_placement(const WindowPlacement& placement)
