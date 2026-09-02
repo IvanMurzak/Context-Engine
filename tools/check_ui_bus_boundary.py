@@ -62,12 +62,27 @@ RULE 3 — NO MIRROR-BEARING MODULE NAMES A DAEMON-REACHING METHOD (the deny-lis
     both defines `PANEL_DAEMON_CALL_METHOD` and brings the mirror up (via `wireUiMirror`), and it
     passes, because bringing a transport up is not holding a sink. Attach one there and it fails.
 
-    RESIDUAL, named rather than papered over: the deny-list is a list of NAMES, so a third
-    daemon-reaching router method added later is not covered until it is added here, and a sink that
-    reached one through a constant imported from another module under a fresh name would not be
-    matched by name. `webui-panel-contract` byte-compares both entries against the C++ headers and
-    the built bundle, and `test_check_ui_bus_boundary.py` asserts each deny-listed literal still
-    exists in the header that defines it — so a RENAME cannot silently empty this list.
+    RESIDUAL, named rather than papered over. The scope is a MODULE and "mirror-bearing" is decided
+    by two names, so three shapes sit outside the rule and none of them should be read as covered:
+
+      * a THIRD daemon-reaching router method added later is unguarded until it is added to
+        `_DENIED_METHODS` — an addition is a human duty, not something this file can notice;
+      * a sink reaching one through a constant IMPORTED FROM ANOTHER MODULE UNDER A FRESH NAME is
+        not matched, because both spellings this file denies are names;
+      * and the one worth stating plainly, because the paragraph above could be read as denying it:
+        THE SINK OBJECT CAN BE BUILT ONE MODULE OUT. A factory returning
+        `{ deliver: (e) => void bridge.call(PANEL_FACTS_PUBLISH_METHOD, e) }` names no sink type and
+        attaches nothing, so its module is not mirror-bearing; the module that then calls
+        `attachMirror(factory(bridge))` IS mirror-bearing but names no denied method. Both halves
+        sweep clean with a live forwarding path in the tree — MEASURED against this checker, not
+        hypothesised. Whole-module scope beats the FILE-local helper it was chosen for; it does not
+        beat a CROSS-module one, and no name-based rule can. What stands behind that gap is rule 2,
+        the runtime half in `uibus.test.ts`, and a review duty on any sink authored outside
+        `uimirror.ts` — so a new sink belongs in `uimirror.ts`, where this rule reaches it.
+
+    `webui-panel-contract` byte-compares both entries against the C++ headers and the built bundle,
+    and `test_check_ui_bus_boundary.py` asserts each deny-listed literal still exists in the header
+    that defines it — so a RENAME cannot silently empty this list.
 
 It is a SOURCE scan (like tools/check_no_raw_key_handlers.py), so it runs on every default `build` leg
 with no browser — registered as the `webui-uibus-boundary` ctest in the `webui-*` family.
@@ -268,10 +283,24 @@ def check_subscriptions(path_label: str, source: str) -> list[str]:
         callback = head[1] if len(head) > 1 else ""
         # The exit by name, OR a deny-listed daemon method: a callback that forwards through a HELPER
         # holding the bridge names no exit of its own, and the method name is what gives it away.
-        hit = _EXIT.search(callback) or _DENIED.search(callback)
-        if hit is None:
+        hit = _EXIT.search(callback)
+        denied = None if hit is not None else _DENIED.search(callback)
+        if hit is None and denied is None:
             continue
         number = code.count("\n", 0, match.start()) + 1
+        if denied is not None:
+            # A DAEMON method, so the mirror seam is NOT the remedy: rule 3 denies this very
+            # name to any mirror-bearing module, and moving the sink one module out to dodge
+            # that is a residual this file names, not a fix. The fact stays in the renderer.
+            findings.append(
+                f"{path_label}:{number}: an editor.ui subscription forwards a chrome fact to "
+                f"the DAEMON-reaching method `{denied.group(0)}` "
+                f"({_denied_home(denied.group(0))}) — a ui-chrome fact must NEVER leave this "
+                f"renderer for the daemon (D7, design 05 §5). This is NOT the mirror seam: a "
+                f"UiMirrorSink targets a SHELL-local method, and rule 3 denies this name to any "
+                f"module that bears one."
+            )
+            continue
         findings.append(
             f"{path_label}:{number}: an editor.ui subscription reaches editor-core's exit "
             f"(`{hit.group(0)}`) — a ui-chrome fact must NEVER be forwarded off this renderer (D7, "

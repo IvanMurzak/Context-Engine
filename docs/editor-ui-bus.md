@@ -146,7 +146,17 @@ for a seam that called nothing.
 **What the deny-list does NOT cover, named rather than left implied.** It is a list of *names*, so a
 third daemon-reaching router method added later is unguarded until it is added to the list, and a sink
 reaching one through a constant imported from another module under a fresh name is not matched by
-name. `webui-panel-contract` byte-compares both entries against the C++ headers and the built bundle,
+name. And the scope is a *module*, so — the one to state plainly, because "a mirror sink can no longer
+reach the daemon" would otherwise be read as absolute — **the sink object can be built one module
+out**. A factory returning `{ deliver: (e) => void bridge.call(PANEL_FACTS_PUBLISH_METHOD, e) }` names
+no sink type and attaches nothing, so its module is not mirror-bearing; the module that then calls
+`attachMirror(factory(bridge))` is mirror-bearing but names no denied method. Both halves sweep clean
+with a live forwarding path in the tree — measured against the checker, not hypothesised, and pinned
+by `test_the_cross_module_sink_factory_is_a_KNOWN_residual` so the gap stays a measurement rather than
+an assumption. Whole-module scope beats the *file*-local helper it was chosen for; it does not beat a
+cross-module one, and no name-based rule can. What stands behind it is rule 2, the runtime half, and a
+review duty: **a new mirror sink belongs in `uimirror.ts`**, which is where rule 3 reaches it.
+`webui-panel-contract` byte-compares both entries against the C++ headers and the built bundle,
 and `test_check_ui_bus_boundary.py` re-reads those headers to assert each denied literal still exists
 there, so a **rename** cannot silently empty the list — but an **addition** is a human duty. Nor does
 this gate touch the security findings `d2` shipped open (both its daemon verbs sit on the read/query

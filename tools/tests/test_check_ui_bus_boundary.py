@@ -374,7 +374,12 @@ def test_the_denylist_entries_still_exist_in_the_cpp_headers() -> None:
     headers = Path(__file__).resolve().parents[2] / "src/editor/shell/include/context/editor/shell"
     assert headers.is_dir(), f"the Shell header directory moved: {headers}"
     for literal, _constant, home in check_ui_bus_boundary._DENIED_METHODS:
-        header_name, cpp_constant = home.split()
+        parts = home.split()
+        assert len(parts) == 2, (
+            f"a deny-list `home` must read '<header.h> <kCppConstant>' so this test can find "
+            f"the definition; {home!r} does not"
+        )
+        header_name, cpp_constant = parts
         header = headers / header_name
         assert header.is_file(), f"deny-list entry {literal} names a header that does not exist"
         expected = f'{cpp_constant} = "{literal}"'
@@ -382,3 +387,55 @@ def test_the_denylist_entries_still_exist_in_the_cpp_headers() -> None:
             f"the deny-list is STALE: {header_name} no longer defines {expected}. The Shell method "
             f"was renamed and tools/check_ui_bus_boundary.py still denies the old name."
         )
+
+
+def test_rule_2_a_daemon_method_hit_does_not_advise_the_mirror_seam(tmp_path: Path) -> None:
+    """The remedy in the finding must not point at the very construct rule 3 forbids.
+
+    The exit-by-name finding says "if this is the cross-window MIRROR, use a UiMirrorSink instead" —
+    right for a bridge in the callback, WRONG for a daemon method: moving that call into a sink is
+    what rule 3 denies, and moving the sink one module out to dodge rule 3 is the residual the
+    checker names, not a fix. A developer following the old text would have walked straight into it.
+    """
+    consumer = (
+        'import { UI_TOPIC_FOCUS } from "./uibus.js";\n'
+        'bus.subscribe(UI_TOPIC_FOCUS, (event) => void send("panel.facts.publish", event));\n'
+    )
+    findings = check_ui_bus_boundary.check(_tree(tmp_path, consumer=consumer))
+    assert len(findings) == 1
+    assert "NOT the mirror seam" in findings[0]
+    assert "package_facts.h kPanelFactsPublishMethod" in findings[0], "and it names where to look"
+
+
+def test_the_cross_module_sink_factory_is_a_KNOWN_residual(tmp_path: Path) -> None:
+    """THE HOLE THIS GATE DOES NOT CLOSE, pinned so it cannot be mistaken for coverage.
+
+    Rule 3's scope is a MODULE, and "mirror-bearing" is two names. Build the sink OBJECT in a module
+    that names neither — a factory returning `{ deliver }` — and attach it from a module that names
+    no denied method, and both halves sweep clean with a live forwarding path in the tree. Whole-
+    module scope beats the FILE-local helper it was chosen for; it does not beat a cross-module one.
+
+    This test asserts the CURRENT behaviour so the residual is MEASURED rather than assumed. If a
+    later task strengthens rule 3 to catch this shape, this test goes RED — and that red is the
+    signal to delete it and strike the residual from the checker docstring and docs/editor-ui-bus.md.
+    """
+    source = _tree(tmp_path)
+    (source / "onwardsink.ts").write_text(
+        'import { PANEL_FACTS_PUBLISH_METHOD } from "./packagefacts.js";\n'
+        "export function makeOnwardSink(bridge) {\n"
+        "    return { deliver: (e) => void bridge.call(PANEL_FACTS_PUBLISH_METHOD, e) };\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    (source / "onwardwire.ts").write_text(
+        'import { makeOnwardSink } from "./onwardsink.js";\n'
+        "export function wireOnward(bridge, bus) {\n"
+        "    return bus.attachMirror(makeOnwardSink(bridge));\n"
+        "}\n",
+        encoding="utf-8",
+    )
+    assert check_ui_bus_boundary.check(source) == [], (
+        "KNOWN RESIDUAL (see check_ui_bus_boundary.py § RESIDUAL): a sink built one module out is "
+        "not mirror-bearing, so rule 3 does not see it. If this now FAILS, rule 3 got stronger — "
+        "delete this test and strike the residual from the docstring and docs/editor-ui-bus.md."
+    )

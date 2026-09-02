@@ -167,10 +167,13 @@ rebuild `context_editor_webui` before reading the result.
 - ~~**`tools/check_ui_bus_boundary.py` owes a deny-list entry for `panel.facts.publish`.**~~
   **CLOSED by `f1`.** That checker's rule 3 now denies `panel.facts.publish` *and* `panel.daemon.call`
   — by wire literal and by the editor-core constant that mirrors each — to any **mirror-bearing**
-  module (one implementing `UiMirrorSink` or calling `attachMirror(`), so a mirror sink can no longer
-  be pointed at this verb to put a window's chrome facts on the daemon wire. A *compliant* caller like
-  `makePackageFactPublish` bears no sink and is untouched. Verified by planting a forwarding path in
-  the real sink and watching the gate go red, then reverting it. See
+  module (one implementing `UiMirrorSink` or calling `attachMirror(`), so a mirror sink written where
+  the mirror lives can no longer be pointed at this verb to put a window's chrome facts on the daemon
+  wire. A *compliant* caller like `makePackageFactPublish` bears no sink and is untouched. Verified by
+  planting a forwarding path in the real sink and watching the gate go red, then reverting it.
+  **Narrower than "a mirror sink can never reach this verb":** the scope is a module, so a sink object
+  built in a module that names neither `UiMirrorSink` nor `attachMirror(` and attached from a module
+  that names no denied method still sweeps clean — a measured, pinned residual. See
   [`editor-ui-bus.md`](editor-ui-bus.md) § the D7 boundary for the rule and for what it deliberately
   does not cover.
 - **The fact bus is primary-window-only**, inheriting `PackageSessionHost`'s existing gap:
