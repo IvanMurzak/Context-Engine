@@ -122,17 +122,35 @@ _BUS_EXIT = re.compile(_EXIT.pattern + r"|\.call\s*\(", re.IGNORECASE)
 # other routed method is Shell-local. `tools/check_webui_assets.py --panel-contract` byte-compares
 # both against the C++ headers and the BUILT bundle, and `test_check_ui_bus_boundary.py` re-reads the
 # headers to assert these literals still exist there, so a rename cannot quietly empty this list.
-_DENIED_METHODS: tuple[tuple[str, str, str], ...] = (
-    ("panel.daemon.call", "PANEL_DAEMON_CALL_METHOD", "package_sessions.h kPanelDaemonCallMethod"),
-    ("panel.facts.publish", "PANEL_FACTS_PUBLISH_METHOD", "package_facts.h kPanelFactsPublishMethod"),
+#
+# Each row is (wire literal, editor-core constant, defining header, C++ constant). The header and the
+# C++ constant are SEPARATE FIELDS rather than one "package_facts.h kPanelFactsPublishMethod" string:
+# the finding text wants them joined, but the staleness test wants them apart — to open the header and
+# look up that constant — and packing them meant that test had to split the string back up and defend
+# its own encoding. Structured here, formatted at the one place that wants prose.
+_DENIED_METHODS: tuple[tuple[str, str, str, str], ...] = (
+    ("panel.daemon.call", "PANEL_DAEMON_CALL_METHOD",
+     "package_sessions.h", "kPanelDaemonCallMethod"),
+    ("panel.facts.publish", "PANEL_FACTS_PUBLISH_METHOD",
+     "package_facts.h", "kPanelFactsPublishMethod"),
 )
 
 _DENIED = re.compile(
     "|".join(
         rf"{re.escape(literal)}|\b{re.escape(constant)}\b"
-        for literal, constant, _ in _DENIED_METHODS
+        for literal, constant, _, _ in _DENIED_METHODS
     )
 )
+
+# Where each deny-listed spelling is defined C++-side, quoted in the finding so it names the file to
+# open. Keyed by BOTH spellings, and built from the same table `_DENIED` is compiled from — so every
+# token `_DENIED` can match is a key here BY CONSTRUCTION, and a missing one is a KeyError rather than
+# a vague fallback label that would quietly make a broken deny-list look like a working one.
+_DENIED_HOME = {
+    spelling: f"{header} {cpp_constant}"
+    for literal, constant, header, cpp_constant in _DENIED_METHODS
+    for spelling in (literal, constant)
+}
 
 # What makes a module MIRROR-BEARING: it implements the sink interface, or it attaches one. Naming
 # the TYPE is enough — a sink is an object with one method, so `implements UiMirrorSink`,
@@ -210,22 +228,16 @@ def _balanced_call(text: str, open_index: int) -> tuple[str, int]:
     return text[open_index + 1 :], len(text)
 
 
-def _denied_home(token: str) -> str:
-    """Where the deny-listed spelling `token` is defined C++-side — quoted in the finding."""
-    for literal, constant, home in _DENIED_METHODS:
-        if token in (literal, constant):
-            return home
-    return "the Shell's router"
-
-
-def check_bus_module(source: str) -> list[str]:
+def check_bus_module(code: str) -> list[str]:
     """RULE 1: the bus module must not name — or invoke — editor-core's exit (comments excluded).
 
     It must not name a deny-listed daemon method either: the bus holds no client, so a method name
     there could only be there to be handed to something that does.
+
+    Takes the COMMENT-STRIPPED source — `check` strips each file once and hands the result to every
+    rule, so prose about the bridge is already gone by the time this sees the text.
     """
     findings: list[str] = []
-    code = _strip_comments(source)
     for number, line in enumerate(code.splitlines(), start=1):
         if _BUS_EXIT.search(line):
             findings.append(
@@ -238,22 +250,25 @@ def check_bus_module(source: str) -> list[str]:
         if denied is not None:
             findings.append(
                 f"{BUS_MODULE}:{number}: the editor.ui bus names the DAEMON-reaching method "
-                f"`{denied.group(0)}` ({_denied_home(denied.group(0))}) — the bus holds no client, so "
+                f"`{denied.group(0)}` ({_DENIED_HOME[denied.group(0)]}) — the bus holds no client, so "
                 f"the only use for that name here is handing it to something that does (D7, design "
                 f"05 §5)"
             )
     return findings
 
 
-def check_mirror_module(path_label: str, source: str) -> list[str]:
+def check_mirror_module(path_label: str, code: str) -> list[str]:
     """RULE 3: a module that implements or attaches a `UiMirrorSink` names no daemon-reaching method.
 
     Whole-module, like rule 1 and for the same reason: with no daemon verb named in the file, no code
     in it can route a chrome fact to the daemon — no matter which helper, local constant or renamed
     import the forwarding path is spelled through. A module that bears no sink is untouched, which is
     what keeps a COMPLIANT `panel.daemon.call` / `panel.facts.publish` caller green.
+
+    Takes the COMMENT-STRIPPED source (see `check`), which is what makes both the mirror-bearing
+    pre-check and the per-line deny scan blind to prose — `uimirror.ts` documents at length why it
+    targets a Shell-local method, and none of that prose may be a finding.
     """
-    code = _strip_comments(source)
     if _MIRROR_BEARING.search(code) is None:
         return []
     findings: list[str] = []
@@ -263,7 +278,7 @@ def check_mirror_module(path_label: str, source: str) -> list[str]:
             continue
         findings.append(
             f"{path_label}:{number}: a module that handles the editor.ui MIRROR seam names the "
-            f"DAEMON-reaching method `{denied.group(0)}` ({_denied_home(denied.group(0))}) — a mirror "
+            f"DAEMON-reaching method `{denied.group(0)}` ({_DENIED_HOME[denied.group(0)]}) — a mirror "
             f"sink must target a SHELL-local method, because the Shell mirrors chrome facts between "
             f"its OWN windows and never forwards them to the daemon (D7, design 05 §5). Keep the "
             f"daemon call in a module that bears no sink."
@@ -271,10 +286,13 @@ def check_mirror_module(path_label: str, source: str) -> list[str]:
     return findings
 
 
-def check_subscriptions(path_label: str, source: str) -> list[str]:
-    """RULE 2: no `editor.ui.*` subscription callback may reach the exit."""
+def check_subscriptions(path_label: str, code: str) -> list[str]:
+    """RULE 2: no `editor.ui.*` subscription callback may reach the exit.
+
+    Takes the COMMENT-STRIPPED source (see `check`), so a commented-out subscription is not a finding
+    and the reported line numbers are the stripped text's — as they have always been.
+    """
     findings: list[str] = []
-    code = _strip_comments(source)
     for match in _SUBSCRIBE.finditer(code):
         args, _ = _balanced_call(code, match.end() - 1)
         head = args.split(",", 1)
@@ -295,7 +313,7 @@ def check_subscriptions(path_label: str, source: str) -> list[str]:
             findings.append(
                 f"{path_label}:{number}: an editor.ui subscription forwards a chrome fact to "
                 f"the DAEMON-reaching method `{denied.group(0)}` "
-                f"({_denied_home(denied.group(0))}) — a ui-chrome fact must NEVER leave this "
+                f"({_DENIED_HOME[denied.group(0)]}) — a ui-chrome fact must NEVER leave this "
                 f"renderer for the daemon (D7, design 05 §5). This is NOT the mirror seam: a "
                 f"UiMirrorSink targets a SHELL-local method, and rule 3 denies this name to any "
                 f"module that bears one."
@@ -314,18 +332,24 @@ def check(source_root: Path) -> list[str]:
     bus = source_root / BUS_MODULE
     if not bus.is_file():
         raise FileNotFoundError(f"{bus} does not exist")
-    findings = check_bus_module(bus.read_text(encoding="utf-8"))
+    # EVERY RULE READS THE SAME COMMENT-STRIPPED TEXT, so each file is read and stripped exactly once
+    # here and the rules are handed the result. `_strip_comments` is a pure full-text pass and is this
+    # checker's dominant cost, so letting each rule re-derive it from the raw source repeated the same
+    # computation twice per file — and read + stripped `uibus.ts` a second time on top. What the rules
+    # SEE is unchanged; only the number of times it is computed is.
+    bus_code = _strip_comments(bus.read_text(encoding="utf-8"))
+    findings = check_bus_module(bus_code)
     for path in sorted(source_root.rglob("*")):
         if not path.is_file() or path.suffix not in _TS_EXTENSIONS or _is_test_source(path):
             continue
         label = path.relative_to(source_root).as_posix()
-        source = path.read_text(encoding="utf-8")
-        findings.extend(check_subscriptions(label, source))
+        code = bus_code if path == bus else _strip_comments(path.read_text(encoding="utf-8"))
+        findings.extend(check_subscriptions(label, code))
         # Rule 3 skips the bus module itself: rule 1 already holds it to a stricter standard, and
         # `uibus.ts` is mirror-bearing (it DECLARES the sink interface), so scanning it twice would
         # report the same line under two rules.
         if label != BUS_MODULE:
-            findings.extend(check_mirror_module(label, source))
+            findings.extend(check_mirror_module(label, code))
     return findings
 
 
@@ -364,7 +388,7 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
-    denied = ", ".join(literal for literal, _, _ in _DENIED_METHODS)
+    denied = ", ".join(literal for literal, _, _, _ in _DENIED_METHODS)
     print(
         f"[uibus-boundary] PASS: {BUS_MODULE} names no exit, no editor.ui subscription in "
         f"{root.as_posix()} reaches one, and no mirror-bearing module names a daemon-reaching "

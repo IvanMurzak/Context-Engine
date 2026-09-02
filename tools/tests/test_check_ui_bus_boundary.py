@@ -215,9 +215,7 @@ def test_test_sources_are_exempt(tmp_path: Path) -> None:
 # the real sink's own target), and a sibling proving a COMPLIANT caller of the very same denied method
 # passes. An absence claim has to be earned by a mechanism that demonstrably ran.
 
-MIRROR_SINK = """import { UI_MIRROR_METHOD } from "./methods.js";
-
-export class ShellUiMirrorSink implements UiMirrorSink {
+MIRROR_SINK = """export class ShellUiMirrorSink implements UiMirrorSink {
     deliver(event) {
         void this.bridge.call(%s, event);
     }
@@ -370,22 +368,25 @@ def test_the_denylist_entries_still_exist_in_the_cpp_headers() -> None:
     method forwarded chrome facts unguarded. `webui-panel-contract` byte-compares the C++ header
     against the BUILT bundle; nothing compared it against THIS list. Now something does: every
     deny-list entry must still be defined, with that exact literal, in the header it names.
+
+    IT READS THE HEADER THROUGH `check_webui_assets._read_cpp_string_constant`, not through a
+    substring scan, and that is the whole difference between this test working and only appearing to.
+    That reader STRIPS COMMENTS FIRST, for a reason its own docstring states: these headers document
+    the very vocabulary being pinned, so a prose line of the form `kFoo = "panel.facts.publish"` left
+    above a drifted declaration satisfies a raw `expected in header_text` check and reports green
+    across exactly the rename this test exists to catch. `package_facts.h` already names
+    `kPanelDaemonCallMethod` in prose today, so that is a live shape here, not a hypothetical one.
     """
+    check_webui_assets = load_tool("check_webui_assets")
     headers = Path(__file__).resolve().parents[2] / "src/editor/shell/include/context/editor/shell"
     assert headers.is_dir(), f"the Shell header directory moved: {headers}"
-    for literal, _constant, home in check_ui_bus_boundary._DENIED_METHODS:
-        parts = home.split()
-        assert len(parts) == 2, (
-            f"a deny-list `home` must read '<header.h> <kCppConstant>' so this test can find "
-            f"the definition; {home!r} does not"
-        )
-        header_name, cpp_constant = parts
+    for literal, _constant, header_name, cpp_constant in check_ui_bus_boundary._DENIED_METHODS:
         header = headers / header_name
         assert header.is_file(), f"deny-list entry {literal} names a header that does not exist"
-        expected = f'{cpp_constant} = "{literal}"'
-        assert expected in header.read_text(encoding="utf-8"), (
-            f"the deny-list is STALE: {header_name} no longer defines {expected}. The Shell method "
-            f"was renamed and tools/check_ui_bus_boundary.py still denies the old name."
+        assert check_webui_assets._read_cpp_string_constant(header, cpp_constant) == literal, (
+            f"the deny-list is STALE: {header_name} no longer defines {cpp_constant} as "
+            f'"{literal}". The Shell method was renamed and tools/check_ui_bus_boundary.py still '
+            f"denies the old name."
         )
 
 
