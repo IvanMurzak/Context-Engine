@@ -108,15 +108,29 @@ def main():
     if reused:
         log(f"reusing existing slot {slot}")
     else:
-        try:
-            fetched = run_git(["fetch", "--quiet", "origin", base], cwd=repo, timeout=90)
-            if fetched.returncode != 0:
-                log(f"fetch of origin/{base} failed ({fetched.stderr.strip() or fetched.returncode}); "
-                    f"continuing with local refs")
-        except subprocess.TimeoutExpired:
-            log("fetch timed out; continuing with local refs")
+        resuming = ref_exists(repo, f"refs/heads/{branch}")
+        if not resuming:
+            # FAIL CLOSED on the base fetch. This used to log and "continue with local
+            # refs", which silently cut the run's branch from a possibly-stale
+            # refs/remotes/origin/<base> -- a remote-tracking ref only `git fetch` moves.
+            # That failure is invisible from inside the run and lands as work rebased onto
+            # an outdated base; a halted provision is merely recoverable. Same fail-closed
+            # convention CLAUDE.md states for pinned downloads (R-SEC-009).
+            # Skipped when resuming an existing branch below, which never consults <base>.
+            if run_git(["remote", "get-url", "origin"], cwd=repo).returncode != 0:
+                log("no 'origin' remote; provisioning from local refs")
+            else:
+                try:
+                    fetched = run_git(["fetch", "--quiet", "origin", base], cwd=repo, timeout=90)
+                except subprocess.TimeoutExpired:
+                    fail(f"fetch of origin/{base} timed out after 90s; refusing to provision "
+                         f"from possibly-stale local refs")
+                if fetched.returncode != 0:
+                    fail(f"fetch of origin/{base} failed "
+                         f"({fetched.stderr.strip() or fetched.returncode}); refusing to "
+                         f"provision from possibly-stale local refs")
         os.makedirs(os.path.dirname(slot), exist_ok=True)
-        if ref_exists(repo, f"refs/heads/{branch}"):
+        if resuming:
             # Resume after a crash: the branch survived, the worktree did not.
             add = run_git(["worktree", "add", slot, branch], cwd=repo, timeout=600)
         else:
