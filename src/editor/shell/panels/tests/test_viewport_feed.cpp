@@ -11,17 +11,16 @@
 
 #include "context/editor/shell/panels/viewport_feed.h"
 
-#include "context/editor/client/client.h"
 #include "context/editor/gui/panels/files/files_model.h" // e4 integration: the OTHER selection subject
 #include "context/editor/gui/panels/files/files_panel.h"
 #include "context/editor/gui/panels/scenetree/scene_tree_model.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/session_feed.h" // e4 integration: the REAL editor.select writer
 #include "context/editor/shell/viewport_binding.h"
-#include "context/render/picking.h" // e4: pick_selection_id, for the id the fixtures below match
 
 #include "mock_channel.h"
 #include "panels_test.h"
+#include "wired_client_test.h" // Wired / make_client -- shared with test_session_feed.cpp
 
 #include <optional>
 #include <string>
@@ -32,7 +31,6 @@ namespace panels = context::editor::shell::panels;
 namespace viewport = context::editor::gui::viewport;
 namespace scenetree = context::editor::gui::panels::scenetree;
 namespace files = context::editor::gui::panels::files;
-namespace client = context::editor::client;
 namespace render = context::render;
 namespace kernel = context::kernel;
 using Json = context::editor::contract::Json;
@@ -66,59 +64,26 @@ constexpr const char* kPanelId = "builtin.viewport";
 
 // ------------------------------------------------------------------- e4: picking (D8) fixtures
 //
-// A real Client over a scripted `clientmock::MockChannel`, attached (so it has a client id) — the
-// SAME wiring discipline test_session_feed.cpp uses: mocking the WIRE rather than the client means
-// the frames here are the frames `dispatcher.cpp` actually emits and the real SDK parses them.
-struct WiredClient
+// `panelstest::Wired`/`make_client` (wired_client_test.h, shared with test_session_feed.cpp) do the
+// generic attach wiring; this suite's own addition is the `editor.select` mock reply, in the
+// daemon's own shape (kernel_server.cpp): the reply's `ids` is the acted subject's post-write
+// selection, `changed` true whenever the ids differ from empty-or-same.
+[[nodiscard]] panelstest::Wired make_wired_client(std::uint64_t client_id)
 {
-    clientmock::MockChannel* channel = nullptr;
-    std::unique_ptr<client::Client> client;
-};
-
-[[nodiscard]] WiredClient make_wired_client(std::uint64_t client_id)
-{
-    auto channel = std::make_unique<clientmock::MockChannel>();
-    clientmock::MockChannel* raw = channel.get();
-    raw->on("attach",
-            [client_id](const clientmock::Request&)
-            {
-                Json result = Json::object();
-                result.set("protocolMajor",
-                           Json(static_cast<std::uint64_t>(context::editor::contract::kProtocolMajor)));
-                result.set("clientId", Json(client_id));
-                Json caps = Json::array();
-                caps.push_back(Json(std::string("describe")));
-                result.set("capabilities", std::move(caps));
-                Json scopes = Json::array();
-                scopes.push_back(Json(std::string("read")));
-                scopes.push_back(Json(std::string("session_control")));
-                result.set("scopes", std::move(scopes));
-                return result;
-            });
-    // The daemon's own `editor.select` shape (kernel_server.cpp): the reply's `ids` is the acted
-    // subject's post-write selection, `changed` true whenever the ids differ from empty-or-same.
-    raw->on("editor.select",
-            [](const clientmock::Request& request)
-            {
-                Json data = Json::object();
-                data.set("ids", request.params.at("ids"));
-                data.set("mode", Json(std::string("replace")));
-                data.set("changed", Json(true));
-                return clientmock::MockChannel::ok_envelope(std::move(data));
-            });
-
-    WiredClient out;
-    out.channel = raw;
-    out.client = std::make_unique<client::Client>(std::move(channel));
-    client::AttachOptions options;
-    options.scope = "read,session";
-    options.token = "t";
-    std::string error;
-    CHECK(out.client->attach(options, error));
-    return out;
+    panelstest::Wired wired = panelstest::make_client(client_id);
+    wired.channel->on("editor.select",
+                       [](const clientmock::Request& request)
+                       {
+                           Json data = Json::object();
+                           data.set("ids", request.params.at("ids"));
+                           data.set("mode", Json(std::string("replace")));
+                           data.set("changed", Json(true));
+                           return clientmock::MockChannel::ok_envelope(std::move(data));
+                       });
+    return wired;
 }
 
-// A one-row Scene tree model whose row identity is the id `render::pick_selection_id(entity)`
+// A one-row Scene tree model whose row identity is the id `panels::pick_selection_id(entity)`
 // produces — so a pick landing on `entity` resolves to a REAL row (a non-zero identity_hash), rather
 // than an id nothing in the tree recognises.
 [[nodiscard]] scenetree::SceneTreeModel model_for(kernel::Entity entity,
@@ -127,7 +92,7 @@ struct WiredClient
 {
     scenetree::SceneTreeModel model;
     scenetree::SceneTreeNode node;
-    node.identity = render::pick_selection_id(entity);
+    node.identity = panels::pick_selection_id(entity);
     node.identity_hash = identity_hash;
     node.display_name = display_name;
     model.roots.push_back(node);
@@ -155,13 +120,35 @@ struct WiredClient
 constexpr kernel::Entity kPickEntityA{7u, 3u};
 constexpr kernel::Entity kPickEntityB{9u, 4u};
 
+// Wires the follow-up steps every hit/miss/camera-move test below repeats identically: set `tree`'s
+// model, bind it to `session`, attach a `Wired` client (this suite's `editor.select` mock) to
+// `session`, and point `feed` at `tree`. Construction of `host`/`session`/`tree`/`binding`/`feed`
+// itself stays at each call site — none of those types is movable (see e.g. ViewportFeed's deleted
+// copy/move ctors), and each one's constructor already takes a reference/pointer to one of the
+// others, so there is no non-degenerate "build a fixture struct and hand it back by value" here.
+[[nodiscard]] panelstest::Wired wire_picking_fixture(panels::SessionFeed& session,
+                                                      scenetree::SceneTreePanel& tree,
+                                                      panels::ViewportFeed& feed,
+                                                      const scenetree::SceneTreeModel& model,
+                                                      std::uint64_t client_id = 5)
+{
+    tree.set_model(model);
+    session.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
+    panelstest::Wired wired = make_wired_client(client_id);
+    session.bind_client(wired.client.get(), wired.client->client_id());
+    feed.bind_scene_tree(&tree);
+    return wired;
+}
+
 void a_hit_moves_the_scene_tree_and_leaves_files_untouched()
 {
     shell::PanelHost host;
     panels::SessionFeed session(host, "unused.playbar");
     scenetree::SceneTreePanel tree(&session);
-    tree.set_model(model_for(kPickEntityA, 0x77, "Picked"));
-    session.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
+    shell::ViewportBinding binding;
+    panels::ViewportFeed feed(host, kPanelId, &binding);
+    panelstest::Wired wired =
+        wire_picking_fixture(session, tree, feed, model_for(kPickEntityA, 0x77, "Picked"));
     files::FilesPanel files_panel(&session.file_selection_gateway());
 
     // The Inspector's real trigger (builtin_panels.cpp): a selection listener on the Scene tree.
@@ -170,13 +157,6 @@ void a_hit_moves_the_scene_tree_and_leaves_files_untouched()
     std::size_t listener_calls = 0;
     tree.add_selection_listener([&listener_calls](const scenetree::SceneSelection&)
                                 { ++listener_calls; });
-
-    WiredClient wired = make_wired_client(/*client_id*/ 5);
-    session.bind_client(wired.client.get(), wired.client->client_id());
-
-    shell::ViewportBinding binding;
-    panels::ViewportFeed feed(host, kPanelId, &binding);
-    feed.bind_scene_tree(&tree);
 
     const render::RenderSnapshot snapshot = snapshot_with(kPickEntityA, /*x*/ 0.0f);
     const bool wrote = feed.pick("builtin.viewport#1", render::RegionPoint{50, 50},
@@ -191,12 +171,12 @@ void a_hit_moves_the_scene_tree_and_leaves_files_untouched()
     {
         CHECK(!sent[0].params.contains("subject"));
         CHECK(sent[0].params.at("ids").size() == 1);
-        CHECK(sent[0].params.at("ids").at(0).as_string() == render::pick_selection_id(kPickEntityA));
+        CHECK(sent[0].params.at("ids").at(0).as_string() == panels::pick_selection_id(kPickEntityA));
     }
 
     // POSITIVE direction: the tree really moved, to a REAL row (non-zero hash), and its listener —
     // the Inspector's own re-point trigger — fired.
-    CHECK(tree.selection().identity == render::pick_selection_id(kPickEntityA));
+    CHECK(tree.selection().identity == panels::pick_selection_id(kPickEntityA));
     CHECK(tree.selection().identity_hash == 0x77u);
     CHECK(listener_calls == 1u);
 
@@ -211,22 +191,17 @@ void a_miss_clears_the_selection_as_an_empty_replace()
     shell::PanelHost host;
     panels::SessionFeed session(host, "unused.playbar");
     scenetree::SceneTreePanel tree(&session);
-    tree.set_model(model_for(kPickEntityA, 0x77, "Picked"));
-    session.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
-
-    WiredClient wired = make_wired_client(5);
-    session.bind_client(wired.client.get(), wired.client->client_id());
-
     shell::ViewportBinding binding;
     panels::ViewportFeed feed(host, kPanelId, &binding);
-    feed.bind_scene_tree(&tree);
+    panelstest::Wired wired =
+        wire_picking_fixture(session, tree, feed, model_for(kPickEntityA, 0x77, "Picked"));
 
     // First land a real selection — the positive half — so the clear below is a genuine change and
     // not a no-op that would pass trivially with the raycast dead.
     const render::RenderSnapshot hit_snapshot = snapshot_with(kPickEntityA, 0.0f);
     CHECK(feed.pick("builtin.viewport#1", render::RegionPoint{50, 50}, render::Extent2D{100, 100},
                     hit_snapshot));
-    CHECK(tree.selection().identity == render::pick_selection_id(kPickEntityA));
+    CHECK(tree.selection().identity == panels::pick_selection_id(kPickEntityA));
 
     // A click at the SAME pixel against an EMPTY scene: the raycast has nothing to hit.
     const render::RenderSnapshot empty_snapshot;
@@ -246,25 +221,24 @@ void the_pick_honours_the_copys_own_camera_not_a_fixed_transform()
 {
     // Two entities, offset on X exactly like the two cameras below — a click at the SAME pixel must
     // resolve to a DIFFERENT entity purely because the copy's camera moved.
-    shell::PanelHost host;
-    panels::SessionFeed session(host, "unused.playbar");
-    scenetree::SceneTreePanel tree(&session);
     scenetree::SceneTreeModel model = model_for(kPickEntityA, 0x77, "A");
     scenetree::SceneTreeNode node_b;
-    node_b.identity = render::pick_selection_id(kPickEntityB);
+    node_b.identity = panels::pick_selection_id(kPickEntityB);
     node_b.identity_hash = 0x99;
     node_b.display_name = "B";
     model.roots.push_back(node_b);
     model.entity_count = 2;
-    tree.set_model(model);
-    session.bind_scene_tree(&tree, scenetree::SceneTreePanel::kContributionId);
 
-    WiredClient wired = make_wired_client(5);
-    session.bind_client(wired.client.get(), wired.client->client_id());
-
+    shell::PanelHost host;
+    panels::SessionFeed session(host, "unused.playbar");
+    scenetree::SceneTreePanel tree(&session);
     shell::ViewportBinding binding;
     panels::ViewportFeed feed(host, kPanelId, &binding);
-    feed.bind_scene_tree(&tree);
+    // Kept alive for the rest of this test even though it is never inspected: `session` stores a
+    // raw, non-owning `client::Client*` into it (bind_client), so letting the return value expire
+    // here would dangle that pointer the moment `feed.pick()` below drives a write through it.
+    const panelstest::Wired wired = wire_picking_fixture(session, tree, feed, model);
+    (void)wired;
 
     render::RenderSnapshot snapshot;
     render::RenderItem item_a;
@@ -285,7 +259,7 @@ void the_pick_honours_the_copys_own_camera_not_a_fixed_transform()
     // offset — so the SAME pixel resolves to entity A, sitting on the camera's own x = 0 line.
     CHECK(feed.pick("builtin.viewport#1", render::RegionPoint{50, 50}, render::Extent2D{100, 100},
                     snapshot));
-    CHECK(tree.selection().identity == render::pick_selection_id(kPickEntityA));
+    CHECK(tree.selection().identity == panels::pick_selection_id(kPickEntityA));
 
     // Move the SAME copy's camera to x = 10 (still looking down -Z, per view.h's own convention) —
     // nothing else about the click changes. The pick now rides entity B's line instead.
@@ -295,7 +269,7 @@ void the_pick_honours_the_copys_own_camera_not_a_fixed_transform()
 
     CHECK(feed.pick("builtin.viewport#1", render::RegionPoint{50, 50}, render::Extent2D{100, 100},
                     snapshot));
-    CHECK(tree.selection().identity == render::pick_selection_id(kPickEntityB));
+    CHECK(tree.selection().identity == panels::pick_selection_id(kPickEntityB));
 }
 
 void picking_with_no_scene_tree_bound_writes_nothing()
@@ -307,6 +281,19 @@ void picking_with_no_scene_tree_bound_writes_nothing()
     const render::RenderSnapshot snapshot = snapshot_with(kPickEntityA, 0.0f);
     CHECK(!feed.pick("builtin.viewport#1", render::RegionPoint{50, 50}, render::Extent2D{100, 100},
                      snapshot));
+}
+
+void picking_selection_ids_are_stable_and_distinguish_entities()
+{
+    // `pick_selection_id` moved here from context::render (picking.h) — it turns a picked entity
+    // into the `editor.select` wire id, which is an editor/wire concern, not a raycast one; see
+    // `camera_set_params` (viewport_binding.h) for the SAME layering already established for a
+    // render value -> wire-params function. This is the property test that moved with it.
+    const std::string id_a = panels::pick_selection_id(kPickEntityA);
+    const std::string id_b = panels::pick_selection_id(kPickEntityB);
+    CHECK(!id_a.empty());
+    CHECK(id_a != id_b);
+    CHECK(panels::pick_selection_id(kPickEntityA) == id_a); // stable across calls
 }
 
 void the_factory_gives_every_copy_its_own_model()
@@ -590,5 +577,6 @@ int main()
     a_miss_clears_the_selection_as_an_empty_replace();
     the_pick_honours_the_copys_own_camera_not_a_fixed_transform();
     picking_with_no_scene_tree_bound_writes_nothing();
+    picking_selection_ids_are_stable_and_distinguish_entities();
     PANELS_TEST_MAIN_END();
 }

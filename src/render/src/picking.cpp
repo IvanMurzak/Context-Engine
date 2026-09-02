@@ -6,7 +6,6 @@
 #include "context/render/viewport_pass.h" // proxy_model / transform_is_finite -- the SAME box the pass draws
 
 #include <cmath>
-#include <cstdio>
 #include <limits>
 
 namespace context::render
@@ -143,14 +142,6 @@ PickHit pick_nearest(const Ray& ray, const RenderSnapshot& snapshot, float proxy
     }
 
     return best;
-}
-
-std::string pick_selection_id(kernel::Entity entity)
-{
-    char buf[48];
-    std::snprintf(buf, sizeof(buf), "entity:%u:%u", static_cast<unsigned>(entity.index),
-                  static_cast<unsigned>(entity.generation));
-    return std::string(buf);
 }
 
 } // namespace context::render

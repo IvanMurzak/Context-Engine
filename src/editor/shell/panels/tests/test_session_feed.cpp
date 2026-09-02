@@ -29,6 +29,7 @@
 
 #include "mock_channel.h"
 #include "panels_test.h"
+#include "wired_client_test.h" // Wired / make_client -- shared with test_viewport_feed.cpp's e4 fixtures
 
 #include <memory>
 #include <string>
@@ -167,48 +168,13 @@ namespace
     return model;
 }
 
-// A real Client over the scripted channel, attached (so it has a client id) and holding `channel`.
-struct Wired
-{
-    clientmock::MockChannel* channel = nullptr;
-    std::unique_ptr<client::Client> client;
-};
-
-[[nodiscard]] Wired make_client(std::uint64_t client_id)
-{
-    auto channel = std::make_unique<clientmock::MockChannel>();
-    clientmock::MockChannel* raw = channel.get();
-    // The attach reply is FLAT in `result` — NOT an envelope (mock_channel.h's standing warning).
-    raw->on("attach",
-            [client_id](const clientmock::Request&)
-            {
-                Json result = Json::object();
-                result.set("protocolMajor",
-                           Json(static_cast<std::uint64_t>(context::editor::contract::kProtocolMajor)));
-                result.set("clientId", Json(client_id));
-                Json caps = Json::array();
-                caps.push_back(Json(std::string("describe")));
-                result.set("capabilities", std::move(caps));
-                Json scopes = Json::array();
-                scopes.push_back(Json(std::string("read")));
-                scopes.push_back(Json(std::string("session_control")));
-                result.set("scopes", std::move(scopes));
-                return result;
-            });
-
-    Wired out;
-    out.channel = raw;
-    out.client = std::make_unique<client::Client>(std::move(channel));
-    client::AttachOptions options;
-    options.scope = "read,session";
-    options.token = "t";
-    std::string error;
-    CHECK(out.client->attach(options, error));
-    CHECK(out.client->client_id() == client_id);
-    return out;
-}
-
 } // namespace
+
+// `Wired`/`make_client` moved to wired_client_test.h (shared with test_viewport_feed.cpp's e4
+// picking fixtures) — brought into unqualified scope here (main()'s own scope, where every existing
+// call site below lives) so `Wired wired = make_client(...)` needs no rewrite.
+using panelstest::make_client;
+using panelstest::Wired;
 
 int main()
 {

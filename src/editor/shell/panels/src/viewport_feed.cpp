@@ -3,10 +3,19 @@
 #include "context/editor/shell/panels/viewport_feed.h"
 
 #include <cstdint>
+#include <cstdio>
 #include <utility>
 
 namespace context::editor::shell::panels
 {
+
+std::string pick_selection_id(kernel::Entity entity)
+{
+    char buf[48];
+    std::snprintf(buf, sizeof(buf), "entity:%u:%u", static_cast<unsigned>(entity.index),
+                  static_cast<unsigned>(entity.generation));
+    return std::string(buf);
+}
 
 render::View framed_scene_view(const render::View& current)
 {
@@ -181,7 +190,7 @@ bool ViewportFeed::pick(const std::string& instance_id, render::RegionPoint poin
         binding_ != nullptr ? binding_->camera(instance_id) : default_scene_view();
     const render::Ray ray = render::pick_ray(view, point, region_size);
     const render::PickHit hit = render::pick_nearest(ray, snapshot);
-    return hit.hit ? scene_tree_->select(render::pick_selection_id(hit.entity))
+    return hit.hit ? scene_tree_->select(pick_selection_id(hit.entity))
                    : scene_tree_->clear_selection();
 }
 

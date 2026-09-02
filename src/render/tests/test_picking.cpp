@@ -209,15 +209,6 @@ void a_singular_transform_is_skipped_not_teleported_to_the_origin()
     CHECK(hit.entity == kEntityB);
 }
 
-void selection_ids_are_stable_and_distinguish_entities()
-{
-    const std::string id_a = pick_selection_id(kEntityA);
-    const std::string id_b = pick_selection_id(kEntityB);
-    CHECK(!id_a.empty());
-    CHECK(id_a != id_b);
-    CHECK(pick_selection_id(kEntityA) == id_a); // stable across calls
-}
-
 } // namespace
 
 int main()
@@ -229,6 +220,5 @@ int main()
     rotation_and_non_uniform_scale_are_honoured();
     a_non_finite_transform_is_skipped_not_crashed();
     a_singular_transform_is_skipped_not_teleported_to_the_origin();
-    selection_ids_are_stable_and_distinguish_entities();
     RENDER_TEST_MAIN_END();
 }

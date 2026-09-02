@@ -45,7 +45,8 @@
 #include "context/editor/gui/viewport/viewport_panel.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/viewport_binding.h"
-#include "context/render/picking.h" // M9 editor-UX e4 (D8): pick_nearest / pick_selection_id
+#include "context/kernel/entity.h" // M9 editor-UX e4 (D8): pick_selection_id's argument
+#include "context/render/picking.h" // M9 editor-UX e4 (D8): pick_nearest
 #include "context/render/view.h"
 
 #include <cstddef>
@@ -89,6 +90,24 @@ static_assert(std::string_view(kViewportAdapterAbsentCode) ==
 // computed one. Returning to the default pose is the honest, deterministic, testable rule, and it is
 // a real camera CHANGE — which is the property the round trip needs.
 [[nodiscard]] render::View framed_scene_view(const render::View& current);
+
+// The selection id one picked entity becomes on the `editor.select --subject entity` wire (D7/D8).
+//
+// LAYERING: turning a picked entity into a wire id is an editor/wire-protocol concern, not a
+// raycast one — the SAME reason `camera_set_params` (viewport_binding.h) turns a `render::View`
+// into `editor.camera-set` JSON params from `context::editor::shell` rather than from
+// `context::render`. `pick_nearest` (picking.h) stays a pure function over snapshot data with no
+// wire-format concern; this is the one call site that turns its `PickHit::entity` into what
+// `ViewportFeed::pick()` (below) actually writes.
+//
+// HONEST, NOT A STUB: there is still no scene-data wire path from the daemon to the Shell (the e11c
+// verb was never built -- viewport_binding.h § SCENE DATA, HONESTLY), so nothing today gives a
+// RenderSnapshot's `kernel::Entity` a real L-35 composed-identity id-path. This is therefore a
+// deliberately TEMPORARY, self-consistent encoding of the entity HANDLE itself -- stable for the
+// lifetime of the handle (index + generation, kernel/entity.h), opaque to the daemon (which stores
+// selection ids without interpreting them) and to every consumer that compares ids for equality. The
+// day a real composed-identity read lands, this is the one call site that changes.
+[[nodiscard]] std::string pick_selection_id(kernel::Entity entity);
 
 // ------------------------------------------------------------------------------------ the feed
 

@@ -30,8 +30,6 @@
 #include "context/render/render_world.h"
 #include "context/render/view.h" // render::Ray (world-space, view.h's own convention)
 
-#include <string>
-
 namespace context::render
 {
 
@@ -55,16 +53,5 @@ struct PickHit
 // pick what would not have been drawn. Pure, headless, no GPU: a function over snapshot data only.
 [[nodiscard]] PickHit pick_nearest(const Ray& ray, const RenderSnapshot& snapshot,
                                     float proxy_size = 1.0f);
-
-// The selection id one picked entity becomes on the `editor.select --subject entity` wire (D7/D8).
-//
-// HONEST, NOT A STUB: there is still no scene-data wire path from the daemon to the Shell (the e11c
-// verb was never built -- viewport_binding.h § SCENE DATA, HONESTLY), so nothing today gives a
-// RenderSnapshot's `kernel::Entity` a real L-35 composed-identity id-path. This is therefore a
-// deliberately TEMPORARY, self-consistent encoding of the entity HANDLE itself -- stable for the
-// lifetime of the handle (index + generation, kernel/entity.h), opaque to the daemon (which stores
-// selection ids without interpreting them) and to every consumer that compares ids for equality. The
-// day a real composed-identity read lands, this is the one call site that changes.
-[[nodiscard]] std::string pick_selection_id(kernel::Entity entity);
 
 } // namespace context::render
