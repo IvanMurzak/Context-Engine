@@ -167,6 +167,24 @@ void ViewportFeed::rearm_camera_write(const std::string& viewport_id)
     binding_->mark_camera_dirty(viewport_id);
 }
 
+bool ViewportFeed::pick(const std::string& instance_id, render::RegionPoint point,
+                        render::Extent2D region_size, const render::RenderSnapshot& snapshot)
+{
+    if (scene_tree_ == nullptr)
+    {
+        return false; // nothing to drive — the same honest no-op every other write seam reports
+    }
+    // The copy's OWN camera, minting the Scene default on first sight — the SAME view the producer
+    // renders with (viewport_binding.h's `camera()`), never a fixed transform: this is what makes a
+    // moved camera pick a different entity.
+    const render::View view =
+        binding_ != nullptr ? binding_->camera(instance_id) : default_scene_view();
+    const render::Ray ray = render::pick_ray(view, point, region_size);
+    const render::PickHit hit = render::pick_nearest(ray, snapshot);
+    return hit.hit ? scene_tree_->select(render::pick_selection_id(hit.entity))
+                   : scene_tree_->clear_selection();
+}
+
 PanelProviderFactory ViewportFeed::make_factory()
 {
     return [this](const std::string& instance_id) -> PanelProvider

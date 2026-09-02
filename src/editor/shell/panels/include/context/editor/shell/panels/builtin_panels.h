@@ -88,6 +88,19 @@ class WriteNoticeRelay;
 class ViewportBinding;
 } // namespace context::editor::shell
 
+namespace context::render
+{
+// Forward-declared for the SAME reason as `ViewportBinding` above (M9 editor-UX e4): `viewport_pick`
+// below takes a region point/size by VALUE and a `RenderSnapshot` by const reference, and only
+// builtin_panels.cpp needs the complete types (a function DECLARATION — as opposed to a call or a
+// definition — needs no more than the name). Including `view.h`/`render_world.h` here would put
+// render/rhi.h on the include path of every TU that hosts a panel, the `-fno-rtti` CEF smokes
+// included, for one signature.
+struct RegionPoint;
+struct Extent2D;
+struct RenderSnapshot;
+} // namespace context::render
+
 namespace context::editor::shell::panels
 {
 
@@ -595,5 +608,16 @@ void bind_viewport_producer(BuiltinPanels& panels, ViewportBinding* viewports);
 //
 // Returns how many `editor.camera-set` calls were attempted. Safe with no viewport feed bound.
 std::size_t pump_viewport_cameras(BuiltinPanels& panels, client::Client& client);
+
+// --- the M9 editor-UX e4 picking write (D8) -------------------------------------------------------
+//
+// A thin wrapper over `ViewportFeed::pick`, for the SAME forward-declaration reason as every other
+// seam here: `editor_main.cpp` holds only the forward-declared `ViewportFeed` above, so a caller
+// that queued a `shell::ViewportPressEvent` (shell.h) off `EditorWindow::take_viewport_presses()`
+// drives the pick through this free function instead of a member call. See `ViewportFeed::pick`
+// (viewport_feed.h) for the raycast + write it performs; `false` here is the SAME honest no-op —
+// no viewport feed bound, or nothing bound for it to write through.
+bool viewport_pick(BuiltinPanels& panels, const std::string& instance_id, render::RegionPoint point,
+                   render::Extent2D region_size, const render::RenderSnapshot& snapshot);
 
 } // namespace context::editor::shell::panels

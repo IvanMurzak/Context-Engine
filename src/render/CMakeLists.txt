@@ -30,6 +30,7 @@ add_library(context_render STATIC
     src/view.cpp               # e11a: the D5 Camera/View type + unproject/pick_ray
     src/viewport_target.cpp    # e11b: per-viewport RTs with a real create/resize/release lifecycle
     src/viewport_pass.cpp      # e11b: the D5 viewport pass — proxy geometry at authored transforms + grid
+    src/picking.cpp            # editor-UX e4: the D8 CPU raycast against a RenderSnapshot's box proxies
     src/profile_hud.cpp        # a15: the L-47 GPU-free profiler HUD overlay (R-OBS-002)
     src/renderdoc_capture.cpp) # a15: the L-47 RenderDoc in-app capture hook (R-OBS-002)
 
@@ -57,6 +58,7 @@ set(_context_render_tests
     test_view             # e11a: the D5 View type, project<->unproject round trip (2D+3D), pick_ray
     test_viewport_target  # e11b: per-viewport RT lifecycle — slot REUSE + texture DESTRUCTION on release/resize
     test_viewport_pass    # e11b: the viewport pass — grid placement/palette + proxies at authored transforms
+    test_picking          # editor-UX e4: the D8 CPU raycast — hit/miss/nearest-of-two/camera-honoured
     test_profile_hud      # a15: L-47 HUD overlay rows + the zero-cost-when-disabled contract
     test_renderdoc_capture) # a15: L-47 RenderDoc hook — the not-attached no-op path (GPU-free)
 foreach(_t IN LISTS _context_render_tests)

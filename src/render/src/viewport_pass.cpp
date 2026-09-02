@@ -72,28 +72,6 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     return std::isfinite(v);
 }
 
-// Whether every component of a snapshot Transform is finite. A single NaN or infinity flows through
-// the model matrix into the view-projection and poisons the whole draw, so the item is skipped
-// instead -- the same "stay finite" house rule math.h's own degenerate guards follow.
-[[nodiscard]] bool transform_is_finite(const Transform& t)
-{
-    for (std::size_t i = 0; i < 3; ++i)
-    {
-        if (!finite(t.position[i]) || !finite(t.scale[i]))
-        {
-            return false;
-        }
-    }
-    for (std::size_t i = 0; i < 4; ++i)
-    {
-        if (!finite(t.rotation[i]))
-        {
-            return false;
-        }
-    }
-    return true;
-}
-
 // A model matrix that scales the unit box by `s` then translates it to `t` (no rotation) -- what a
 // grid line needs.
 [[nodiscard]] Mat4 translate_scale(Vec3 t, Vec3 s)
@@ -105,28 +83,6 @@ fn fs_main(in : VsOut) -> @location(0) vec4<f32> {
     m.m[12] = t.x;
     m.m[13] = t.y;
     m.m[14] = t.z;
-    return m;
-}
-
-// The model matrix of a proxy: translate * rotate * scale, with the item's scale multiplied by the
-// configured proxy edge. Built directly rather than through three mul()s because the composition is
-// exactly "scale the rotation's columns, then drop the translation into the last one".
-[[nodiscard]] Mat4 proxy_model(const Transform& transform, float proxy_size)
-{
-    Mat4 m = rotation_from_quaternion(transform.rotation[0], transform.rotation[1],
-                                      transform.rotation[2], transform.rotation[3]);
-    for (std::size_t c = 0; c < 3; ++c)
-    {
-        const float s = transform.scale[c] * proxy_size;
-        for (std::size_t r = 0; r < 3; ++r)
-        {
-            m.m[c * 4 + r] *= s;
-        }
-    }
-    m.m[12] = transform.position[0];
-    m.m[13] = transform.position[1];
-    m.m[14] = transform.position[2];
-    m.m[15] = 1.0f;
     return m;
 }
 
@@ -153,6 +109,58 @@ struct PendingDraw
 };
 
 } // namespace
+
+// Whether every component of a snapshot Transform is finite. A single NaN or infinity flows through
+// the model matrix into the view-projection and poisons the whole draw, so the item is skipped
+// instead -- the same "stay finite" house rule math.h's own degenerate guards follow.
+//
+// EXPORTED (viewport_pass.h) so picking.cpp's CPU raycast can apply the SAME skip: you can only pick
+// what is actually drawn, and a second finiteness check here would be a second definition of "drawn"
+// free to disagree with this one.
+bool transform_is_finite(const Transform& t)
+{
+    for (std::size_t i = 0; i < 3; ++i)
+    {
+        if (!finite(t.position[i]) || !finite(t.scale[i]))
+        {
+            return false;
+        }
+    }
+    for (std::size_t i = 0; i < 4; ++i)
+    {
+        if (!finite(t.rotation[i]))
+        {
+            return false;
+        }
+    }
+    return true;
+}
+
+// The model matrix of a proxy: translate * rotate * scale, with the item's scale multiplied by the
+// configured proxy edge. Built directly rather than through three mul()s because the composition is
+// exactly "scale the rotation's columns, then drop the translation into the last one".
+//
+// EXPORTED (viewport_pass.h) for the SAME reason as transform_is_finite above: picking.cpp raycasts
+// against EXACTLY this box, in object space, via its inverse -- a second definition here would be
+// free to drift from the box this pass actually draws (D8's whole premise is "pick what is drawn").
+Mat4 proxy_model(const Transform& transform, float proxy_size)
+{
+    Mat4 m = rotation_from_quaternion(transform.rotation[0], transform.rotation[1],
+                                      transform.rotation[2], transform.rotation[3]);
+    for (std::size_t c = 0; c < 3; ++c)
+    {
+        const float s = transform.scale[c] * proxy_size;
+        for (std::size_t r = 0; r < 3; ++r)
+        {
+            m.m[c * 4 + r] *= s;
+        }
+    }
+    m.m[12] = transform.position[0];
+    m.m[13] = transform.position[1];
+    m.m[14] = transform.position[2];
+    m.m[15] = 1.0f;
+    return m;
+}
 
 const char* viewport_pass_wgsl()
 {

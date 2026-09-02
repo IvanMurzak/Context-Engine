@@ -41,9 +41,11 @@
 
 #include "context/editor/contract/json.h"
 #include "context/editor/gui/compositor/surface.h"
+#include "context/editor/gui/panels/scenetree/scene_tree_panel.h" // M9 editor-UX e4: the pick's write target
 #include "context/editor/gui/viewport/viewport_panel.h"
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/viewport_binding.h"
+#include "context/render/picking.h" // M9 editor-UX e4 (D8): pick_nearest / pick_selection_id
 #include "context/render/view.h"
 
 #include <cstddef>
@@ -56,6 +58,8 @@ namespace context::editor::shell::panels
 {
 
 namespace viewport = gui::viewport;
+// M9 editor-UX e4 (D8): the panel a pick's `select()`/`clear_selection()` writes through.
+namespace scenetree = gui::panels::scenetree;
 // The L-41 compositor surface vocabulary. Aliased rather than spelled `gui::compositor` at each use:
 // inside `shell::panels` the bare name `compositor` does NOT resolve to it (there is no
 // `shell::compositor` namespace, and `shell::Compositor*` types are in scope), so the alias is what
@@ -143,6 +147,52 @@ public:
     // is re-armed immediately. Idempotent, and a no-op for a copy that has since closed.
     void rearm_camera_write(const std::string& viewport_id);
 
+    // --- picking (M9 editor-UX e4, D8) -------------------------------------------------------------
+
+    // Point the feed at the LIVE Scene tree panel a pick's selection is applied through. `nullptr`
+    // detaches: `pick()` then reports false and writes nothing, the same honest "nothing to drive"
+    // posture every other write seam in this bag takes with no target bound. Non-owning — the
+    // composition root's bag destroys the Scene tree feed AFTER this one (builtin_panels.h member
+    // order), so the pointer never dangles while this feed is alive.
+    void bind_scene_tree(scenetree::SceneTreePanel* scene_tree) noexcept { scene_tree_ = scene_tree; }
+
+    // Resolve a pointer PRESS inside viewport copy `instance_id` to an entity pick (a CPU raycast,
+    // context::render::pick_nearest, against `snapshot`'s box proxies) and issue it as the Scene
+    // tree's OWN write — `SceneTreePanel::select()` on a hit, `clear_selection()` on a miss ("an
+    // empty replace", the task's own phrase for a click that hits nothing). NO NEW CHANNEL: the
+    // Inspector and any other selection listener already react to exactly this call, the SAME as an
+    // ordinary tree-row click — `select()` writes through the gateway and RENDERS THE DAEMON'S ANSWER
+    // itself (scene_tree_panel.h), which is the "learn your own outcome from the reply, never your
+    // own fact" rule this task's spec states.
+    //
+    // Uses the copy's OWN camera (`ViewportBinding::camera`, minting the Scene default on first
+    // sight — the SAME view the producer renders with) so a moved camera picks a different entity,
+    // never a fixed transform. `point` is PHYSICAL, region-relative; `region_size` is the copy's live
+    // composited size (both view.h's own pick_ray convention). `snapshot` is the Shell's
+    // `viewport::RenderSnapshot` — EMPTY in production until a daemon scene-data read exists
+    // (viewport_binding.h § SCENE DATA, HONESTLY), so a live pick always misses today; that is the
+    // honest state, not a stub, and the T1 suite proves the algorithm against a CONSTRUCTED snapshot.
+    //
+    // ⚠ WHICH CAMERA THE RAY IS BUILT FROM — a DELIBERATE choice, not an accident of what happened to
+    // be handy. `ViewportBinding` has a KNOWN, SEPARATE defect (e3): `set_camera`/`apply_camera` arm
+    // no re-render, so the COMPOSITED PIXELS can lag one frame behind the LIVE camera state a gesture
+    // (or `viewport.frame-scene`) already wrote. This function reads the LIVE state
+    // (`ViewportBinding::camera`) — the value about to be (or already) sent to the daemon — rather
+    // than trying to reconstruct "the camera the last composited frame was drawn with". That is the
+    // more correct answer for the human (a click always resolves against what THEY last set, never a
+    // stale render), and it is the only one this function can even attempt: the pass takes a `View` by
+    // value and keeps no record of which one drew the pixels currently on screen. The cost is
+    // structural, not a new bug this task introduces: on the one frame the render lags, a raycast built
+    // this way can disagree with what the human is LOOKING AT — the same disagreement the e3 defect
+    // already produces for the picture itself, now visible in the pick too, and it resolves itself the
+    // instant the next real render catches up (the SAME frame the composited pixels themselves
+    // resolve). Fixing that lag is e3's own defect, not this function's.
+    //
+    // Returns false when no Scene tree is bound (nothing was written); the write's own success/no-op
+    // outcome is `SceneTreePanel::select`/`clear_selection`'s own return, forwarded verbatim.
+    bool pick(const std::string& instance_id, render::RegionPoint point,
+              render::Extent2D region_size, const render::RenderSnapshot& snapshot);
+
     // --- the present environment (the degraded summary) -------------------------------------------
 
     // Whether this build has a rendering adapter for the viewports. Pushed from the composition root
@@ -168,6 +218,9 @@ private:
     PanelHost& host_;
     std::string panel_id_;
     ViewportBinding* binding_ = nullptr;
+    // M9 editor-UX e4 (D8): the write target a pick's select()/clear_selection() drives. Non-owning;
+    // see bind_scene_tree's comment on why the pointer cannot dangle.
+    scenetree::SceneTreePanel* scene_tree_ = nullptr;
     // ORDERED, like the binding's own map and for the same reason: `take_camera_writes` walks it and
     // a stable order makes the RPC sequence reproducible across runs and platforms.
     std::map<std::string, viewport::ViewportPanel> models_;

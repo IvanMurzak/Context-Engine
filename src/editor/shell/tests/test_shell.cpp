@@ -321,11 +321,65 @@ void test_a_viewport_region_takes_input_away_from_the_browser()
 
     CHECK(harness.window->pump_once(1000));
     // Only the chrome sample reached the browser; the viewport one took the native path. Its
-    // consumer is the e3 producer + camera transport (viewport_binding.h); the GESTURE math that
-    // would turn this sample into a camera move is e4's and later (shell.cpp § the viewport arm).
+    // consumer is the e3 producer + camera transport (viewport_binding.h) and e4's picking
+    // (take_viewport_presses(), below) — orbit/pan/zoom GESTURE math is later work still.
     CHECK(harness.browser->pointers().size() == 1u);
     CHECK(harness.browser->pointers()[0].position == (PointI{500, 400}));
     CHECK(harness.window->input().pointer_dispatches() == 2);
+    // A plain MOVE (this test posted no press) queues no pick — picking fires once per press, not
+    // once per sample a hover would generate.
+    CHECK(harness.window->take_viewport_presses().empty());
+}
+
+void test_a_primary_press_in_a_viewport_region_is_queued_for_picking()
+{
+    Harness harness;
+    const render::Rect2D region_rect = shelltest::rect(0, 40, 400, 300);
+    harness.window->input().regions().publish(
+        {ShellRegion{"builtin.viewport#1", region_rect, RegionKind::viewport}});
+
+    ShellEvent press;
+    press.kind = ShellEventKind::pointer;
+    press.pointer.action = PointerAction::down;
+    press.pointer.button = MouseButton::left;
+    press.pointer.position = PointI{150, 140}; // inside the region: region-relative (150, 100)
+    harness.backend->post(press);
+    CHECK(harness.window->pump_once(1000));
+
+    std::vector<ViewportPressEvent> presses = harness.window->take_viewport_presses();
+    CHECK(presses.size() == 1u);
+    if (presses.size() == 1u)
+    {
+        CHECK(presses[0].region_id == "builtin.viewport#1");
+        CHECK(presses[0].point.x == 150);
+        CHECK(presses[0].point.y == 100);
+        CHECK(presses[0].region_size.width == region_rect.size.width);
+        CHECK(presses[0].region_size.height == region_rect.size.height);
+    }
+    // DRAINED: a second call sees nothing left, and the browser never saw this sample (it took the
+    // native path, exactly like the plain-move case above).
+    CHECK(harness.window->take_viewport_presses().empty());
+    CHECK(harness.browser->pointers().empty());
+
+    // A HOVER inside the SAME region queues nothing — only a primary-button PRESS does.
+    ShellEvent hover;
+    hover.kind = ShellEventKind::pointer;
+    hover.pointer.action = PointerAction::move;
+    hover.pointer.position = PointI{150, 140};
+    harness.backend->post(hover);
+    CHECK(harness.window->pump_once(2000));
+    CHECK(harness.window->take_viewport_presses().empty());
+
+    // A RIGHT-button press in the SAME region ALSO queues nothing — D8's replace-mode default is a
+    // primary-button gesture; a modifier/second-button press is out of this task's scope.
+    ShellEvent right_press;
+    right_press.kind = ShellEventKind::pointer;
+    right_press.pointer.action = PointerAction::down;
+    right_press.pointer.button = MouseButton::right;
+    right_press.pointer.position = PointI{150, 140};
+    harness.backend->post(right_press);
+    CHECK(harness.window->pump_once(3000));
+    CHECK(harness.window->take_viewport_presses().empty());
 }
 
 void test_the_owner_loop_builds_the_viewport_layer_stack_from_the_region_map()
@@ -1108,6 +1162,7 @@ int main()
     test_a_placement_change_with_no_move_event_still_repositions_the_browser();
     test_input_round_trip_reaches_the_browser();
     test_a_viewport_region_takes_input_away_from_the_browser();
+    test_a_primary_press_in_a_viewport_region_is_queued_for_picking();
     test_the_owner_loop_builds_the_viewport_layer_stack_from_the_region_map();
     test_caption_samples_are_suppressed_and_control_samples_reach_the_browser();
     test_pump_pushes_republished_chrome_regions_down_to_the_backend();

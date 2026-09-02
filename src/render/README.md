@@ -43,20 +43,26 @@ gate. Pulls in NO GPU backend, so a headless build never links one.
   probes for an adapter and creates a device only if one exists, returning `nullptr` otherwise — so
   "headless" is the *absence* of a `Renderer`, not a flag on one. The engine runs fully with the
   render module absent; the kernel never depends on render (render depends on the kernel).
-- **`math.h` / `view.h` / `viewport_target.h` / `viewport_pass.h`** — the **editor viewport path**
-  (M9 e11, design `m9-editor` D5). `math.h` is the shared CPU 3D math (promoted from `lit/` by e11a,
-  which added `perspective()` and the first matrix `inverse()`); `view.h` is the per-viewport
-  `Camera`/`View` value type plus `view_proj` / `project` / `unproject` / `pick_ray` — the aspect
-  ratio is deliberately NOT stored on a `View`, so every entry point there takes the target's
-  `Extent2D` and derives it. **`viewport_target.h`** owns per-viewport render targets (colour +
-  `Depth32Float`) with a real `create`/`resize`/`release` lifecycle and generation-tagged handles, so
-  a slot is reused safely and a resize does not leak — deliberately a SIBLING of
-  `context_render_ui`'s append-only `DynamicTextureRegistry` rather than an extension of it (its
-  header states the three reasons; the first is that `context_render` cannot link a library that
+- **`math.h` / `view.h` / `viewport_target.h` / `viewport_pass.h` / `picking.h`** — the **editor
+  viewport path** (M9 e11 / editor-UX e3-e4, design `m9-editor` D5 / D7 / D8). `math.h` is the shared
+  CPU 3D math (promoted from `lit/` by e11a, which added `perspective()` and the first matrix
+  `inverse()`); `view.h` is the per-viewport `Camera`/`View` value type plus `view_proj` / `project` /
+  `unproject` / `pick_ray` — the aspect ratio is deliberately NOT stored on a `View`, so every entry
+  point there takes the target's `Extent2D` and derives it. **`viewport_target.h`** owns per-viewport
+  render targets (colour + `Depth32Float`) with a real `create`/`resize`/`release` lifecycle and
+  generation-tagged handles, so a slot is reused safely and a resize does not leak — deliberately a
+  SIBLING of `context_render_ui`'s append-only `DynamicTextureRegistry` rather than an extension of it
+  (its header states the three reasons; the first is that `context_render` cannot link a library that
   links against it). **`viewport_pass.h`**'s `render_viewport_view()` is the pass: the ground grid,
   then one box PROXY per renderable at its authored transform. Proxies are not a placeholder for a
   mesh pipeline — `ctx:scene` authors a POSITION and nothing else, and `Renderable::mesh_id` has no
-  registry anywhere; that header spells the constraint out.
+  registry anywhere; that header spells the constraint out. **`picking.h`**'s `pick_nearest()` (D8) is
+  the CPU raycast a Scene-viewport click resolves through: it tests EXACTLY the box `viewport_pass.h`
+  draws (`proxy_model`/`transform_is_finite`, exported for this one reason), in the box's own object
+  space via its inverse so rotation and non-uniform scale are honoured, and picks the nearest
+  candidate by real world distance (an object-space `t` is not comparable across differently-scaled
+  boxes). No GPU, no readback — a pure function over a `RenderSnapshot`, matching this repo's
+  headless-first CI rule (`docs/shell.md` § 4c owns the Shell-side wiring).
 
 ### `context_render_wgpu` — the T1 native backend + offscreen proof (CI-gated dependency path)
 

@@ -153,6 +153,18 @@ inline constexpr std::uint64_t kViewportDrawUniformStride = 256u;
 // corner table -- no vertex buffer, matching every other T1 path in this repo.
 inline constexpr std::uint32_t kViewportBoxVertexCount = 36;
 
+// Whether every component of `t` is finite -- the skip test this pass applies to a renderable before
+// drawing it (a NaN position or an infinite scale would otherwise poison the whole draw). EXPORTED so
+// context/render/picking.h's CPU raycast (M9 editor-UX e4, D8) applies the identical skip: you can
+// only pick what is actually drawn.
+[[nodiscard]] bool transform_is_finite(const Transform& t);
+
+// The model matrix of a proxy box: translate * rotate * scale, `transform`'s own scale multiplied by
+// `proxy_size` (this struct's own field) before rotation + translation. EXPORTED for the SAME reason
+// as transform_is_finite above: picking.cpp raycasts against exactly this box, in object space via
+// its inverse, so a second definition would be free to drift from the box this pass actually draws.
+[[nodiscard]] Mat4 proxy_model(const Transform& transform, float proxy_size);
+
 // The WGSL both the grid and the proxies draw with (binding 0 = the ViewportDrawUniform block).
 [[nodiscard]] const char* viewport_pass_wgsl();
 
