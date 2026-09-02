@@ -19,6 +19,7 @@
 #include "context/editor/shell/viewport_binding.h"
 
 #include "mock_channel.h"
+#include "render_test_rhi.h" // rendertest::FakeDevice — a producer WITH an adapter, no GPU
 #include "panels_test.h"
 #include "wired_client_test.h" // Wired / make_client -- shared with test_session_feed.cpp
 
@@ -520,6 +521,77 @@ void no_adapter_renders_the_summary_and_reports_the_code()
     CHECK(degraded.has_value() && ok.has_value() && degraded->html != ok->html);
 }
 
+void the_reported_size_follows_the_composited_layer()
+{
+    // THE REPORT IS THE PRODUCT HERE, not a debug aid: `width`/`height` are fields of the R-HEAD-002
+    // present report the panel renders, and the human reads them in the summary line.
+    //
+    // The ORDERING is the whole bug. A copy's model is materialised by the RENDERER asking for it,
+    // which necessarily happens before the producer has ever published a layer for that copy — so
+    // the size baked in at materialisation is 0x0 for every viewport that ever exists. Nothing
+    // re-read it, so `0x0` was what the panel reported for the life of the window while a 354x260
+    // layer was being composited (measured on the live editor).
+    //
+    // NO DEVICE IS NEEDED to drive this: `ViewportBinding::publish` fills `content_rect` /
+    // `content_size` from the REGION and only the `content` view needs an adapter, so the layer this
+    // asserts on is the real one the real code path produces.
+    shell::PanelHost host;
+    // A producer WITH an adapter, because the size is only part of a PRESENT report that has one:
+    // `compute_present`'s first rule answers `viewport.adapter_absent` and reports no dimensions at
+    // all, so an adapter-less fixture would assert 0x0 against 0x0 and pass with the fix removed.
+    rendertest::FakeDevice device;
+    shell::ViewportBinding binding;
+    binding.attach_device(device);
+    CHECK(binding.adapter_available());
+    shell::WindowCompositor compositor{shell::CompositorConfig{}};
+    panels::ViewportFeed feed(host, kPanelId, &binding);
+    CHECK(host.provide_factory(kPanelId, feed.make_factory()));
+    const shell::InstanceOpen a = host.open_instance(kPanelId);
+
+    // Materialise the model the way the renderer does, BEFORE any layer exists — the ordering the
+    // bug lived in. It must report the honest 0x0 here, which is also what makes the assertion after
+    // the publish a real change rather than a value that was always right.
+    std::string code;
+    CHECK(host.render(kPanelId, code, a.instance_id).has_value());
+    const viewport::ViewportPanel* model = feed.model(a.instance_id);
+    CHECK(model != nullptr);
+    if (model == nullptr)
+    {
+        return;
+    }
+    CHECK(model->present().width == 0u);
+    CHECK(model->present().height == 0u);
+
+    shell::ShellRegion region;
+    region.id = a.instance_id;
+    region.kind = shell::RegionKind::viewport;
+    region.rect = render::Rect2D{render::Origin2D{48, 96}, render::Extent2D{354u, 260u}};
+    const render::RenderSnapshot snapshot;
+    const shell::ViewportPublishStats stats = binding.publish({region}, snapshot, compositor);
+    CHECK(stats.layers == 1u);
+
+    // The pump's ONE per-frame call into the feed, with the producer UNCHANGED — the path the live
+    // editor takes on every iteration, and the one that used to re-read nothing.
+    feed.bind_binding(&binding);
+    CHECK(model->present().width == 354u);
+    CHECK(model->present().height == 260u);
+
+    // …and it FOLLOWS: a resized dock publishes a new rect under the same producer. Without this the
+    // case would pass for a fix that read the size exactly once more.
+    region.rect = render::Rect2D{render::Origin2D{48, 96}, render::Extent2D{512u, 300u}};
+    (void)binding.publish({region}, snapshot, compositor);
+    feed.bind_binding(&binding);
+    CHECK(model->present().width == 512u);
+    CHECK(model->present().height == 300u);
+
+    // A copy whose region went away has no layer any more, and the report goes back to the honest
+    // 0x0 rather than freezing at the last size it happened to see.
+    (void)binding.publish({}, snapshot, compositor);
+    feed.bind_binding(&binding);
+    CHECK(model->present().width == 0u);
+    CHECK(model->present().height == 0u);
+}
+
 void the_framing_helper_keeps_the_projection()
 {
     render::View current;
@@ -571,6 +643,7 @@ int main()
     a_new_copy_re_arms_the_hydration_read();
     a_failed_write_is_re_armed();
     no_adapter_renders_the_summary_and_reports_the_code();
+    the_reported_size_follows_the_composited_layer();
     the_framing_helper_keeps_the_projection();
     a_feed_with_no_binding_still_renders();
     a_hit_moves_the_scene_tree_and_leaves_files_untouched();

@@ -476,7 +476,24 @@ an EMPTY one: there is still no daemon scene-data read (the e11c verb was never 
 viewport renders the grid and nothing else. The pass, the targets, the layers, the rects and the
 cameras are all real; the day a scene read lands it changes one argument at one call site.
 
-**The transparent hole is NOT yet end to end, and the remainder is named in § 11.**
+**The transparent hole IS end to end** — but only because FOUR surfaces stop painting, not two.
+`viewport.ts`'s `syncNativeSurfaceGroups` marks the slot, the Dockview group, the dockview ROOT
+(`.dv-dockview`, which paints `--dv-group-view-background-color` behind every group) and `<html>`
+(the document CANVAS, which `html, body` paint `colors.canvas` into); app.css turns each mark into
+transparency. The last two are window-wide, so they are scoped to "a viewport is on screen" and a
+window with no Scene view open paints exactly as before. What backs the window while they are off is
+the compositor's `clear` (opaque black by design); the one surface that had relied on the dockview
+root is the sash gutter, which app.css now paints explicitly. Measured before this landed: the
+viewport slot read `#0a0a0a` — exactly `colors.panel`, byte-identical to every other panel body —
+with e3's two rules already in force, so the composited layer was painted over on every frame.
+
+**And the rect must actually be PUBLISHED, which is a separate trigger.** A `viewport`-kind region
+exists only once Dockview has laid the panel out, and that is neither a window resize nor a DPI
+change — the region publisher's own two triggers — while `LayoutPersistence` subscribes the Dockview
+event only after `PanelHost.start()` has already added every panel. So the dock reports its own
+arrangement (`PanelHostOptions.onArrangementChanged`, wired in boot.ts to the publisher's debounced
+`schedule()`). Measured before that seam existed: the Shell held 4 regions, none of them
+`viewport`-kind, for the entire life of the window.
 
 `builtin.viewport` is also the tree's ONE `provide_factory` binding (c3's `instances.mode:
 "unlimited"`): each live copy gets its own `ViewportPanel` model and its own camera, because two
@@ -1506,19 +1523,14 @@ context menu for every member below.
 
 Named so the gaps are visible rather than assumed:
 
-- **The Scene viewport's transparent hole is not end to end (editor-UX e3).** The layer IS composited
-  beneath the CEF layer, the rect IS published, and editor-core stops painting the two surfaces that
-  are the viewport's own — the panel slot (`.ctx-panel-body[data-panel-native-surface]`) and the
-  Dockview GROUP behind it (which is not an ancestor of the slot: an `always`-rendered panel lives in
-  `.dv-render-overlay`, a sibling subtree, so the group paints BEHIND the hole and no selector
-  reaches it from the slot — `viewport.ts` records the measured stack). What still paints over it is
-  everything GLOBAL beneath those two: `.dv-grid-view`'s `--dv-background-color`, `html, body`'s
-  canvas paint, and — the one that makes the rest moot — `CefBrowserSettings.background_color`, which
-  is unset, so the browser composites onto an OPAQUE base and no alpha could reach the OSR buffer
-  whatever the DOM says. Each is a one-line change; all three move the composited pixels that every
-  `editor-cef-smoke` coverage floor is calibrated against (`cef_shell_smoke.cpp` § `kAppBackground*`),
-  which is a CI-only surface and why e3 stopped at the viewport-specific two rather than at a green
-  local gate. Until they land the viewport renders the docking surface, not the scene.
+- ~~**The Scene viewport's transparent hole is not end to end (editor-UX e3).**~~ CLOSED — see § 4b.
+  The remainder e3 recorded here was `.dv-dockview`'s background, `html, body`'s canvas paint, and
+  `CefBrowserSettings.background_color`. The first two were real and are now marked-and-scoped
+  (`viewport.ts` stamps the dockview root and `<html>` off the same answer that marks the group); the
+  third needed no change and its premise was wrong — the setting is left at 0, whose ALPHA is 0, which
+  is CEF's "use transparent painting" for a windowless browser. The `editor-cef-smoke` coverage floor
+  this was expected to move did not move: every dock group still paints `colors.panel` over its own
+  box, and all 13 smokes pass.
 - **No camera GESTURES.** `EditorWindow::handle_event`'s `case InputTarget::viewport:` is still a bare
   `break;`. e3 landed the producer and the camera TRANSPORT (`editor.camera-set` hydrated from
   `editor.cameras-get`, persisted where cameras persist), and the one thing that moves a camera is the

@@ -142,7 +142,27 @@ public:
     // Also refreshes the ADAPTER verdict, because the two facts arrive together and a feed that took
     // a new producer while keeping the old verdict would report `viewport.adapter_absent` for a
     // window that has just acquired a device (or, worse, hide the code for one that has lost it).
+    //
+    // ...and the composited SIZE, for the same "the two facts arrive together" reason — see
+    // `sync_sizes` below, which this calls on every bind (i.e. once per pump).
     void bind_binding(ViewportBinding* binding);
+
+    // Re-read the composited size the producer publishes for each live copy, and touch the panel
+    // kind when one has MOVED.
+    //
+    // WHY IT EXISTS. `refresh_present` used to run in exactly two places — when a model is first
+    // materialised, and when the adapter verdict flips — and a copy is materialised by the renderer
+    // asking for it, which happens BEFORE the producer has ever published a layer for it. So the
+    // size baked in at that moment was 0x0, nothing ever re-read it, and the panel's own summary
+    // reported `0x0` for the life of the window no matter what was actually composited (observed on
+    // the live editor: a viewport rendering a 354x260 layer, reporting 0x0). The size is not
+    // cosmetic — it is the R-HEAD-002 present report's own `width`/`height`.
+    //
+    // Cheap enough to run per pump: one pass over the live copies (one or two in practice), each a
+    // scan of the producer's layer vector, and it touches the host ONLY when a size actually changed
+    // — the same "an unchanged verdict is not a model change" rule `set_adapter_available` states,
+    // for the same reason (a touch per frame would re-fetch every viewport's tree forever).
+    void sync_sizes();
 
     // --- the camera round trip -------------------------------------------------------------------
 
@@ -233,6 +253,13 @@ private:
     // Push the current present environment into ONE model: the platform + probed caps, the adapter
     // verdict, and the composited size the producer published for this copy (0x0 until it has one).
     void refresh_present(const std::string& instance_id, viewport::ViewportPanel& panel) const;
+
+    // The composited size the producer currently publishes for one copy — 0x0 when it publishes no
+    // layer for it (not yet laid out, parked off-dock, or no producer bound at all). The ONE place
+    // that reads `ViewportBinding::layers()` by id, shared by `refresh_present` and `sync_sizes` so
+    // the size the panel REPORTS and the size that decides whether to touch cannot come from two
+    // different readings of the same vector.
+    [[nodiscard]] render::Extent2D composited_size(const std::string& instance_id) const;
 
     PanelHost& host_;
     std::string panel_id_;

@@ -57,6 +57,10 @@ void ViewportFeed::bind_binding(ViewportBinding* binding)
         if (binding != nullptr)
         {
             set_adapter_available(binding->adapter_available());
+            // The composited size moves under an UNCHANGED producer on every dock resize, and this
+            // is the only per-pump call the feed gets — so the re-read rides here rather than
+            // needing a second per-frame hook in the composition root.
+            sync_sizes();
         }
         return;
     }
@@ -65,6 +69,10 @@ void ViewportFeed::bind_binding(ViewportBinding* binding)
     // are still open and their cameras are still the human's, they just have to be hydrated again.
     fetch_due_ = true;
     set_adapter_available(binding == nullptr ? false : binding->adapter_available());
+    // A new producer also publishes a DIFFERENT layer set (a detached one publishes none), and
+    // `set_adapter_available` only refreshes when the VERDICT moved — so a producer swap that keeps
+    // the verdict would otherwise leave every copy reporting the old producer's size.
+    sync_sizes();
 }
 
 viewport::ViewportPanel* ViewportFeed::model(const std::string& instance_id)
@@ -88,28 +96,58 @@ viewport::ViewportPanel* ViewportFeed::model(const std::string& instance_id)
     return &it->second;
 }
 
-void ViewportFeed::refresh_present(const std::string& instance_id,
-                                   viewport::ViewportPanel& panel) const
+render::Extent2D ViewportFeed::composited_size(const std::string& instance_id) const
 {
-    std::uint32_t width = 0;
-    std::uint32_t height = 0;
     if (binding_ != nullptr)
     {
         for (const ViewportLayer& layer : binding_->layers())
         {
             if (layer.id == instance_id)
             {
-                width = layer.content_size.width;
-                height = layer.content_size.height;
-                break;
+                return layer.content_size;
             }
         }
     }
+    // No producer, or no layer published for this copy yet — the honest 0x0 the header names, which
+    // `compute_present` reads as "nothing composited here", not as a render failure.
+    return render::Extent2D{};
+}
+
+void ViewportFeed::refresh_present(const std::string& instance_id,
+                                   viewport::ViewportPanel& panel) const
+{
+    const render::Extent2D size = composited_size(instance_id);
     // `scene_render_ok` is true: with no adapter the FIRST rule in `compute_present` already answers
     // `viewport.adapter_absent`, and claiming a render failure on top of it would report the wrong
     // one of two reserved codes for the same state.
     panel.set_present_env(gui_compositor::current_platform(), caps_, adapter_available_,
-                          /*scene_render_ok*/ true, width, height);
+                          /*scene_render_ok*/ true, size.width, size.height);
+}
+
+void ViewportFeed::sync_sizes()
+{
+    bool changed = false;
+    for (auto& [instance_id, panel] : models_)
+    {
+        const render::Extent2D size = composited_size(instance_id);
+        // Compared against what the MODEL currently reports, not against a shadow copy kept here: a
+        // second record of the same number is a second thing to keep in step, and the model already
+        // holds the value the human reads. `present()` is exactly what `status_text`/`surface_text`
+        // render from, so "the report is stale" and "these differ" are the same predicate.
+        const viewport::ViewportPresent& present = panel.present();
+        if (present.width == size.width && present.height == size.height)
+        {
+            continue;
+        }
+        refresh_present(instance_id, panel);
+        changed = true;
+    }
+    if (changed)
+    {
+        // ONE touch for the whole pass, not one per copy: `touch` invalidates the panel KIND, so N
+        // touches would cost N re-fetches of the same tree for a single frame's worth of change.
+        host_.touch(panel_id_);
+    }
 }
 
 void ViewportFeed::set_adapter_available(bool available)

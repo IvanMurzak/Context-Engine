@@ -102,8 +102,13 @@ foreach(_t IN LISTS _context_editor_panels_tests)
     # test drives a REAL client::Client over. Reusing it (rather than writing a second mock here) is
     # deliberate: that header carries the standing "a mock more capable than the daemon hides real
     # bugs" warning and the flat-attach-reply rule, and a private copy would drift off both.
+    # ...and the RENDER tests' header-only fake RHI, for the same reason: `rendertest::FakeDevice`
+    # is what lets a viewport feed be driven against a producer that HAS an adapter on all three
+    # default build legs, with no GPU anywhere. A private copy would be a second fake free to drift
+    # off the one the render and shell tiers assert against.
     target_include_directories(context_editor_panels_${_t} PRIVATE
         ${CMAKE_CURRENT_SOURCE_DIR}/tests
-        ${CMAKE_CURRENT_SOURCE_DIR}/../../client/tests)
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../client/tests
+        ${CMAKE_CURRENT_SOURCE_DIR}/../../../render/tests)
     add_test(NAME editor-shell-${_t} COMMAND context_editor_panels_${_t})
 endforeach()

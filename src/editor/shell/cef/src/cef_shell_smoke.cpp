@@ -807,11 +807,43 @@ int main(int argc, char** argv)
         SMOKE_CHECK(min_region != nullptr, "the minimize control rect arrived");
         SMOKE_CHECK(max_region != nullptr, "the maximize control rect arrived");
         SMOKE_CHECK(close_region != nullptr, "the close control rect arrived");
-        SMOKE_CHECK(map.size() == 4, "the map is exactly the four chrome regions, wholesale");
-        // Caption FIRST, controls after — the publish order 02 §6 pins so back-to-front
-        // last-match-wins resolves a control click above the drag surface with no carve-out token.
-        SMOKE_CHECK(!map.regions().empty() && map.regions().front().id == "chrome.caption",
-                    "the caption publishes FIRST (the last-match-wins arbitration order)");
+        // ...AND THE SCENE VIEWPORT'S DOCK RECT (editor-UX e3). The default roster opens one Scene
+        // view, and its slot is measured into the SAME wholesale publish as the chrome strips —
+        // which is the only way the Shell ever learns where to composite a viewport layer. Asserted
+        // BY NAME rather than by a widened count: this smoke used to require exactly the four chrome
+        // regions, and that expectation was satisfied for the whole life of the window by a dock
+        // that never published anything at all.
+        const shell::ShellRegion* viewport = map.find("builtin.viewport#1");
+        SMOKE_CHECK(viewport != nullptr,
+                    "the Scene viewport's dock rect arrived in the same region map");
+        SMOKE_CHECK(viewport != nullptr && viewport->kind == shell::RegionKind::viewport,
+                    "...carrying the viewport kind, which is what makes it a composited layer");
+        SMOKE_CHECK(map.size() == 5,
+                    "the map is exactly the four chrome regions plus the one Scene viewport, "
+                    "wholesale");
+        // VIEWPORTS FIRST, then the caption, then its controls — the publish order 02 §6 / chrome.ts
+        // pin so back-to-front last-match-wins resolves a control click above the drag surface, and
+        // the drag surface above dock content, with no carve-out token anywhere.
+        const auto index_of = [&map](const char* id) -> std::size_t
+        {
+            const std::vector<shell::ShellRegion>& regions = map.regions();
+            for (std::size_t i = 0; i < regions.size(); ++i)
+            {
+                if (regions[i].id == id)
+                {
+                    return i;
+                }
+            }
+            return regions.size();
+        };
+        const std::size_t viewport_at = index_of("builtin.viewport#1");
+        const std::size_t caption_at = index_of("chrome.caption");
+        SMOKE_CHECK(viewport_at < caption_at,
+                    "the viewport publishes BEFORE the caption (dock content loses to chrome)");
+        SMOKE_CHECK(caption_at < index_of("chrome.caption-min") &&
+                        caption_at < index_of("chrome.caption-max") &&
+                        caption_at < index_of("chrome.caption-close"),
+                    "the caption publishes before its controls (the last-match-wins order)");
         if (caption != nullptr && min_region != nullptr && max_region != nullptr &&
             close_region != nullptr)
         {
