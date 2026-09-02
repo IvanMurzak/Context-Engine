@@ -1,0 +1,24 @@
+src/render/src/picking.cpp
+  s_782aa603d2bdb2::t_83305c3636fc8d 8,17-22
+  s_782aa603d2bdb2::t_a16122edaa3501 96-107
+  s_782aa603d2bdb2::t_71bcaac67933b4 23
+src/render/tests/test_picking.cpp
+  s_782aa603d2bdb2::t_5b84f09b3ad42e 183-211
+  s_782aa603d2bdb2::t_0ae5ec873fff17 231
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "2ad6cc37e6d5b305631f7d825deb8966c88aa59b",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
