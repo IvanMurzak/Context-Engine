@@ -9,6 +9,11 @@
 // never a daemon one — the Shell mirrors chrome facts between its own windows and never forwards them
 // to the daemon (that is the D7 violation the whole tier exists to prevent).
 //
+// ⚠ THIS MODULE IS MIRROR-BEARING, so since editor-UX f1 it may not name a DAEMON-reaching router
+// method anywhere in it — `check_ui_bus_boundary.py` rule 3, which is what stops the sink below from
+// being re-pointed at one. Wanting to call a daemon verb from here is the signal that the call
+// belongs in a module that holds no sink (see docs/editor-ui-bus.md § the D7 boundary).
+//
 // THE BROADCASTING SHAPE, and why it is the point. The Shell BROADCASTS every mirrored envelope to
 // EVERY window including the sender (window_bridge.h `ui.mirror`). So this window receives its OWN
 // envelope back on its poll, and `receiveMirrored` drops it by `origin` — the loop breaker e08c built

@@ -65,9 +65,15 @@
 //     agent and a second window can see them; the built-in `editor.ui` set stays closed at nine and
 //     `packageui.ts`'s refusal of cross-package `editor.ui` subscription STAYS. D4 answers that
 //     refusal's security reason with a grant instead of removing the check.
-//   * IT DOES NOT ADD THE BOUNDARY CHECKER'S DENY-LIST ENTRY for `panel.facts.publish`. That is
-//     `f1`, deliberately sequenced after this task — and it is why `check_ui_bus_boundary.py` will
-//     have TWO daemon-reaching methods to name rather than one.
+//   * IT DOES NOT ADD THE BOUNDARY CHECKER'S DENY-LIST ENTRY for `panel.facts.publish`. That was
+//     `f1`, deliberately sequenced after this task — and it is why `check_ui_bus_boundary.py` had
+//     TWO daemon-reaching methods to name rather than one. LANDED: rule 3 of that checker now denies
+//     this method (and `panel.daemon.call`) to any module that implements `UiMirrorSink` or calls
+//     `attachMirror(`, so a cross-window mirror sink written where the mirror lives can no longer be
+//     pointed at this verb. A compliant panel-surface caller bears no sink and is untouched. The
+//     scope is a MODULE, so a sink object built one module out — naming neither the sink type nor
+//     `attachMirror(` — is a named, pinned RESIDUAL, not coverage; see docs/editor-ui-bus.md § the
+//     D7 boundary.
 
 #pragma once
 

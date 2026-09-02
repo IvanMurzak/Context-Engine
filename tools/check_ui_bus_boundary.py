@@ -6,7 +6,7 @@ Design 05 §5: the `editor.ui` bus is EDITOR-LOCAL and its facts are "NOT forwar
 test alone cannot prove it, because it only observes the code paths it happens to drive. This is the
 static half: it sweeps EVERY editor-core source, so a forwarding path nothing drives is still caught.
 
-Two rules, and both were verified by PLANTING a violation and watching this script go red.
+Three rules, and every one was verified by PLANTING a violation and watching this script go red.
 
 RULE 1 — THE BUS MODULE IS STRUCTURALLY INCAPABLE OF REACHING THE DAEMON.
     editor-core's ONE way out is `ShellBridge` (src/bridge.ts): it wraps CEF's injected query
@@ -14,29 +14,75 @@ RULE 1 — THE BUS MODULE IS STRUCTURALLY INCAPABLE OF REACHING THE DAEMON.
     therefore must not import that module, name that class, or otherwise mention the bridge — with no
     reference to the exit, no code in it can forward anything anywhere. It must also not INVOKE a
     `.call(`-shaped method, which closes the one route a name scan cannot see: a bridge handed in
-    under an innocuous name.
+    under an innocuous name. Nor may it name a DENY-LISTED method (rule 3): the bus holds no client,
+    so the only thing it could do with such a name is hand it to something that does.
 
 RULE 2 — NO ui-TOPIC SUBSCRIPTION ANYWHERE REACHES THE EXIT.
     Rule 1 keeps the bus clean; it says nothing about a CONSUMER. `bus.subscribe("editor.ui.focus",
     (e) => void bridge.call(...))` in any other editor-core module would forward chrome facts out of
     the renderer while leaving uibus.ts pristine. So every `subscribe(` call whose topic argument
     names a ui topic — a `UI_TOPIC_*` constant or an `editor.ui.*` literal — has its callback text
-    scanned for the exit, and a hit is a FINDING.
+    scanned for the exit, and a hit is a FINDING. Since editor-UX `f1` the same callback text is also
+    scanned for a DENY-LISTED method (rule 3), because a callback that reaches the daemon through a
+    HELPER holding the bridge names no exit of its own.
 
-WHAT THIS DELIBERATELY DOES NOT FORBID: the cross-window MIRROR seam (`UiMirrorSink`). Mirroring
-chrome facts between the Shell's own windows is the design (05 §5), and e10's sink will legitimately
-call a SHELL-local bridge method. That sink is not a subscription and is not matched here.
+RULE 3 — NO MIRROR-BEARING MODULE NAMES A DAEMON-REACHING METHOD (the deny-list; editor-UX `f1`).
+    Rules 1 and 2 both leave the cross-window MIRROR seam (`UiMirrorSink`) alone, and must: mirroring
+    chrome facts between the Shell's OWN windows is the design (05 §5), and `uimirror.ts`'s real sink
+    legitimately calls a SHELL-local bridge method (`ui.mirror`). A sink is not a subscription, so
+    rule 2 never looks at it — which is precisely why the seam needs a rule of its own.
 
-⚠ THE "NO DAEMON-FORWARDING METHOD EXISTS" PREMISE EXPIRED WITH M9 e13c-1. This docstring used to
-argue that a mirror sink could not reach the daemon because no routed method reached it through —
-every method the Shell routed was Shell-local (`panel.*`, `themes.get`, `config.*`,
-`keybindings.get`, `editor.state.*`, `welcome.*`). `panel.daemon.call` (package_sessions.h
-`kPanelDaemonCallMethod`) is now exactly such a method: it forwards a renderer-supplied method name
-and renderer-supplied params onto a daemon wire. The safety argument therefore no longer rests on
-non-existence, and THIS GATE OWES THE DENY-LIST the old text promised — a sink pointed at
-`panel.daemon.call` would carry chrome facts to the daemon and is precisely the D7 violation this
-file exists to prevent. NOT YET IMPLEMENTED (e13c-1 follow-up): add it with a planted violation
-first, since this file's own regexes have twice passed plants (see the warning below).
+    THE PREMISE THAT USED TO COVER THAT GAP EXPIRED WITH M9 e13c-1. This docstring once argued that a
+    sink could not reach the daemon because no method the Shell routed reached it through — every one
+    was Shell-local (`panel.*`, `themes.get`, `config.*`, `keybindings.get`, `editor.state.*`,
+    `welcome.*`). Two now are not:
+
+      * `panel.daemon.call` (M9 e13c-1, `package_sessions.h` `kPanelDaemonCallMethod`) forwards a
+        renderer-supplied method name and params onto a package's baseline daemon session;
+      * `panel.facts.publish` (editor-UX `d2`, `package_facts.h` `kPanelFactsPublishMethod`) carries a
+        package's declared fact onto that same session.
+
+    Either, named from a mirror sink, puts this window's chrome facts on the daemon wire — the D7
+    violation this whole file exists to prevent. So: a module is MIRROR-BEARING when it implements
+    `UiMirrorSink` or calls `attachMirror(`, and a mirror-bearing module may not name a deny-listed
+    method — by wire literal or by the TS constant that mirrors it — ANYWHERE in the module.
+
+    WHOLE-MODULE, deliberately, and it is the same structural-incapability argument rule 1 makes one
+    module out: a region-scoped rule (the sink's class body, the `attachMirror` argument) is bypassed
+    by a file-local helper, a file-local `const M = "panel.daemon.call"`, or a renaming import, and
+    each patch for those is another regex that has to be right. Holding the whole module clean needs
+    none of them — with no daemon method named in the file, no code in it can forward anything to the
+    daemon. It costs the seam nothing: `uibus.ts` and `uimirror.ts` are the only mirror-bearing
+    modules and neither has any business naming a daemon verb.
+
+    IT DISCRIMINATES RATHER THAN BLANKET-FAILING, which is the property that makes it a deny-list and
+    not a ban. A COMPLIANT use of either method — `makePackageDaemonCall` (`boot.ts`) and
+    `makePackageFactPublish` (`packagefacts.ts`), each forwarding a PANEL's own call from a panel
+    surface — sits in a module that bears no sink and stays green. `boot.ts` is the sharp case: it
+    both defines `PANEL_DAEMON_CALL_METHOD` and brings the mirror up (via `wireUiMirror`), and it
+    passes, because bringing a transport up is not holding a sink. Attach one there and it fails.
+
+    RESIDUAL, named rather than papered over. The scope is a MODULE and "mirror-bearing" is decided
+    by two names, so three shapes sit outside the rule and none of them should be read as covered:
+
+      * a THIRD daemon-reaching router method added later is unguarded until it is added to
+        `_DENIED_METHODS` — an addition is a human duty, not something this file can notice;
+      * a sink reaching one through a constant IMPORTED FROM ANOTHER MODULE UNDER A FRESH NAME is
+        not matched, because both spellings this file denies are names;
+      * and the one worth stating plainly, because the paragraph above could be read as denying it:
+        THE SINK OBJECT CAN BE BUILT ONE MODULE OUT. A factory returning
+        `{ deliver: (e) => void bridge.call(PANEL_FACTS_PUBLISH_METHOD, e) }` names no sink type and
+        attaches nothing, so its module is not mirror-bearing; the module that then calls
+        `attachMirror(factory(bridge))` IS mirror-bearing but names no denied method. Both halves
+        sweep clean with a live forwarding path in the tree — MEASURED against this checker, not
+        hypothesised. Whole-module scope beats the FILE-local helper it was chosen for; it does not
+        beat a CROSS-module one, and no name-based rule can. What stands behind that gap is rule 2,
+        the runtime half in `uibus.test.ts`, and a review duty on any sink authored outside
+        `uimirror.ts` — so a new sink belongs in `uimirror.ts`, where this rule reaches it.
+
+    `webui-panel-contract` byte-compares both entries against the C++ headers and the built bundle,
+    and `test_check_ui_bus_boundary.py` asserts each deny-listed literal still exists in the header
+    that defines it — so a RENAME cannot silently empty this list.
 
 It is a SOURCE scan (like tools/check_no_raw_key_handlers.py), so it runs on every default `build` leg
 with no browser — registered as the `webui-uibus-boundary` ctest in the `webui-*` family.
@@ -67,6 +113,50 @@ _EXIT = re.compile(r"\bbridge\b|\bShellBridge\b|\bdetectBridgeQuery\b|\bBRIDGE_Q
 # `.call(`-shaped method at all (it holds no client, and `Function.prototype.call` is not a style
 # this file uses). Forbidding the shape outright closes the smuggling route by construction.
 _BUS_EXIT = re.compile(_EXIT.pattern + r"|\.call\s*\(", re.IGNORECASE)
+
+# THE DENY-LIST (rule 3). The router methods that reach the DAEMON, each paired with the editor-core
+# constant that mirrors it. Both spellings are denied because either is enough to make the call: the
+# literal is what goes on the wire, the constant is how editor-core actually writes it.
+#
+# The two entries are the complete set of daemon-reaching methods the Shell routes today — every
+# other routed method is Shell-local. `tools/check_webui_assets.py --panel-contract` byte-compares
+# both against the C++ headers and the BUILT bundle, and `test_check_ui_bus_boundary.py` re-reads the
+# headers to assert these literals still exist there, so a rename cannot quietly empty this list.
+#
+# Each row is (wire literal, editor-core constant, defining header, C++ constant). The header and the
+# C++ constant are SEPARATE FIELDS rather than one "package_facts.h kPanelFactsPublishMethod" string:
+# the finding text wants them joined, but the staleness test wants them apart — to open the header and
+# look up that constant — and packing them meant that test had to split the string back up and defend
+# its own encoding. Structured here, formatted at the one place that wants prose.
+_DENIED_METHODS: tuple[tuple[str, str, str, str], ...] = (
+    ("panel.daemon.call", "PANEL_DAEMON_CALL_METHOD",
+     "package_sessions.h", "kPanelDaemonCallMethod"),
+    ("panel.facts.publish", "PANEL_FACTS_PUBLISH_METHOD",
+     "package_facts.h", "kPanelFactsPublishMethod"),
+)
+
+_DENIED = re.compile(
+    "|".join(
+        rf"{re.escape(literal)}|\b{re.escape(constant)}\b"
+        for literal, constant, _, _ in _DENIED_METHODS
+    )
+)
+
+# Where each deny-listed spelling is defined C++-side, quoted in the finding so it names the file to
+# open. Keyed by BOTH spellings, and built from the same table `_DENIED` is compiled from — so every
+# token `_DENIED` can match is a key here BY CONSTRUCTION, and a missing one is a KeyError rather than
+# a vague fallback label that would quietly make a broken deny-list look like a working one.
+_DENIED_HOME = {
+    spelling: f"{header} {cpp_constant}"
+    for literal, constant, header, cpp_constant in _DENIED_METHODS
+    for spelling in (literal, constant)
+}
+
+# What makes a module MIRROR-BEARING: it implements the sink interface, or it attaches one. Naming
+# the TYPE is enough — a sink is an object with one method, so `implements UiMirrorSink`,
+# `: UiMirrorSink` and `satisfies UiMirrorSink` all declare one, and a bare mention in code (as
+# opposed to a comment, which `_strip_comments` has already removed) means this module handles sinks.
+_MIRROR_BEARING = re.compile(r"\bUiMirrorSink\b|\battachMirror\s*\(")
 
 # The subscribe call site. The OPTIONAL TYPE ARGUMENT is load-bearing: editor-core's own real call is
 # `bus.subscribe<ThemeChangedPayload>(UI_TOPIC_THEME_CHANGED, …)`, and a bare `subscribe\s*\(` pattern
@@ -138,10 +228,16 @@ def _balanced_call(text: str, open_index: int) -> tuple[str, int]:
     return text[open_index + 1 :], len(text)
 
 
-def check_bus_module(source: str) -> list[str]:
-    """RULE 1: the bus module must not name — or invoke — editor-core's exit (comments excluded)."""
+def check_bus_module(code: str) -> list[str]:
+    """RULE 1: the bus module must not name — or invoke — editor-core's exit (comments excluded).
+
+    It must not name a deny-listed daemon method either: the bus holds no client, so a method name
+    there could only be there to be handed to something that does.
+
+    Takes the COMMENT-STRIPPED source — `check` strips each file once and hands the result to every
+    rule, so prose about the bridge is already gone by the time this sees the text.
+    """
     findings: list[str] = []
-    code = _strip_comments(source)
     for number, line in enumerate(code.splitlines(), start=1):
         if _BUS_EXIT.search(line):
             findings.append(
@@ -149,23 +245,80 @@ def check_bus_module(source: str) -> list[str]:
                 f"({line.strip()}) — D7 requires it to be structurally incapable of reaching the "
                 f"daemon (design 05 §5)"
             )
+            continue
+        denied = _DENIED.search(line)
+        if denied is not None:
+            findings.append(
+                f"{BUS_MODULE}:{number}: the editor.ui bus names the DAEMON-reaching method "
+                f"`{denied.group(0)}` ({_DENIED_HOME[denied.group(0)]}) — the bus holds no client, so "
+                f"the only use for that name here is handing it to something that does (D7, design "
+                f"05 §5)"
+            )
     return findings
 
 
-def check_subscriptions(path_label: str, source: str) -> list[str]:
-    """RULE 2: no `editor.ui.*` subscription callback may reach the exit."""
+def check_mirror_module(path_label: str, code: str) -> list[str]:
+    """RULE 3: a module that implements or attaches a `UiMirrorSink` names no daemon-reaching method.
+
+    Whole-module, like rule 1 and for the same reason: with no daemon verb named in the file, no code
+    in it can route a chrome fact to the daemon — no matter which helper, local constant or renamed
+    import the forwarding path is spelled through. A module that bears no sink is untouched, which is
+    what keeps a COMPLIANT `panel.daemon.call` / `panel.facts.publish` caller green.
+
+    Takes the COMMENT-STRIPPED source (see `check`), which is what makes both the mirror-bearing
+    pre-check and the per-line deny scan blind to prose — `uimirror.ts` documents at length why it
+    targets a Shell-local method, and none of that prose may be a finding.
+    """
+    if _MIRROR_BEARING.search(code) is None:
+        return []
     findings: list[str] = []
-    code = _strip_comments(source)
+    for number, line in enumerate(code.splitlines(), start=1):
+        denied = _DENIED.search(line)
+        if denied is None:
+            continue
+        findings.append(
+            f"{path_label}:{number}: a module that handles the editor.ui MIRROR seam names the "
+            f"DAEMON-reaching method `{denied.group(0)}` ({_DENIED_HOME[denied.group(0)]}) — a mirror "
+            f"sink must target a SHELL-local method, because the Shell mirrors chrome facts between "
+            f"its OWN windows and never forwards them to the daemon (D7, design 05 §5). Keep the "
+            f"daemon call in a module that bears no sink."
+        )
+    return findings
+
+
+def check_subscriptions(path_label: str, code: str) -> list[str]:
+    """RULE 2: no `editor.ui.*` subscription callback may reach the exit.
+
+    Takes the COMMENT-STRIPPED source (see `check`), so a commented-out subscription is not a finding
+    and the reported line numbers are the stripped text's — as they have always been.
+    """
+    findings: list[str] = []
     for match in _SUBSCRIBE.finditer(code):
         args, _ = _balanced_call(code, match.end() - 1)
         head = args.split(",", 1)
         if not _UI_TOPIC_ARG.search(head[0]):
             continue
         callback = head[1] if len(head) > 1 else ""
+        # The exit by name, OR a deny-listed daemon method: a callback that forwards through a HELPER
+        # holding the bridge names no exit of its own, and the method name is what gives it away.
         hit = _EXIT.search(callback)
-        if hit is None:
+        denied = None if hit is not None else _DENIED.search(callback)
+        if hit is None and denied is None:
             continue
         number = code.count("\n", 0, match.start()) + 1
+        if denied is not None:
+            # A DAEMON method, so the mirror seam is NOT the remedy: rule 3 denies this very
+            # name to any mirror-bearing module, and moving the sink one module out to dodge
+            # that is a residual this file names, not a fix. The fact stays in the renderer.
+            findings.append(
+                f"{path_label}:{number}: an editor.ui subscription forwards a chrome fact to "
+                f"the DAEMON-reaching method `{denied.group(0)}` "
+                f"({_DENIED_HOME[denied.group(0)]}) — a ui-chrome fact must NEVER leave this "
+                f"renderer for the daemon (D7, design 05 §5). This is NOT the mirror seam: a "
+                f"UiMirrorSink targets a SHELL-local method, and rule 3 denies this name to any "
+                f"module that bears one."
+            )
+            continue
         findings.append(
             f"{path_label}:{number}: an editor.ui subscription reaches editor-core's exit "
             f"(`{hit.group(0)}`) — a ui-chrome fact must NEVER be forwarded off this renderer (D7, "
@@ -175,18 +328,28 @@ def check_subscriptions(path_label: str, source: str) -> list[str]:
 
 
 def check(source_root: Path) -> list[str]:
-    """Run both rules over `source_root`. Raises FileNotFoundError when the bus module is missing."""
+    """Run all three rules over `source_root`. Raises FileNotFoundError when the bus module is missing."""
     bus = source_root / BUS_MODULE
     if not bus.is_file():
         raise FileNotFoundError(f"{bus} does not exist")
-    findings = check_bus_module(bus.read_text(encoding="utf-8"))
+    # EVERY RULE READS THE SAME COMMENT-STRIPPED TEXT, so each file is read and stripped exactly once
+    # here and the rules are handed the result. `_strip_comments` is a pure full-text pass and is this
+    # checker's dominant cost, so letting each rule re-derive it from the raw source repeated the same
+    # computation twice per file — and read + stripped `uibus.ts` a second time on top. What the rules
+    # SEE is unchanged; only the number of times it is computed is.
+    bus_code = _strip_comments(bus.read_text(encoding="utf-8"))
+    findings = check_bus_module(bus_code)
     for path in sorted(source_root.rglob("*")):
         if not path.is_file() or path.suffix not in _TS_EXTENSIONS or _is_test_source(path):
             continue
-        findings.extend(
-            check_subscriptions(path.relative_to(source_root).as_posix(),
-                                path.read_text(encoding="utf-8"))
-        )
+        label = path.relative_to(source_root).as_posix()
+        code = bus_code if path == bus else _strip_comments(path.read_text(encoding="utf-8"))
+        findings.extend(check_subscriptions(label, code))
+        # Rule 3 skips the bus module itself: rule 1 already holds it to a stricter standard, and
+        # `uibus.ts` is mirror-bearing (it DECLARES the sink interface), so scanning it twice would
+        # report the same line under two rules.
+        if label != BUS_MODULE:
+            findings.extend(check_mirror_module(label, code))
     return findings
 
 
@@ -225,9 +388,11 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 1
 
+    denied = ", ".join(literal for literal, _, _, _ in _DENIED_METHODS)
     print(
-        f"[uibus-boundary] PASS: {BUS_MODULE} names no exit, and no editor.ui subscription in "
-        f"{root.as_posix()} reaches one."
+        f"[uibus-boundary] PASS: {BUS_MODULE} names no exit, no editor.ui subscription in "
+        f"{root.as_posix()} reaches one, and no mirror-bearing module names a daemon-reaching "
+        f"method ({denied})."
     )
     return 0
 

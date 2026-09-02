@@ -68,9 +68,11 @@ checks that catch different things. Both were verified by **planting a forwardin
 them go red — a boundary test that would still pass with a violation in place is worse than none.
 
 1. **`webui-uibus-boundary`** (ctest; `tools/check_ui_bus_boundary.py`) — a source scan on every
-   `build` leg. `uibus.ts` may not name *or invoke* editor-core's one exit (`ShellBridge`,
-   `bridge.ts`), and no `editor.ui.*` subscription anywhere in editor-core may reach that exit from
-   its callback. This is the half that sees a forwarding path **no test happens to drive**.
+   `build` leg, in three rules. `uibus.ts` may not name *or invoke* editor-core's one exit
+   (`ShellBridge`, `bridge.ts`); no `editor.ui.*` subscription anywhere in editor-core may reach that
+   exit from its callback; and — since editor-UX `f1` — no **mirror-bearing** module may name a
+   **daemon-reaching** method (the deny-list, below). This is the half that sees a forwarding path
+   **no test happens to drive**.
 2. **`webui-ts-unit` → `uibus.test.ts`** — installs a recording query function as the injected Shell
    channel (the one channel out of the renderer), drives the real theme engine plus a publish on every
    topic with subscribers and a mirror sink attached, and requires the channel to have seen nothing.
@@ -102,22 +104,65 @@ What exists today:
 A sink implementation MUST target a **Shell-local** method. The Shell mirrors chrome between its own
 windows; routing chrome onward to the daemon is the D7 violation the gates above exist to prevent.
 
-⚠ **A daemon-forwarding method now EXISTS** — `panel.daemon.call` (M9 e13c-1), which carries a package
-panel's call onto that package's own baseline daemon session. Until e13b-1 this section could argue
-that a sink *could not* reach the daemon because no routed method reached it through; that premise is
-gone. `check_ui_bus_boundary.py` accordingly owes the deny-list naming it, which is **not yet
-implemented** — so today the rule "a sink MUST target a Shell-local method" is enforced by review
-rather than by the gate. Pointing a sink at `panel.daemon.call` would put chrome facts on the daemon
-wire.
+**That rule is now GATE-ENFORCED, not review-enforced** (editor-UX `f1`). Two methods the Shell routes
+do reach the daemon, and either one, named from a mirror sink, would put this window's chrome facts on
+the daemon wire:
 
-⚠ **AND THERE ARE NOW TWO.** editor-UX `d2` added `panel.facts.publish` — the package FACT BUS's one
-door ([`package-facts.md`](package-facts.md)) — which carries a package's declared fact onto its own
-baseline daemon session. It widens exactly the hole named above rather than opening a new kind of one:
-a mirror sink pointed at it would put this window's chrome facts on the daemon wire under a package's
-topic. So the deny-list `check_ui_bus_boundary.py` owes must name **both** methods, and `f1` is the
-task that adds it — verified the way that checker was verified originally, by planting a forwarding
-path and watching the gate go red. A boundary test that would still pass with a violation in place is
-worse than none.
+* `panel.daemon.call` (M9 e13c-1, `package_sessions.h` `kPanelDaemonCallMethod`) — a package panel's
+  call, forwarded onto that package's own baseline daemon session;
+* `panel.facts.publish` (editor-UX `d2`, `package_facts.h` `kPanelFactsPublishMethod`) — the package
+  FACT BUS's one door ([`package-facts.md`](package-facts.md)), carrying a package's declared fact
+  onto that same session.
+
+Until `f1` the safety argument here rested on a premise that had expired: that a sink *could not*
+reach the daemon because every routed method was Shell-local. `check_ui_bus_boundary.py` rule 3 now
+carries it instead. A module is **mirror-bearing** when it implements `UiMirrorSink` or calls
+`attachMirror(`, and a mirror-bearing module may not name either method anywhere in it — by wire
+literal or by the editor-core constant that mirrors it (`PANEL_DAEMON_CALL_METHOD`,
+`PANEL_FACTS_PUBLISH_METHOD`).
+
+**Whole-module, and that is the design, not laziness.** A rule scoped to the sink's class body or the
+`attachMirror` argument is walked past by a file-local helper, a file-local
+`const M = "panel.daemon.call"`, or a renaming import — each needing another regex that has to be
+right. Holding the whole module clean is the same structural-incapability argument rule 1 makes about
+`uibus.ts`, one module out, and it costs the seam nothing: `uibus.ts` and `uimirror.ts` are the only
+mirror-bearing modules and neither has any business naming a daemon verb.
+
+**It discriminates, rather than banning the methods outright.** A *compliant* use of either —
+`makePackageDaemonCall` (`boot.ts`) and `makePackageFactPublish` (`packagefacts.ts`), each forwarding a
+panel's own call from a panel surface — lives in a module that bears no sink and stays green. `boot.ts`
+is the sharp case: it both defines `PANEL_DAEMON_CALL_METHOD` **and** brings this mirror up (via
+`wireUiMirror`), and it passes, because bringing a transport up is not holding a sink. Attach one
+there and it fails.
+
+Verified the way this checker was verified originally — by planting a forwarding path and watching the
+gate go red, in both directions and per plant: `panel.daemon.call` from `ShellUiMirrorSink.deliver`,
+`panel.facts.publish` from the same place, and the helper-plus-local-constant indirection a
+region-scoped rule would have missed. `uibus.test.ts` carries the runtime half: it drives the REAL
+`ShellUiMirrorSink` and asserts the methods it puts on the wire are Shell-local `ui.mirror*` verbs —
+after first asserting the channel carried anything at all, because "no daemon verb was called" is free
+for a seam that called nothing.
+
+**What the deny-list does NOT cover, named rather than left implied.** It is a list of *names*, so a
+third daemon-reaching router method added later is unguarded until it is added to the list, and a sink
+reaching one through a constant imported from another module under a fresh name is not matched by
+name. And the scope is a *module*, so — the one to state plainly, because "a mirror sink can no longer
+reach the daemon" would otherwise be read as absolute — **the sink object can be built one module
+out**. A factory returning `{ deliver: (e) => void bridge.call(PANEL_FACTS_PUBLISH_METHOD, e) }` names
+no sink type and attaches nothing, so its module is not mirror-bearing; the module that then calls
+`attachMirror(factory(bridge))` is mirror-bearing but names no denied method. Both halves sweep clean
+with a live forwarding path in the tree — measured against the checker, not hypothesised, and pinned
+by `test_the_cross_module_sink_factory_is_a_KNOWN_residual` so the gap stays a measurement rather than
+an assumption. Whole-module scope beats the *file*-local helper it was chosen for; it does not beat a
+cross-module one, and no name-based rule can. What stands behind it is rule 2, the runtime half, and a
+review duty: **a new mirror sink belongs in `uimirror.ts`**, which is where rule 3 reaches it.
+`webui-panel-contract` byte-compares both entries against the C++ headers and the built bundle,
+and `test_check_ui_bus_boundary.py` re-reads those headers to assert each denied literal still exists
+there, so a **rename** cannot silently empty the list — but an **addition** is a human duty. Nor does
+this gate touch the security findings `d2` shipped open (both its daemon verbs sit on the read/query
+baseline; the manifest topic grammar has no length bound while the bus enforces 128); those are daemon-
+and manifest-tier issues on the far side of this boundary, and the deny-list neither closes nor
+worsens them.
 
 The `editor.ui` built-in topic set is **unchanged at nine** by `d2`, deliberately: package facts are
 daemon facts precisely so this bus does not have to grow a member, and `packageui.ts`'s refusal of

@@ -189,6 +189,9 @@ export type UiListener<P = unknown> = (event: EditorUiEvent<P>) => void;
  *
  * ⚠ A sink MUST target a SHELL-local method. The Shell mirrors chrome facts between ITS OWN windows;
  * routing them onward to the daemon would be the D7 violation this whole module exists to prevent.
+ * Since editor-UX f1 that is GATE-ENFORCED rather than review-enforced: `check_ui_bus_boundary.py`
+ * rule 3 denies both daemon-reaching router methods to any module that implements this interface or
+ * calls `attachMirror` (see docs/editor-ui-bus.md § the D7 boundary).
  */
 export interface UiMirrorSink {
     deliver(event: EditorUiEvent): void;
