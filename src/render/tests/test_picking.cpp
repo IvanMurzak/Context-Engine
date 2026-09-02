@@ -180,6 +180,35 @@ void a_non_finite_transform_is_skipped_not_crashed()
     CHECK(hit.entity == kEntityB);
 }
 
+void a_singular_transform_is_skipped_not_teleported_to_the_origin()
+{
+    // A DEGENERATE scale (zero on one axis) makes the proxy's model matrix SINGULAR.
+    // math.h's inverse() documents that a singular matrix falls back to the IDENTITY rather than an
+    // inf/NaN matrix — the regression this test pins is a raycast that naively inverts a singular
+    // model anyway and ends up testing the ray against a phantom unit box at the WORLD ORIGIN
+    // instead of the item's real (far-away, degenerate) location.
+    RenderItem degenerate = make_item(kEntityA, Vec3{100.0f, 100.0f, 100.0f}, Vec3{0.0f, 1.0f, 1.0f});
+
+    RenderSnapshot only_degenerate;
+    only_degenerate.items.push_back(degenerate);
+    // The ray's ORIGIN is the world origin — exactly the point a buggy identity-fallback raycast
+    // would find itself "inside" the phantom box and report a spurious hit at distance ~0, even
+    // though the real (degenerate) item sits at (100, 100, 100), nowhere near this ray.
+    const PickHit miss = pick_nearest(straight_ahead_ray(), only_degenerate);
+    CHECK(!miss.hit);
+
+    // The POSITIVE sibling in the SAME fixture family: a normal, non-degenerate item on the ray's
+    // own line is still picked — proving the miss above is really about the singular transform, not
+    // a raycast that has stopped hitting anything.
+    RenderSnapshot degenerate_and_valid;
+    degenerate_and_valid.items.push_back(degenerate);
+    degenerate_and_valid.items.push_back(
+        make_item(kEntityB, Vec3{0.0f, 0.0f, 10.0f}, Vec3{1.0f, 1.0f, 1.0f}));
+    const PickHit hit = pick_nearest(straight_ahead_ray(), degenerate_and_valid);
+    CHECK(hit.hit);
+    CHECK(hit.entity == kEntityB);
+}
+
 void selection_ids_are_stable_and_distinguish_entities()
 {
     const std::string id_a = pick_selection_id(kEntityA);
@@ -199,6 +228,7 @@ int main()
     the_nearest_of_two_overlapping_candidates_wins();
     rotation_and_non_uniform_scale_are_honoured();
     a_non_finite_transform_is_skipped_not_crashed();
+    a_singular_transform_is_skipped_not_teleported_to_the_origin();
     selection_ids_are_stable_and_distinguish_entities();
     RENDER_TEST_MAIN_END();
 }

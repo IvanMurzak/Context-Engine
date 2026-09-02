@@ -5,6 +5,7 @@
 #include "context/render/math.h"
 #include "context/render/viewport_pass.h" // proxy_model / transform_is_finite -- the SAME box the pass draws
 
+#include <cmath>
 #include <cstdio>
 #include <limits>
 
@@ -12,6 +13,13 @@ namespace context::render
 {
 namespace
 {
+
+// The determinant floor below which a proxy's model matrix is treated as SINGULAR for picking
+// purposes -- deliberately generous (well above float epsilon) because what matters here is not
+// "is this literally zero" but "would inverse() take its identity fallback and hand back a matrix
+// meaning something else entirely". A determinant this small already puts inverse()'s own float
+// division into subnormal/overflow territory (math.h's inverse() documents exactly that case).
+constexpr float kMinPickableDeterminant = 1.0e-6f;
 
 // Ray-vs-UNIT-BOX (centred on the origin, spanning [-0.5, 0.5] on every axis) in the box's OWN
 // space, via the classic slab method. `origin`/`dir` are already in that object space (the caller
@@ -85,6 +93,18 @@ PickHit pick_nearest(const Ray& ray, const RenderSnapshot& snapshot, float proxy
         }
 
         const Mat4 model = proxy_model(item.transform, proxy_size);
+
+        // A SINGULAR (or near-singular) model -- a zero/degenerate authored scale on any axis, most
+        // commonly -- has no real inverse: math.h's inverse() falls back to the IDENTITY rather than
+        // an inf/NaN matrix. Testing the ray against THAT would raycast a phantom unit box at the
+        // WORLD ORIGIN instead of the item's actual (drawn, if invisible) location -- a click far
+        // from the item could then spuriously "hit" it, or a click ON it could miss. Skip instead,
+        // exactly like the transform_is_finite() skip above: you cannot pick a box that has no real
+        // shape in world space, the same "pick what is drawn" rule this file's header states.
+        if (!(std::fabs(determinant(model)) > kMinPickableDeterminant))
+        {
+            continue;
+        }
         const Mat4 inv = inverse(model);
 
         // Map the world ray into the box's OWN space. Transforming the origin and a SECOND point
