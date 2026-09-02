@@ -220,6 +220,9 @@ void ViewportBinding::attach_device(render::IDevice& device)
     // registry is what drops them; the entries keep their cameras and are re-acquired on the next
     // publish (their slots are re-minted there too — a slot is registry-local).
     targets_ = std::make_unique<render::ViewportTargetRegistry>(device);
+    // …and every layer ALREADY published names a view the line above just destroyed. Arm the
+    // unconditional republish so the compositor cannot keep one (see `needs_publish`).
+    force_publish_ = true;
     for (auto& [id, live] : entries_)
     {
         (void)id;
@@ -233,6 +236,11 @@ void ViewportBinding::detach_device()
 {
     device_ = nullptr;
     targets_.reset();
+    // The compositor still holds the layers this binding published, and their `content` views were
+    // owned by the registry just destroyed. Without this the next publish would compare an
+    // unchanged rect set, take the `mark_viewport_content()` branch and leave those dangling
+    // pointers in place for `render_gpu_frame` to dereference.
+    force_publish_ = true;
     for (auto& [id, live] : entries_)
     {
         (void)id;
@@ -309,6 +317,15 @@ std::size_t ViewportBinding::apply_cameras_result(const contract::Json& reply)
         {
             continue;
         }
+        if (std::find(dirty_.begin(), dirty_.end(), id) != dirty_.end())
+        {
+            // A LOCAL move for this viewport is still on the write queue, so the daemon's copy is
+            // by definition the OLDER one. Adopting it here would revert the human's gesture and —
+            // worse — the very next `take_dirty()` would push the reverted value back as if it were
+            // the move, making the loss permanent. The pending write wins; the daemon hears it, and
+            // the next hydration reads what we wrote.
+            continue;
+        }
         (void)apply_camera(id, element.at("transform"), element.at("projection"));
         ++adopted;
     }
@@ -372,6 +389,10 @@ ViewportPublishStats ViewportBinding::publish(const std::vector<ShellRegion>& re
     ViewportPublishStats stats;
     stats.adapter_absent = device_ == nullptr;
     ++publishes_;
+    // A device change invalidated every published `content` view, so this publish must reach the
+    // compositor whatever the rects say (viewport_binding.h § needs_publish).
+    const bool forced = force_publish_;
+    force_publish_ = false;
 
     for (auto& [id, live] : entries_)
     {
@@ -487,7 +508,7 @@ ViewportPublishStats ViewportBinding::publish(const std::vector<ShellRegion>& re
     }
 
     layers_ = layers;
-    if (stats.changed)
+    if (stats.changed || forced)
     {
         ++layout_changes_;
         // A moved / added / removed rect IS a layout change, and `publish_viewports` sets exactly
@@ -505,7 +526,14 @@ ViewportPublishStats ViewportBinding::publish(const std::vector<ShellRegion>& re
         //
         // This is the FIRST caller of `mark_viewport_content()` — the seam compositor.h reserved for
         // "a viewport's CONTENT changed without its rect changing" and that nothing had reached.
-        compositor.mark_viewport_content();
+        //
+        // Only when there IS a viewport: with no viewport layers at all nothing was redrawn, and
+        // damaging the frame anyway would make every chrome-only region republish present a frame
+        // for a viewport that does not exist.
+        if (!layers_.empty())
+        {
+            compositor.mark_viewport_content();
+        }
     }
     return stats;
 }

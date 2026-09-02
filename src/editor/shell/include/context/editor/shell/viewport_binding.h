@@ -223,6 +223,17 @@ public:
     [[nodiscard]] std::size_t publishes() const noexcept { return publishes_; }
     [[nodiscard]] std::size_t layout_changes() const noexcept { return layout_changes_; }
 
+    // A device came or went since the last `publish()`, so the compositor's layer stack MUST be
+    // rebuilt even if no rect moved.
+    //
+    // WHY IT IS A PUBLIC FACT AND NOT AN INTERNAL FLAG. `WindowCompositor` holds the published
+    // layers by RAW `ITextureView*`, and those views belong to the registry `attach_device` /
+    // `detach_device` destroys. The owner loop only calls `publish()` when the region map's
+    // generation moved, so after a device change with an unchanged layout NOTHING would republish
+    // and the compositor would keep compositing pointers into a destroyed registry. The caller's
+    // publish gate reads this so a device change is a publish trigger in its own right.
+    [[nodiscard]] bool needs_publish() const noexcept { return force_publish_; }
+
 private:
     // Everything the binding knows about one live viewport.
     struct Entry
@@ -247,6 +258,10 @@ private:
     std::uint32_t next_slot_ = 1; // 0 is view.h's reserved "unassigned"
     std::size_t publishes_ = 0;
     std::size_t layout_changes_ = 0;
+    // Set by attach_device / detach_device, consumed by publish(): the next publish republishes
+    // unconditionally, so no layer pointing into a destroyed registry survives it (see
+    // `needs_publish`).
+    bool force_publish_ = false;
 };
 
 } // namespace context::editor::shell

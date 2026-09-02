@@ -37,10 +37,10 @@ render::View framed_scene_view(const render::View& current)
 ViewportFeed::ViewportFeed(PanelHost& host, std::string panel_id, ViewportBinding* binding)
     : host_(host), panel_id_(std::move(panel_id)), binding_(binding)
 {
-    if (binding_ != nullptr)
-    {
-        adapter_available_ = binding_->adapter_available();
-    }
+    // NO PRODUCER IS NO ADAPTER (R-HEAD-002), which is also exactly what `bind_binding(nullptr)`
+    // records — a feed constructed without a binding must not claim a rendering adapter it would
+    // then report absent the moment the same nullptr arrived through the setter instead.
+    adapter_available_ = binding_ != nullptr && binding_->adapter_available();
 }
 
 void ViewportFeed::bind_binding(ViewportBinding* binding)

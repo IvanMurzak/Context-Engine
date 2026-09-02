@@ -145,6 +145,12 @@ void EditorWindow::DragObserver::on_update_drag_cursor(DragOperation operation)
 
 PresentPath EditorWindow::attach_present(render::IRhi& rhi)
 {
+    // e3: drop every viewport target FIRST. `device_` is replaced (or reset) below, and a target is
+    // created ON that device — `attach_device`'s own contract is that the device outlives the
+    // binding, so releasing the old targets has to happen while the old device is still alive.
+    // A no-op on the first attach, and it also arms the republish that stops the compositor keeping
+    // a layer whose `content` view this destroys.
+    viewports_.detach_device();
     const render::NativeWindowDesc native = backend_->native_window();
     surface_ = rhi.create_surface(native);
     if (surface_ == nullptr)
@@ -578,7 +584,12 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
     // exists for, and its first consumer. A viewport whose CONTENT moved without its rect moving is
     // not covered by this gate and never will be: that is `mark_viewport_content()`'s job, which the
     // producer marks itself, and which a live scene feed will drive when one exists.
-    if (alive_ && input_.regions().generation() != viewport_regions_generation_)
+    //
+    // A DEVICE CHANGE IS ITS OWN TRIGGER (`needs_publish`): attaching or detaching a device destroys
+    // every render target, and the compositor holds the published layers by raw `ITextureView*`, so
+    // a device swap under an unchanged layout must still republish or those pointers dangle.
+    if (alive_ && (viewports_.needs_publish() ||
+                   input_.regions().generation() != viewport_regions_generation_))
     {
         viewport_regions_generation_ = input_.regions().generation();
         (void)viewports_.publish(input_.regions().regions(), viewport_scene_, compositor_);
