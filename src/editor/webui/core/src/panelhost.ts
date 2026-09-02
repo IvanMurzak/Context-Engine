@@ -838,6 +838,27 @@ export interface PanelHostOptions {
      * `boot.ts` supplies `ThemeEngine.iframes`.
      */
     readonly themeChannel?: PanelThemeChannel;
+    /**
+     * "The dock's arrangement is now this" — called on the FIRST mount and on every layout change
+     * afterwards (editor-UX e3). `boot.ts` wires it to the chrome region publisher's debounced
+     * `schedule()`.
+     *
+     * WHY THE HOST OWNS THIS SIGNAL and no caller can reconstruct it. A Scene viewport publishes its
+     * dock rect as a `viewport`-kind region, and that rect exists only once Dockview has laid the
+     * panel out — which is neither a window resize nor a DPI change, i.e. NONE of the region
+     * publisher's own triggers. `LayoutPersistence` subscribes the same Dockview event, but only
+     * after `start()` has already added every panel, so the adds that first produced the rect are
+     * already past by then; and a torn-out window has no `LayoutPersistence` at all. Before this
+     * seam existed the Shell was measured holding zero `viewport`-kind regions for the entire life
+     * of a window — the composited scene was never drawn, and the panel showed its text summary over
+     * an empty layer stack until the human happened to drag a sash.
+     *
+     * Called from the SAME place `#syncNativeSurfaces` is — the mount, then the undebounced layout
+     * subscription — because it answers the same question about the same arrangement, and two
+     * subscriptions could disagree for a frame. Debouncing belongs to the CALLBACK (a drag reports at
+     * mousemove rate); this fires on every change and says nothing about how often to act.
+     */
+    readonly onArrangementChanged?: () => void;
 }
 
 /** Options for `PanelHost.start`. */
@@ -918,6 +939,8 @@ export class PanelHost {
     // in which the docking surface is drawn over live scene pixels is a visible flash.
     #layoutSub: DockviewDisposable | null = null;
     #roster: PanelRoster | null = null;
+    // editor-UX e3: "the arrangement changed" — see PanelHostOptions.onArrangementChanged.
+    readonly #onArrangementChanged: (() => void) | undefined;
 
     constructor(options: PanelHostOptions) {
         this.#container = options.container;
@@ -926,6 +949,7 @@ export class PanelHost {
         this.#localPanels = options.localPanels ?? new Map<string, LocalPanelFactory>();
         this.#panelVerbs = options.panelVerbs;
         this.#themeChannel = options.themeChannel;
+        this.#onArrangementChanged = options.onArrangementChanged;
     }
 
     /**
@@ -1647,16 +1671,25 @@ export class PanelHost {
     }
 
     /**
-     * Re-mark the Dockview groups whose ACTIVE panel is a native surface (editor-UX e3).
+     * Re-mark the Dockview groups whose ACTIVE panel is a native surface (editor-UX e3), and report
+     * the arrangement to whoever is measuring it.
      *
-     * Kept as a one-line forwarder to `viewport.ts` so the rule itself lives beside the attribute it
-     * stamps and the stylesheet that reads it, rather than being split across two modules.
+     * The marking is kept as a one-line forwarder to `viewport.ts` so the rule itself lives beside
+     * the attribute it stamps and the stylesheet that reads it, rather than being split across two
+     * modules.
+     *
+     * The REPORT rides the same call for the reason `PanelHostOptions.onArrangementChanged` states:
+     * the mark decides whether the dock paints over a viewport and the report is what gets a layer
+     * composited under it — the same arrangement answering one question, so they cannot be allowed to
+     * disagree by a frame. It runs even when the marking found nothing to change: a group that lost
+     * its viewport moves a rect too, and the map is published wholesale.
      */
     #syncNativeSurfaces(): void {
         if (this.#api === null) {
             return;
         }
         syncNativeSurfaceGroups(this.#api.panels, (instanceId) => this.panelIdOf(instanceId));
+        this.#onArrangementChanged?.();
     }
 
     /** Dispose every panel and the docking root. Idempotent. */

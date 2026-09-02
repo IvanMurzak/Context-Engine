@@ -924,11 +924,65 @@ html .dockview-theme-dark .dv-tab:hover {
  *     frame the browser paints over, one ring of pixels wide.
  *
  * The measured rect (viewport.ts) is this element's, so what is transparent and what is composited
- * are the same rectangle by construction rather than by two numbers agreeing. */
+ * are the same rectangle by construction rather than by two numbers agreeing.
+ *
+ * …AND THE INK, because of what the slot's own content is drawn over once the hole is genuinely open.
+ *
+ * The slot is not empty: the C++ `ViewportPanel` projects a status line, the R-HEAD-002 present
+ * report ("ready", or the reserved `viewport.*` code) and the accessible surface description into
+ * it, plus the focusable "Frame scene" control. All of that now sits ON TOP of live scene pixels
+ * rather than on the theme's panel surface — so `colors.ink` is the wrong ink for it: it is chosen
+ * to read against `colors.panel`, and in every LIGHT theme that is dark text on the D5 pass's dark
+ * render, which is illegible. Measured on the light builtin the moment the hole started working.
+ *
+ * A FIXED overlay ink rather than a theme token, deliberately: what this text is drawn over is not
+ * the theme, it is the viewport pass's own output, and that is dark in every theme (the pass takes
+ * no theme input at all). The shadow carries the rest — it keeps the line readable over a bright
+ * patch of scene without a scrim, which would be a second surface competing with the render.
+ *
+ * NOT hidden instead, and that is an R-HEAD-002 point rather than a taste one: when this build has
+ * no rendering adapter the composited layer is EMPTY, and this text is the only thing that reports
+ * `viewport.adapter_absent` to the human. Hiding it would hide exactly the failure it exists to
+ * name. Controls keep their own kit surface (a button paints a background), so they are untouched. */
 .ctx-panel-body[data-panel-native-surface] {
     background: transparent;
     padding: 0;
     overflow: hidden;
+}
+
+/* THE SLOT IS AN OVERLAY SURFACE, so it re-points the colour tokens its content resolves against.
+ *
+ * The slot's content is not decoration: the C++ `ViewportPanel` projects a status line carrying the
+ * R-HEAD-002 present report ("ready", or the reserved `viewport.*` code), the accessible surface
+ * description, and the focusable "Frame scene" control. Once the hole is genuinely open all of it is
+ * drawn ON TOP of live scene pixels rather than on the theme's panel surface — so the theme's ink,
+ * chip and line colours are the wrong ones: they are chosen to read against `colors.panel`, and in
+ * every LIGHT theme that is dark text and a near-white button on the viewport pass's dark render.
+ * Measured on the light builtin the moment the hole started working: illegible.
+ *
+ * TOKENS, NOT RULES, and that is a jurisdiction point rather than a style preference. The hydration
+ * widget layer has exactly ONE styling owner (the kit), and `webui-kit-role-coverage` enforces that
+ * no `.ctx-widget-` rule survives in this stylesheet. Re-pointing the tokens the kit's own rules
+ * resolve against is how a container says "the surface underneath me is different" without taking
+ * any of that ownership: the kit still decides what a status line or a button LOOKS like, this
+ * decides what it is looking at. The five below are exactly the ones the roles this panel renders
+ * resolve — ink (text/heading/button label), muted (the status line), chip + line (the button's own
+ * surface) and panel2 (its hover) — and nothing else is re-pointed, so anything a future viewport
+ * panel adds inherits the theme until someone looks at it here.
+ *
+ * FIXED VALUES rather than a theme lookup, because what this text is over is not the theme: it is
+ * the viewport pass's own output, and the pass takes no theme input at all (viewport_pass.h). A
+ * theme-derived overlay ink would track a surface that is not there.
+ *
+ * NOT hidden instead, which would be the other way to solve legibility: when this build has no
+ * rendering adapter the composited layer is EMPTY and this text is the only thing that reports
+ * `viewport.adapter_absent` to the human — hiding it would hide exactly the failure it names. */
+.ctx-panel-body[data-panel-native-surface] {
+    --ctx-colors-ink: #f2f5f8;
+    --ctx-colors-muted: #c3cad2;
+    --ctx-colors-chip: rgb(20 22 26 / 82%);
+    --ctx-colors-line: rgb(242 245 248 / 28%);
+    --ctx-colors-panel2: rgb(40 44 50 / 88%);
 }
 
 /* THE OTHER HALF OF THE HOLE (M9 editor-UX e3) — the GROUP behind it.
@@ -955,6 +1009,49 @@ html .dockview-theme-dark .dv-tab:hover {
 html .dockview-theme-dark .dv-groupview[data-group-native-surface] {
     --dv-group-view-background-color: transparent;
     background-color: transparent;
+}
+
+/* THE REMAINING TWO HALVES OF THE HOLE — and they were the ones that actually kept it shut.
+ *
+ * The `…` in the stack above hides `.dv-dockview`, dockview's own root, which paints
+ * `--dv-group-view-background-color` across the WHOLE dock behind every group; and behind THAT the
+ * document CANVAS, which the `html, body` rule near the top of this file paints `colors.canvas`
+ * into. Both are opaque, both are behind every viewport slot, and either one alone is enough to
+ * make the composited layer invisible: the browser frame's alpha under the rect stays 1 and the
+ * Shell's `draw_layer` output is simply painted over.
+ *
+ * MEASURED on the live editor before this rule existed: the viewport slot read `#0a0a0a` — exactly
+ * `colors.panel`, byte-identical to every other panel body — with the slot and the group already
+ * transparent. With these two rules it reads the compositor's clear, and the composited scene shows
+ * through. That is the whole of the e3 hole; the two rules above are necessary and were never
+ * sufficient.
+ *
+ * ⚠ SCOPED TO "a viewport is on screen" (`viewport.ts`'s `syncNativeSurfaceGroups` stamps both
+ * markers off the same answer that marks the groups), so a window with no Scene view open paints
+ * exactly as it did before this change.
+ *
+ * WHAT BACKS THE WINDOW once the canvas stops painting is the Shell compositor's clear colour
+ * (compositor.h § `clear` — opaque black by design, so the desktop can never show through a hole).
+ * Every surface the human looks at paints itself: the three chrome strips paint `colors.panel2` and
+ * each dock group paints `colors.panel`. The one thing that DID rely on the root was the sash gutter
+ * between groups (`--dv-sash-color` is `transparent` in every dockview theme), so it is painted
+ * explicitly below rather than left to whatever is behind it. */
+html[data-native-surface],
+html[data-native-surface] body {
+    background: transparent;
+}
+
+html .dockview-theme-dark .dv-dockview[data-dock-native-surface] {
+    background-color: transparent;
+}
+
+/* The gutter the root used to paint. `.dv-sash` fills the space between two views, so painting it
+ * restores exactly the pixels the rule above stops painting — and it is never under a viewport rect
+ * (a sash lies BETWEEN group boxes, and a slot is measured inside one), so it cannot re-close the
+ * hole. `colors.canvas`, not `colors.panel`: this is the surface the dock's own background was, and
+ * it is what the light themes need to stay light. */
+html .dockview-theme-dark .dv-dockview[data-dock-native-surface] .dv-sash {
+    background-color: var(--ctx-colors-canvas, var(--editor-bg));
 }
 
 /* A THIRD-PARTY package panel's slot (M9 e13a-2) — the same `.ctx-panel-body` slot, minus the two

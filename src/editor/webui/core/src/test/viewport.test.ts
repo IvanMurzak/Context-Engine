@@ -18,12 +18,15 @@
 
 import { assert, assertEqual, waitFor, type TestCase } from "./harness.js";
 import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
+import { ChromeRegionPublisher } from "../chrome.js";
 import { detectDockview } from "../dockview.js";
-import { REGION_KIND_VIEWPORT } from "../editorstate.js";
+import { REGION_KIND_VIEWPORT, type ShellRegion } from "../editorstate.js";
 import { PanelHost } from "../panelhost.js";
 import { PANEL_LIST_METHOD, PanelClient, parsePanelManifest } from "../panels.js";
 import {
     PANEL_INSTANCE_ATTRIBUTE,
+    VIEWPORT_DOCK_ATTRIBUTE,
+    VIEWPORT_DOCUMENT_ATTRIBUTE,
     VIEWPORT_PANEL_ID,
     VIEWPORT_SURFACE_ATTRIBUTE,
     isNativeSurfacePanel,
@@ -142,7 +145,13 @@ interface Mounted {
     dispose(): void;
 }
 
-async function mountHost(panels: readonly Record<string, unknown>[]): Promise<Mounted> {
+async function mountHost(
+    panels: readonly Record<string, unknown>[],
+    // Handed the CONTAINER, because every report worth recording is a measurement taken against it —
+    // and the caller cannot close over `mountHost`'s return value: the first reports are delivered
+    // from inside `host.start()`, while that binding is still in its temporal dead zone.
+    onArrangementChanged?: (container: HTMLElement) => void,
+): Promise<Mounted> {
     const dockview = detectDockview();
     assert(
         dockview !== undefined,
@@ -166,6 +175,15 @@ async function mountHost(panels: readonly Record<string, unknown>[]): Promise<Mo
         container,
         client: new PanelClient(mockShell(panels)),
         dockview: dv,
+        // Absent unless a case asks for it (exactOptionalPropertyTypes forbids an explicit
+        // `undefined`), so every other case mounts exactly the host it mounted before.
+        ...(onArrangementChanged === undefined
+            ? {}
+            : {
+                  onArrangementChanged: (): void => {
+                      onArrangementChanged(container);
+                  },
+              }),
     });
     await host.start();
     // RE-APPLIED after `start()`: the host mounts Dockview into this element and sets its own
@@ -477,28 +495,35 @@ export const viewportTests: readonly TestCase[] = [
         },
     },
     {
-        name: "viewport: the slot and the GROUP behind it stop painting; an ordinary panel's does not",
+        name: "viewport: NOTHING in the slot's paint stack paints; an ordinary panel's does",
         run: async (): Promise<void> => {
-            // ⚠ SCOPE, STATED SO THE ASSERTIONS ARE NOT READ AS MORE THAN THEY ARE. A composited
-            // native layer is visible only where the browser's frame is alpha-0 all the way down, and
-            // the measured paint stack under a viewport is
+            // A composited native layer is visible only where the browser's frame is alpha-0 ALL THE
+            // WAY DOWN, so that — not "the slot and the group are transparent" — is what this case
+            // asserts. The measured paint stack under a viewport is
             //
             //     .ctx-panel-body | .dv-render-overlay | .dv-content-container | .dv-groupview |
             //     … | .dv-grid-view.dv-dockview | body | html
             //
-            // EDITOR-UX e3 DELIVERS THE VIEWPORT-SPECIFIC TWO — the slot, and the group behind it
-            // (which is not an ancestor of the slot: an `always`-rendered panel lives in
-            // `.dv-render-overlay`, a sibling subtree, so the group paints BEHIND the hole and no
-            // selector reaches it from the slot). That is what this case asserts.
+            // ⚠ THIS CASE USED TO ASSERT ONLY THE FIRST TWO, and that is exactly how the hole shipped
+            // shut. e3 delivered the slot and the group behind it (which is not an ancestor of the
+            // slot: an `always`-rendered panel lives in `.dv-render-overlay`, a sibling subtree, so
+            // the group paints BEHIND the hole and no selector reaches it from there) and recorded
+            // the rest as a deferred boundary. The rest was the part that mattered: `.dv-dockview`
+            // paints `--dv-group-view-background-color` behind every group and `html, body` paint the
+            // document canvas behind that, so the live editor's viewport slot measured `#0a0a0a` —
+            // byte-identical to every other panel body — with both of e3's rules already in force,
+            // and the Shell's layer was painted over on every frame in every theme.
             //
-            // THE REMAINING THREE ARE GLOBAL AND ARE NOT THIS TASK'S: `.dv-grid-view`'s
-            // `--dv-background-color`, `html, body`'s canvas paint, and CEF's own
-            // `CefBrowserSettings.background_color` (unset today, so the browser composites onto an
-            // OPAQUE base and no alpha could reach the OSR buffer whatever the DOM says). Each is a
-            // one-line change and all three change the composited pixels that EVERY `editor-cef-smoke`
-            // coverage floor is calibrated against (cef_shell_smoke.cpp § kAppBackground*) — a
-            // CI-only surface. They are named here, and in `viewport.ts`, so the gap is a recorded
-            // boundary rather than something a later reader has to rediscover from a black viewport.
+            // So the assertion is now a WHOLE-STACK one, expressed as a loop rather than a list of
+            // named elements: a future dockview upgrade that inserts one more painted wrapper must
+            // fail this, and it cannot if the test only knows the names of the wrappers that existed
+            // when it was written.
+            //
+            // (The third deferred item, CEF's own `CefBrowserSettings.background_color`, needed no
+            // change and its premise was wrong: it is left at 0, whose alpha is 0, and CEF documents
+            // that as "use transparent painting" for a windowless browser. Measured on the live
+            // editor — with these rules in place and NOTHING changed C++-side, the composited scene
+            // shows through.)
             const mounted = await mountHost([
                 manifestJson(VIEWPORT_PANEL_ID, "unlimited"),
                 manifestJson("builtin.files"),
@@ -539,6 +564,32 @@ export const viewportTests: readonly TestCase[] = [
                     isTransparent(window.getComputedStyle(viewport).backgroundColor),
                     "the SLOT stops painting",
                 );
+
+                // THE WHOLE STACK, which is the assertion the composite actually depends on. Every
+                // element the browser would paint under the slot's centre — the slot itself, every
+                // wrapper, the dockview root, `body`, `html` — must be alpha-0; ONE opaque layer
+                // anywhere in it hides the Shell's viewport just as completely as all of them would.
+                const stack = paintStack(viewport, mounted.container);
+                assert(
+                    stack.length >= 4,
+                    `the paint stack has depth (${String(stack.length)} elements) — a short stack ` +
+                        "means elementsFromPoint hit nothing and the loop below is vacuous",
+                );
+                const painted = stack.filter(
+                    (candidate) =>
+                        !isTransparent(window.getComputedStyle(candidate).backgroundColor),
+                );
+                assertEqual(
+                    painted.map(describe).join(", "),
+                    "",
+                    "NOTHING in the viewport's paint stack paints a background",
+                );
+                assert(
+                    stack.some((candidate) => candidate === window.document.documentElement),
+                    "…and the stack reaches `html`, so the canvas was actually one of the elements " +
+                        "the loop above cleared rather than one it never saw",
+                );
+
                 const group = groupBehind(viewport, mounted.container);
                 assert(
                     group !== null,
@@ -555,6 +606,24 @@ export const viewportTests: readonly TestCase[] = [
                 assert(
                     isTransparent(window.getComputedStyle(group).backgroundColor),
                     `…so it stops painting too (${window.getComputedStyle(group).backgroundColor})`,
+                );
+
+                // The two window-wide markers the transparency above is SCOPED to. Asserted by name
+                // as well as by effect: the whole-stack loop proves the pixels, these prove WHY, so a
+                // stylesheet that made every dock transparent unconditionally (which would repaint
+                // every window with no viewport open) cannot pass this case.
+                const dock = mounted.container.querySelector(".dv-dockview");
+                assert(dock !== null, "the dockview root is in the DOM");
+                if (dock === null) {
+                    return;
+                }
+                assert(
+                    dock.hasAttribute(VIEWPORT_DOCK_ATTRIBUTE),
+                    "the dockview ROOT is marked as carrying a native surface",
+                );
+                assert(
+                    window.document.documentElement.hasAttribute(VIEWPORT_DOCUMENT_ATTRIBUTE),
+                    "…and so is the document, which is what stops the canvas painting",
                 );
 
                 // THE CONTROL, in BOTH directions. Switch to the ordinary panel: the SAME group must
@@ -579,12 +648,127 @@ export const viewportTests: readonly TestCase[] = [
                     "and the docking surface is painted again " +
                         `(${window.getComputedStyle(group).backgroundColor})`,
                 );
+                assert(
+                    !dock.hasAttribute(VIEWPORT_DOCK_ATTRIBUTE) &&
+                        !window.document.documentElement.hasAttribute(
+                            VIEWPORT_DOCUMENT_ATTRIBUTE,
+                        ),
+                    "…and BOTH window-wide markers are withdrawn, so a window showing no viewport " +
+                        "paints its dock and its canvas exactly as it did before the hole existed",
+                );
+                assert(
+                    !isTransparent(
+                        window.getComputedStyle(window.document.documentElement).backgroundColor,
+                    ) ||
+                        !isTransparent(window.getComputedStyle(window.document.body).backgroundColor),
+                    "…which the canvas itself confirms: it is painting again",
+                );
                 const ordinary = slotFor(mounted.container, ordinaryInstance ?? "");
                 assert(
                     ordinary !== null && !ordinary.hasAttribute(VIEWPORT_SURFACE_ATTRIBUTE),
                     "and the ordinary panel's own slot carries no native-surface marker",
                 );
             } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        name: "viewport: the dock's own trigger gets a viewport rect published",
+        run: async (): Promise<void> => {
+            // THE TRIGGER, and it is the half without which every rule in this file is decoration.
+            //
+            // A viewport is composited from a `viewport`-kind region, and that region exists only
+            // once Dockview has laid the panel out. Nothing else in the editor can notice that
+            // moment: it is not a window resize and not a DPI change (the region publisher's own two
+            // triggers), and `LayoutPersistence` subscribes the same Dockview event only AFTER
+            // `start()` has added every panel — so the adds that first produced the rect are already
+            // past. Measured on the live editor before this seam existed: the Shell held 4 regions,
+            // zero of them `viewport`-kind, for the entire life of the window, and the composited
+            // layer stack stayed empty until the human happened to drag a sash.
+            //
+            // DRIVEN THROUGH THE REAL `ChromeRegionPublisher`, wired exactly as boot.ts wires it,
+            // rather than by asserting the callback fired. That is not ceremony: a report can arrive
+            // BEFORE Dockview has applied the arrangement to the DOM, and what makes the published
+            // map correct anyway is the publisher's DEBOUNCE — it measures when the burst settles,
+            // not when it starts. A test that sampled the geometry at callback time would assert a
+            // property the production path does not have and does not need. (This case was written
+            // that way first; it failed against a working editor, which is how the debounce's role
+            // got pinned down rather than assumed.)
+            //
+            // The other two triggers are stubbed OUT — no resize target, no matchMedia — so what is
+            // proven here is the DOCK's trigger alone, not something a stray resize could satisfy.
+            let publisher: ChromeRegionPublisher | undefined;
+            const published: number[] = [];
+            const mounted = await mountHost(
+                // BOTH IN ONE GROUP, deliberately (the always-renderer case builds the same
+                // fixture for the same reason): a tab switch is the cheapest arrangement change that
+                // both moves a viewport OUT of the dock and back, so one case can prove the rect is
+                // published AND withdrawn on the same trigger.
+                [
+                    manifestJson(VIEWPORT_PANEL_ID, "unlimited", "center"),
+                    manifestJson("builtin.files", "singleton", "center"),
+                ],
+                (container: HTMLElement): void => {
+                    publisher ??= new ChromeRegionPublisher({
+                        provider: (): readonly ShellRegion[] => viewportRegions(container),
+                        publish: async (regions): Promise<boolean> => {
+                            published.push(regions.length);
+                            return Promise.resolve(true);
+                        },
+                        // The SHIPPED default is 100 ms; 60 keeps the case quick while still
+                        // letting a burst settle before the provider measures — which is the whole
+                        // reason the production path is debounced at all (see the header).
+                        debounceMs: 60,
+                        resizeTarget: { addEventListener: (): void => {}, removeEventListener: (): void => {} },
+                        matchMedia: (): null => null,
+                    });
+                    publisher.schedule();
+                },
+            );
+            try {
+                assert(
+                    publisher !== undefined,
+                    "the mount itself reported an arrangement — a host that only reports on LATER " +
+                        "changes leaves a window that is never touched again publishing nothing",
+                );
+
+                // ACTIVATE THE VIEWPORT, for the reason the paint-stack case does: both panels land
+                // in the `center` group, the one added last is the active tab, and Dockview parks an
+                // `always`-rendered background panel a full dock-height OUTSIDE the dock — where
+                // `viewportRegions` deliberately withdraws it.
+                const viewportInstance = mounted.host.mounted.find(
+                    (id) => mounted.host.panelIdOf(id) === VIEWPORT_PANEL_ID,
+                );
+                mounted.host.api?.getPanel(viewportInstance ?? "")?.api?.setActive();
+                await waitFor(
+                    "a publish carried the viewport's rect",
+                    () => published.some((count) => count > 0),
+                );
+
+                // …AND IT KEEPS FIRING. A trigger that only ever fired once would leave the Shell
+                // holding whatever map the mount happened to produce, which is the same defect one
+                // arrangement later: a viewport that moves (a tab switch, a sash drag, a tear-out)
+                // must republish, and the map is replaced wholesale so a rect that stops being
+                // published is a rect the Shell drops.
+                //
+                // WHAT IS *NOT* ASSERTED HERE, deliberately: which regions that later publish
+                // carries. Whether a parked copy is withdrawn is `viewportRegions`' own rule and its
+                // own cases above ("an unlaid-out or unkeyed copy publishes nothing", and the
+                // off-dock clip) prove it directly against constructed geometry, which is the tier
+                // that can choose the geometry. Re-deriving it here through a real dock would assert
+                // Dockview's parking behaviour, not ours.
+                const before = published.length;
+                const files = mounted.host.mounted.find(
+                    (id) => mounted.host.panelIdOf(id) === "builtin.files",
+                );
+                mounted.host.api?.getPanel(files ?? "")?.api?.setActive();
+                await waitFor(
+                    "…and a later arrangement change publishes again",
+                    () => published.length > before,
+                );
+            } finally {
+                publisher?.dispose();
                 mounted.dispose();
             }
         },

@@ -591,7 +591,7 @@ export class ChromeRegionPublisher {
     async start(): Promise<void> {
         if (this.#resizeTarget !== undefined) {
             const onResize = (): void => {
-                this.#schedule();
+                this.schedule();
             };
             this.#resizeTarget.addEventListener("resize", onResize);
             this.#onResize = onResize;
@@ -611,7 +611,16 @@ export class ChromeRegionPublisher {
         this.#onPublish?.(regions.length, this.#publishes);
     }
 
-    #schedule(): void {
+    /**
+     * Ask for a publish, collapsing a burst into one — the debounced sibling of `publishNow`.
+     *
+     * PUBLIC because the DOCK is a third source of region changes and it arrives as a storm: a sash
+     * or tab drag reports at mousemove rate, and a viewport's rect moves with it (editor-UX e3). The
+     * two internal triggers use exactly this, so the dock cannot get a weaker or differently-timed
+     * one. Callers that need the map SETTLED before they proceed — boot's awaited publishes — take
+     * `publishNow` instead; this one is fire-and-forget by construction.
+     */
+    schedule(): void {
         if (this.#disposed) {
             return;
         }
@@ -640,7 +649,7 @@ export class ChromeRegionPublisher {
         }
         const listener = (): void => {
             this.#armDpi();
-            this.#schedule();
+            this.schedule();
         };
         list.addEventListener("change", listener);
         this.#dpiList = { list, listener };

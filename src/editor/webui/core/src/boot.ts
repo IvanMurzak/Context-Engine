@@ -561,6 +561,26 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             menu,
         );
 
+        // editor-UX e3 — REPUBLISH NOW THE DOCK EXISTS, and this is not an optimisation: without it
+        // a Scene viewport is never composited at all.
+        //
+        // The region map the Shell holds at this point was built by publishes that ALL ran before
+        // the docking root was mounted, so it carries the chrome strips and no viewport rect. None
+        // of the publisher's own triggers can correct that: there is no window resize, no DPI
+        // change, and the third trigger — LayoutPersistence's `onDidLayoutChange` — subscribes
+        // INSIDE `startPanels`, after `PanelHost.start()` has already added every default panel, so
+        // the adds that would have carried the viewport are already past. A boot that opens a Scene
+        // view therefore left the Shell publishing zero `viewport`-kind regions for the whole
+        // session, and the composited layer stack stayed empty until the human happened to drag a
+        // sash. Measured before this line existed: `publishes=2, regions=4` for the life of the
+        // window, `viewport-kind=0` at every `ViewportBinding::publish`.
+        //
+        // The SAME gap the menubar's republish below closes for the caption rect, one layer out: a
+        // layout the publisher's triggers cannot see changed under an already-published map. Awaited
+        // for the same reason too, so the map is settled before boot reports ready. `?.` because a
+        // document with no strips mounted has no publisher — and then no region channel either.
+        await chromeStrips?.publisher.publishNow();
+
         // d3: publish the menu model to the Shell now the command layer is up, so the native bar's
         // publish-time enablement snapshot reads the REAL registry (menu.ts § menuModelJson).
         // Awaited so the live smoke's `menu_publishes()` counter is settled before boot reports
@@ -713,6 +733,19 @@ async function startPanels(
             // spread, required by `exactOptionalPropertyTypes`) and package panels are simply never
             // re-tokened, which is the honest degraded state.
             ...(theme === undefined ? {} : { themeChannel: theme.iframes }),
+            // editor-UX e3: the dock is the THIRD source of region changes, and the only one that
+            // can produce a `viewport`-kind rect at all (panelhost.ts § onArrangementChanged). Wired
+            // to the publisher's DEBOUNCED trigger, not `publishNow`: this fires at mousemove rate
+            // for the whole of a sash or tab drag, and every one of those frames moves a viewport's
+            // rect. A window with no strips has no publisher and therefore no region channel, so the
+            // spread keeps the option absent rather than passing a closure over `undefined`.
+            ...(chrome === undefined
+                ? {}
+                : {
+                      onArrangementChanged: (): void => {
+                          chrome.publisher.schedule();
+                      },
+                  }),
             panelVerbs: (binding: PanelVerbBinding) =>
                 makePanelBridgeVerbs({
                     panelId: binding.panelId,

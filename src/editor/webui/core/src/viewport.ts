@@ -82,8 +82,48 @@ const VIEWPORT_SURFACE_SELECTOR = `[${VIEWPORT_SURFACE_ATTRIBUTE}]`;
  * and it was `.dv-groupview` painting `colors.panel` that made the "hole" opaque. Transparency on
  * the slot alone is therefore necessary and NOT sufficient — which is exactly the class of bug the
  * paint-stack assertion in `viewport.test.ts` exists to catch, and did.
+ *
+ * ⚠ AND THE GROUP IS NOT THE LAST PAINTER EITHER. The `…` in the stack above hid two more, both
+ * measured opaque on the live editor: `.dv-dockview` (dockview's own root, which paints
+ * `--dv-group-view-background-color` — app.css points that at `colors.panel`) and the document
+ * CANVAS, which `html, body` paint `colors.canvas` into. With those two still painting, the slot
+ * and the group going transparent changes nothing a compositor can see: the browser frame's alpha
+ * under the viewport rect stayed 1, and the composited layer beneath was invisible in every theme.
+ * Measured on the live editor before this fix: the viewport slot read `#0a0a0a`, byte-identical to
+ * every other panel body, i.e. exactly `colors.panel`. That is why there are FOUR markers, not two —
+ * see `VIEWPORT_DOCK_ATTRIBUTE` and `VIEWPORT_DOCUMENT_ATTRIBUTE`.
  */
 export const VIEWPORT_GROUP_ATTRIBUTE = "data-group-native-surface";
+
+/**
+ * The attribute stamped on dockview's ROOT (`.dv-dockview`) while a native surface is on screen.
+ *
+ * The root paints `--dv-group-view-background-color` across the WHOLE dock, behind every group — so
+ * it is behind the hole too, and no selector rooted at the slot can reach it (it is an ancestor of
+ * the group, and the slot is not even a descendant of the group: see the note above).
+ *
+ * SCOPED TO "a viewport is on screen" rather than applied unconditionally, so a window with no
+ * Scene view open paints exactly as it did before. What the root stops painting is picked up by the
+ * groups themselves (each paints `colors.panel` over its own box); what is left is the sash gutter
+ * between them, which `app.css` paints explicitly for this state rather than leaving to the root.
+ */
+export const VIEWPORT_DOCK_ATTRIBUTE = "data-dock-native-surface";
+
+/**
+ * The attribute stamped on `<html>` while a native surface is on screen.
+ *
+ * THE LAST PAINTER, and the one there is no way around: a CSS background on the root element (or on
+ * `body`, which propagates to it) paints the document CANVAS — the full-window surface every other
+ * element is composited over. While it is opaque there is no such thing as a transparent hole,
+ * whatever the elements above it do.
+ *
+ * What backs the window once the canvas stops painting is the Shell compositor's clear colour
+ * (compositor.h § `clear`, opaque black by design so the desktop can never show through). Every
+ * surface the human actually looks at paints itself — the three chrome strips paint `colors.panel2`,
+ * every dock group paints `colors.panel` — so the clear shows only where the app deliberately draws
+ * nothing, which after this change is the same set of pixels the viewport layer is composited into.
+ */
+export const VIEWPORT_DOCUMENT_ATTRIBUTE = "data-native-surface";
 
 /** Whether a panel KIND renders as a native-surface hole. */
 export function isNativeSurfacePanelId(panelId: string): boolean {
@@ -195,6 +235,18 @@ function intersectsDock(box: DOMRectReadOnly, dock: DOMRectReadOnly): boolean {
  *
  * `panelIdOf` maps an instance id back to its KIND (c3's pair), so the caller keeps ownership of the
  * id grammar and this module never re-derives it.
+ *
+ * ⚠ IT MARKS THREE LEVELS, not one, and the other two are not an optimisation — they are the rest of
+ * the same hole. A group that stops painting still has `.dv-dockview` behind it and the document
+ * CANVAS behind that, both opaque, and either one alone is enough to make the composited viewport
+ * invisible (see `VIEWPORT_DOCK_ATTRIBUTE` / `VIEWPORT_DOCUMENT_ATTRIBUTE` for the measurement).
+ * They ride THIS function rather than a second sync because they are decided by exactly the same
+ * question — is a native surface on screen right now — and two functions answering it would be two
+ * answers free to disagree for a frame, which is a frame of docking surface painted over live scene
+ * pixels (the same reason `#layoutSub` is deliberately undebounced).
+ *
+ * The dock/document marks key on "ANY group is showing a native surface", not on a particular one:
+ * both elements are single, window-wide, and shared by every viewport copy.
  */
 export function syncNativeSurfaceGroups(
     panels: readonly DockviewPanelHandle[],
@@ -229,5 +281,42 @@ export function syncNativeSurfaceGroups(
         } else {
             element.removeAttribute(VIEWPORT_GROUP_ATTRIBUTE);
         }
+    }
+    // The other two painters (see the header). `wanted` already holds the per-group answer, so this
+    // is a fold over it rather than a second walk of `panels`.
+    let anyNative = false;
+    let dock: Element | null = null;
+    let documentElement: Element | null = null;
+    for (const [element, native] of wanted) {
+        anyNative = anyNative || native;
+        // Resolved from a GROUP, not from the slot: the slot lives in `.dv-render-overlay`, a
+        // sibling subtree, so `closest` from there would climb the wrong branch. Any group answers —
+        // they all share one dockview root — so the first one that has an owner document wins.
+        dock ??= element.closest(".dv-dockview");
+        documentElement ??= element.ownerDocument.documentElement;
+    }
+    if (dock !== null) {
+        setMark(dock, VIEWPORT_DOCK_ATTRIBUTE, anyNative);
+    }
+    if (documentElement !== null) {
+        setMark(documentElement, VIEWPORT_DOCUMENT_ATTRIBUTE, anyNative);
+    }
+}
+
+/**
+ * Set or clear one boolean marker attribute, writing only on an actual change.
+ *
+ * The same guard the group loop above states at length, extracted because three elements now need
+ * it: every one of these attributes is a live selector in `app.css`, so a same-value `setAttribute`
+ * still invalidates style for that element, and this runs at mousemove rate for the whole of a drag.
+ */
+function setMark(element: Element, attribute: string, wanted: boolean): void {
+    if (wanted === element.hasAttribute(attribute)) {
+        return;
+    }
+    if (wanted) {
+        element.setAttribute(attribute, "");
+    } else {
+        element.removeAttribute(attribute);
     }
 }
