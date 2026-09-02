@@ -1,0 +1,25 @@
+src/editor/shell/include/context/editor/shell/viewport_binding.h
+  s_782aa603d2bdb2::t_148e4d958b2104 226-236,261-264
+src/editor/shell/panels/src/viewport_feed.cpp
+  s_782aa603d2bdb2::t_f02845454e53ab 40-43
+src/editor/shell/src/shell.cpp
+  s_782aa603d2bdb2::t_fd27f3f4cd5f39 148-153,587-592
+src/editor/shell/src/viewport_binding.cpp
+  s_782aa603d2bdb2::t_70667feeb316a6 223-225,239-243,320-328,392-395,511,529-536
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "373cf57608532e3406c84f6cac00786e4d1ad2c5",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
