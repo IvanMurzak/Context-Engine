@@ -33,10 +33,20 @@ import {
 
 // ------------------------------------------------------------------------------- the roster mock
 
-/** One `panel.list` entry in the WIRE shape `PanelHost::list()` emits (panel_host.cpp). */
+/**
+ * One `panel.list` entry in the WIRE shape `PanelHost::list()` emits (panel_host.cpp).
+ *
+ * ⚠ `zone` IS EXPLICIT AND LOAD-BEARING, not decoration. `PanelHost.open` derives BOTH the Dockview
+ * direction and (since e3) the reference panel from it, so a fixture that leaves every panel in one
+ * zone is asserting a single-group arrangement — see the real-roster case at the bottom of this file
+ * for why that is a fixture choice rather than a fact about the editor.
+ */
 function manifestJson(
     id: string,
     mode: "singleton" | "unlimited" = "singleton",
+    zone = "center",
+    hosted = true,
+    contentType = "uitree",
 ): Record<string, unknown> {
     return {
         id,
@@ -44,18 +54,62 @@ function manifestJson(
         title: id,
         icon: "",
         contractVersion: 3,
-        dock: { zone: "center", minWidth: 0, minHeight: 0 },
+        dock: { zone, minWidth: 0, minHeight: 0 },
         instances: { mode, max: 0 },
         path: "Scene",
-        content: { type: "uitree", entry: "" },
+        content: { type: contentType, entry: "" },
         state: { schemaVersion: 1 },
         capabilities: [],
         commands: [],
-        hosted: true,
+        hosted,
         gestures: false,
         persists: false,
         revision: 1,
     };
+}
+
+/**
+ * THE REAL ROSTER, in the REAL order, with the REAL zones and the REAL hosted set — transcribed from
+ * `src/editor/gui/contract/src/builtin_roster.cpp` (`build_roster`, which `panel_host.cpp:615`
+ * serves to `panel.list` IN ORDER) and `src/editor/shell/panels/src/builtin_panels.cpp`
+ * (`hostable_panel_ids`, which is exactly what the `hosted` bit reports).
+ *
+ * WHY A REAL FIXTURE AND NOT A SYNTHETIC ONE: the defect class this pins is "mounting panel N
+ * displaces panel M from the DOM", and in a synthetic roster the author picks both N and M — so the
+ * victim is always a panel the test was willing to lose. Only the shipped order, zones and hosted
+ * set decide who actually gets displaced. That is the difference between the case below and the
+ * `always`-renderer case above, which is deliberately synthetic because its claim is about Dockview.
+ *
+ * The C++ side is pinned by `context_gui_contract_test_roster`; if this drifts from it, the mounted
+ * set assertion in the case below is what says so.
+ */
+function realRosterJson(): Record<string, unknown>[] {
+    // id, zone, hosted, contentType — the four fields placement and mountability read.
+    const entries: readonly (readonly [string, string, boolean, string])[] = [
+        ["placeholder", "center", true, "uitree"],
+        ["builtin.scene-tree", "left", true, "uitree"],
+        ["builtin.files", "left", true, "uitree"],
+        ["builtin.inspector", "right", true, "uitree"],
+        ["builtin.viewport", "center", true, "uitree"],
+        ["builtin.problems", "bottom", true, "uitree"],
+        ["builtin.tilemap-painter", "right", false, "uitree"],
+        ["builtin.viewport-edit", "right", false, "uitree"],
+        ["builtin.help", "right", false, "uitree"],
+        ["builtin.session.undo", "bottom", true, "uitree"],
+        // The ONE `local` panel. Unmountable in this harness (no factory is registered), which is
+        // also true of any window whose bundle lacks one — and it is last in roster order either
+        // way, so it cannot participate in the placement this case is about.
+        ["builtin.settings", "right", true, "local"],
+    ];
+    return entries.map(([id, zone, hosted, contentType]) =>
+        manifestJson(
+            id,
+            id === "builtin.viewport" ? "unlimited" : "singleton",
+            zone,
+            hosted,
+            contentType,
+        ),
+    );
 }
 
 /** A Shell serving one roster and refusing everything else, exactly as the real router's default. */
@@ -541,9 +595,17 @@ export const viewportTests: readonly TestCase[] = [
             // The CONSEQUENCE, not the option: an `onlyWhenVisible` panel is REMOVED from the DOM
             // when another tab in its group is activated, which makes its rect meaningless and takes
             // the transparent hole with it (viewport.ts § THE HOLE PINS THE RENDERER).
+            //
+            // ⚠ BOTH PANELS ARE DECLARED `center` ON PURPOSE, and that is the whole reason they share
+            // a group here. This case needs two panels in ONE group to have a tab switch to observe
+            // at all, so it BUILDS one — it does not discover one. Read no further than that: the
+            // detachment asserted at the end of this case is Dockview doing the correct thing to a
+            // co-tabbed panel, NOT a statement that displacing a sibling out of the DOM is
+            // acceptable when the roster never asked for co-tabbing. It is not, it shipped, and the
+            // real-roster case at the bottom of this file is what pins it.
             const mounted = await mountHost([
-                manifestJson(VIEWPORT_PANEL_ID, "unlimited"),
-                manifestJson("builtin.files"),
+                manifestJson(VIEWPORT_PANEL_ID, "unlimited", "center"),
+                manifestJson("builtin.files", "singleton", "center"),
             ]);
             try {
                 const api = mounted.host.api;
@@ -567,8 +629,9 @@ export const viewportTests: readonly TestCase[] = [
                     return;
                 }
 
-                // Activate the ORDINARY panel. In a `center`-zoned layout both land in one group, so
-                // this is the tab switch that detaches whatever Dockview is allowed to detach.
+                // Activate the ORDINARY panel. Both fixtures declare `center`, so both land in one
+                // group (see the roster note above) and this is the tab switch that detaches
+                // whatever Dockview is allowed to detach.
                 api?.getPanel(otherId)?.api?.setActive();
                 await waitFor(
                     "the ordinary panel became the active tab",
@@ -616,6 +679,12 @@ export const viewportTests: readonly TestCase[] = [
                 // ordinary `uitree` panel from the document when it stops being active. Without this
                 // assertion "the viewport stayed" proves nothing — a Dockview that never detached
                 // anything would satisfy it for free.
+                //
+                // ⚠ THIS ASSERTS A PLATFORM FACT, AND ONLY BECAUSE THIS FIXTURE ASKED FOR IT. Both
+                // panels here declare `center`, so co-tabbing is what the roster requested and
+                // detaching the inactive one is correct. The same platform fact applied to a panel
+                // the roster did NOT ask to co-tab is the e3 regression — pinned separately below,
+                // because no synthetic roster can catch it: the author picks the victim.
                 await waitFor(
                     "an ordinary `uitree` panel to be DETACHED once it stops being the active tab — " +
                         "the default this task pins the viewport away from",
@@ -664,6 +733,123 @@ export const viewportTests: readonly TestCase[] = [
                 const one = viewportRegions(mounted.container, 1)[0]?.rect.width ?? 0;
                 const two = viewportRegions(mounted.container, 2)[0]?.rect.width ?? 0;
                 assertEqual(two, one * 2, "and the two scales really do differ");
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        // THE e3 REGRESSION, pinned against the SHIPPED roster.
+        //
+        // Hosting the viewport put a `center` panel immediately after `builtin.inspector` (`right`)
+        // in roster order. `open` placed every panel relative to whatever was mounted LAST with no
+        // regard for zone, and `center` is the one zone that maps to `"within"` — join the reference
+        // panel's group as a tab. So the Scene view tabbed itself onto the Inspector and Dockview's
+        // default `onlyWhenVisible` renderer DETACHED the Inspector's element from the document.
+        //
+        // The Inspector stayed mounted, stayed listed and stayed driveable over the bridge; it was
+        // simply not in the DOM. `editor-cef-smoke-shell-inspector-fanout` therefore did not fail an
+        // assertion — its `querySelector` returned null, its injected script returned early, nothing
+        // ever staged, and the test TIMED OUT at ~420 s on all three OS legs.
+        name: "viewport: hosting the viewport does not evict a sibling panel from the DOM (real roster)",
+        run: async (): Promise<void> => {
+            const mounted = await mountHost(realRosterJson());
+            try {
+                // THE DRIFT DETECTOR. If the C++ roster or `hostable_panel_ids` changes and this
+                // fixture is not updated with it, this is what says so — before the assertions below
+                // start proving something about a roster the editor no longer serves.
+                const kinds = mounted.host.mounted.map((id) => mounted.host.panelIdOf(id));
+                assertEqual(
+                    JSON.stringify([...kinds].sort((a, b) => a.localeCompare(b))),
+                    JSON.stringify([
+                        "builtin.files",
+                        "builtin.inspector",
+                        "builtin.problems",
+                        "builtin.scene-tree",
+                        "builtin.session.undo",
+                        "builtin.viewport",
+                        "placeholder",
+                    ]),
+                    "the fixture mounts exactly the hosted `uitree` built-ins — if this fails, the " +
+                        "real roster moved and realRosterJson() must be re-transcribed from " +
+                        "builtin_roster.cpp + builtin_panels.cpp before the rest of this case means " +
+                        "anything",
+                );
+
+                const inspectorId = mounted.host.instancesOf("builtin.inspector")[0] ?? "";
+                assert(inspectorId !== "", "the Inspector is mounted");
+                const inspectorSlot = slotFor(mounted.container, inspectorId);
+
+                // THE ASSERTION THE SMOKE'S TIMEOUT WAS. Not "the Inspector is open" — it was open
+                // throughout the outage — but "the Inspector is REACHABLE THROUGH THE DOCUMENT",
+                // which is the only thing a `document.querySelector` (the Shell's own fan-out smoke,
+                // a11y tooling, and every user click) can act on.
+                assert(
+                    inspectorSlot !== null && inspectorSlot.isConnected,
+                    "the Inspector's slot is IN THE DOCUMENT after start() — with the viewport " +
+                        "hosted, a zone-blind reference panel tabs the Scene view onto the " +
+                        "Inspector and Dockview detaches the inactive tab, which is invisible to " +
+                        "every 'is it mounted?' check and fatal to every DOM one",
+                );
+
+                // AND NOBODY ELSE EITHER. The Inspector is the panel that broke, but the defect is
+                // "a `center` mount evicts whatever preceded it", so the victim is an accident of
+                // roster order — pinning only the Inspector would let the next reorder move the
+                // damage to a panel nothing happens to name here.
+                for (const kind of [
+                    "builtin.scene-tree",
+                    "builtin.files",
+                    "builtin.problems",
+                    "builtin.session.undo",
+                ]) {
+                    const instanceId = mounted.host.instancesOf(kind)[0] ?? "";
+                    const slot = slotFor(mounted.container, instanceId);
+                    assert(
+                        slot !== null && slot.isConnected,
+                        `'${kind}' is in the document too — no panel the roster never asked to ` +
+                            "co-tab may be evicted by a later mount",
+                    );
+                }
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        // THE OTHER HALF, and the reason the case above cannot be satisfied the cheap way.
+        //
+        // "The Inspector stays in the DOM" is trivially true of a build that does not host the
+        // viewport at all, and equally true of one that opens it `inactive` — parked, tabbed behind
+        // the Inspector, with `viewportRegions` withdrawing its rect so the Shell composites no scene
+        // and the human sees nothing. Both would score GREEN above while defeating the entire point
+        // of e3. This case asserts the viewport is not merely mounted but LAID OUT AND PUBLISHED, so
+        // the pair together admit only an arrangement that is correct on both counts.
+        name: "viewport: …and the viewport is still visible and publishing a region (real roster)",
+        run: async (): Promise<void> => {
+            const mounted = await mountHost(realRosterJson());
+            try {
+                const viewportId = mounted.host.instancesOf(VIEWPORT_PANEL_ID)[0] ?? "";
+                assert(viewportId !== "", "the viewport is mounted");
+                const slot = slotFor(mounted.container, viewportId);
+                assert(slot !== null, "the viewport's slot exists");
+                if (slot === null) {
+                    return;
+                }
+                await waitFor(
+                    "the viewport is laid out INSIDE the dock — not parked outside it, which is " +
+                        "what an `inactive` open would leave and what withdraws its region",
+                    () => isInsideDock(slot, mounted.container),
+                    5000,
+                    () =>
+                        `slot ${JSON.stringify(slot.getBoundingClientRect())} vs dock ` +
+                        `${JSON.stringify(mounted.container.getBoundingClientRect())}`,
+                );
+                assertEqual(
+                    viewportRegions(mounted.container, 1).length,
+                    1,
+                    "and it PUBLISHES a region — the Shell composites a scene into this rect, so a " +
+                        "viewport that boots parked is a viewport the user cannot see",
+                );
             } finally {
                 mounted.dispose();
             }

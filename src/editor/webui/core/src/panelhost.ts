@@ -1261,7 +1261,7 @@ export class PanelHost {
             return refusal(admission);
         }
         const instanceId = this.#reserveInstanceId(manifest.id, requestedInstanceId);
-        const previous = this.mounted[this.mounted.length - 1];
+        const previous = this.#referenceFor(manifest.dock.zone);
         this.#api.addPanel({
             // THE DOCKVIEW PANEL ID IS THE INSTANCE ID (c3). Dockview keys its whole arrangement —
             // and the blob `captureLayout` persists — on this, so two copies of one kind need two
@@ -1270,8 +1270,10 @@ export class PanelHost {
             component: componentFor(manifest),
             title: manifest.title,
             ...rendererFor(manifest),
-            // Placement follows the manifest's declared zone. `referencePanel` is only set once
-            // something is already mounted — Dockview has nothing to place relative to otherwise.
+            // Placement follows the manifest's declared zone — for the DIRECTION and, since e3, for
+            // the REFERENCE too (`#referenceFor`, which is where the reason lives). `referencePanel`
+            // is only set once something is already mounted — Dockview has nothing to place relative
+            // to otherwise.
             ...(previous === undefined
                 ? {}
                 : {
@@ -1284,6 +1286,47 @@ export class PanelHost {
         return this.#panels.has(instanceId)
             ? { outcome: "opened", instanceId, diagnostic: "" }
             : refusal(`the docking root did not create '${instanceId}'`);
+    }
+
+    /**
+     * The panel a new mount is placed RELATIVE TO — the last live copy that declares the SAME zone,
+     * falling back to the last one mounted when this zone has no occupant yet (editor-UX e3).
+     *
+     * ⚠ THE ZONE MATCH IS THE WHOLE POINT, and it is load-bearing for exactly one direction:
+     * `center`. `ZONE_DIRECTION` maps every other zone to a SPLIT (`left`/`right`/`above`/`below`),
+     * and a split makes a NEW group beside the reference — so which panel it splits from moves an
+     * edge, never a membership, and a plain "whatever was mounted last" reference is harmless there.
+     * `center` alone maps to `"within"`, which means JOIN THE REFERENCE PANEL'S GROUP as a tab. With
+     * an unqualified reference, a `center` panel therefore tabs itself onto whatever happened to be
+     * mounted immediately before it, wherever that panel lives — and Dockview's default
+     * `onlyWhenVisible` renderer DETACHES the group's now-inactive panel from the DOM (dockview.ts
+     * § the renderer contract). The displaced panel is still mounted, still listed, still driveable
+     * over the bridge, and simply NOT IN THE DOCUMENT.
+     *
+     * That is not hypothetical: hosting `builtin.viewport` (center) put it directly after
+     * `builtin.inspector` (right) in roster order, so the Scene view tabbed itself over the
+     * Inspector and took the Inspector's DOM subtree with it — `editor-cef-smoke-shell-inspector-
+     * fanout` timed out on all three OS legs because its `querySelector` for an Inspector widget
+     * returned null. Keying on the zone docks the viewport `within` the `center` `placeholder`
+     * group, which is where a scene view belongs anyway.
+     */
+    #referenceFor(zone: string): string | undefined {
+        const mounted = this.mounted;
+        for (let index = mounted.length - 1; index >= 0; index -= 1) {
+            const candidate = mounted[index];
+            if (
+                candidate !== undefined &&
+                this.manifestForInstance(candidate)?.dock.zone === zone
+            ) {
+                return candidate;
+            }
+        }
+        // NO OCCUPANT YET — fall back to the previous behaviour rather than to nothing. A `center`
+        // panel opening into an empty zone still wants to be placed relative to the arrangement
+        // (Dockview would otherwise drop it into the root group), and every other zone splits, which
+        // is unaffected by the choice. Returns undefined only when NOTHING is mounted, which is the
+        // first panel and has nothing to be relative to.
+        return mounted[mounted.length - 1];
     }
 
     /**
