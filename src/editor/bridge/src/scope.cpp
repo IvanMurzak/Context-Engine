@@ -135,11 +135,18 @@ Scope required_scope_for(const std::string& rpc_method)
     // The M8.5 a18 tilemap cell-authoring verbs (`tilemap.paint` / `tilemap.fill`) REWRITE authored
     // files (canonical owner + cell sidecars through the L-33 family plan) — the same file_write
     // privilege as `set`, gated fail-closed the moment a bridge backing lands.
+    // The M9 e2 editor FILE-WRITE family (`editor.file-move` / `editor.file-delete` /
+    // `editor.file-restore`, D10 write half) is LIVE, not reserved: it moves, deletes and restores
+    // the human's own project files through assetdb's engine operations. It sits in this family
+    // rather than with the e08a `editor.*` SESSION-STATE verbs below precisely because what it
+    // changes is authored data on disk, not the live human session — the same discrimination that
+    // keeps `editor.files` on the read baseline one paragraph further down.
     if (rpc_method == "set" || rpc_method == "new" || rpc_method == "edit" ||
         rpc_method == "edit-batch" || rpc_method == "migrate" || rpc_method == "merge-file" ||
         rpc_method == "resolve-conflict" || rpc_method == "re-key" || rpc_method == "asset.move" ||
         rpc_method == "asset.rename" || rpc_method == "tilemap.paint" ||
-        rpc_method == "tilemap.fill")
+        rpc_method == "tilemap.fill" || rpc_method == "editor.file-move" ||
+        rpc_method == "editor.file-delete" || rpc_method == "editor.file-restore")
         return Scope::file_write;
     // Session lifecycle family (reserved verb-ids; gated now so activation is non-breaking). The
     // daemon's operational `shutdown` control method is a session-lifecycle action. `session.new`,

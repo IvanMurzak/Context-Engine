@@ -1,5 +1,6 @@
 // Dual-form reference checking + healing over authored documents (L-34): dangling/path-only/stale
-// findings and the ref-hint-healing write half of the R-FILE-003 enumerated surface.
+// findings, the ref-hint-healing write half of the R-FILE-003 enumerated surface, and (M9 e2) the
+// REVERSE lookup -- who references this asset -- that the delete refusal names its evidence from.
 
 #pragma once
 
@@ -8,7 +9,13 @@
 #include "context/editor/serializer/json_tree.h"
 
 #include <string>
+#include <string_view>
 #include <vector>
+
+namespace context::editor::filesync
+{
+class FileStore;
+} // namespace context::editor::filesync
 
 namespace context::editor::assetdb
 {
@@ -69,5 +76,38 @@ struct RefHealResult
 [[nodiscard]] bool is_entity_ref(const serializer::JsonValue& value) noexcept;
 // True when `value` is the id-path ARRAY form: >= 2 non-empty strings.
 [[nodiscard]] bool is_entity_id_path(const serializer::JsonValue& value) noexcept;
+
+// --- M9 e2: the REVERSE reference lookup (the delete refusal's evidence) --------------------------
+
+// One document that REFERENCES an asset, in the shape a refusal diagnostic quotes.
+struct Referrer
+{
+    std::string path;    // the referring document (project-relative)
+    std::string pointer; // the RFC 6901 pointer of the x-ctx-ref field that names the target
+};
+
+// Every schema-bound document in `listed_paths` that references the asset identified by `guid`
+// (its authoritative L-34 `$ref`) or by `asset_path` (a path-only reference, which L-34 accepts as
+// a still-unresolved reference and which a delete must therefore honour identically). Either key
+// may be empty: a meta-less asset has no GUID, and a caller with no path passes "".
+//
+// WHY THIS IS NOT THE INDEX. `AssetDatabase::scan` reads ONLY sidecars, never payloads
+// (R-FILE-011(e)) -- so the index CANNOT answer "who points at this?" and no amount of querying it
+// will. This is a deliberate ONE-SHOT sweep instead: it parses each candidate document, walks it
+// against its registered kind schema (the same walk check_document_refs uses -- there is one walker,
+// not two), and RETAINS NOTHING. That is the same transient-read discipline
+// AssetDatabase::sniff_kind already applies, so the bounded-index guarantee is untouched; the cost
+// is paid once, by a human-initiated destructive operation, and buys a refusal instead of a
+// silently-dangled reference.
+//
+// WHAT IT CANNOT SEE, stated rather than implied: a document bound to no registered kind schema
+// (schema_for returns nullptr -- reference work is schema-driven), a non-JSON payload, and a
+// reference field a kind schema does not declare with x-ctx-ref. Deleting past those leaves a
+// dangling reference the existing asset.ref_dangling finding surfaces on the next validate.
+[[nodiscard]] std::vector<Referrer> find_referrers(const filesync::FileStore& fs,
+                                                   const std::vector<std::string>& listed_paths,
+                                                   const schema::SchemaSet& schemas,
+                                                   std::string_view guid,
+                                                   std::string_view asset_path);
 
 } // namespace context::editor::assetdb

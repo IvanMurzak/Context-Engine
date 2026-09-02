@@ -18,7 +18,11 @@
 #   context_gui_panel_problems  -> gui_uitree / bridge       (bridge is deliberately NOT forbidden)
 #   context_gui_panel_scenetree -> gui_uitree / bridge       (e05d3: compose split OUT)
 #   context_gui_panel_inspector -> gui_uitree / serializer   (e05d3: compose+schema split OUT)
-#   context_gui_panel_files     -> gui_uitree / bridge       (M9 e1: assetdb split OUT from day one)
+#   context_gui_panel_files     -> gui_uitree / bridge       (M9 e1/e2: assetdb split OUT from day
+#                                                            one — e2's write half is a pure-virtual
+#                                                            seam, so the panel still links no
+#                                                            assetdb/filesync type and the D10
+#                                                            FORBIDDEN list is untouched)
 #   context_gui_playbar         -> gui_uitree                (e08b: session_control split OUT, so the
 #                                                             transport carries no runtime/render dep)
 
@@ -29,6 +33,7 @@ add_library(context_editor_panels STATIC
     src/files_feed.cpp       # M9 e1: the `editor.files` read -> FilesPanel projection (D10 read half)
     src/session_feed.cpp     # e08b: the `session` topic + the `editor.*` writes <-> panel state
     src/wire_override_gateway.cpp # e09b-2: the Inspector's L-20/L-30 commit over the `edit` RPC
+    src/wire_file_gateway.cpp     # M9 e2: the Files panel's rename/move/delete over the wire
     src/undo_feed.cpp        # e09c: the session undo HOST (records, replays over the wire, persists)
     src/builtin_panels.cpp)  # the provider bindings + the live-hydration pump
 
@@ -66,6 +71,7 @@ set(_context_editor_panels_tests
     test_files_feed        # M9 e1: the files wire round-trip, settle->refetch, selection dispatch
     test_session_feed      # e08b: the `session` facts, origin echo suppression, the `editor.*` writes
     test_wire_override_gateway # e09b-2: the `edit` wire shape, the CAS refusal, L-30 over the seam
+    test_wire_file_gateway     # M9 e2: the file-write wire shape, refusal pass-through, fail-closed
     test_undo_feed         # e09c: record -> replay-over-the-wire -> persist -> RESTART -> undo again
     test_builtin_panels)   # the composition root: what binds, what stays unhosted, end to end
 

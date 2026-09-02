@@ -1,7 +1,9 @@
-// T1 for the LIVE files feed (M9 e1, D10 read half): the kernel-side builder+wire -> Shell-side
-// parser ROUND-TRIP (the two halves that must not drift), the envelope tolerance, the settle-
-// >refetch cadence, the node-id -> identity mapping, and the selection dispatch through the
-// provider. Mirrors test_scenetree_feed.cpp — see that file's header for the fuller rationale.
+// T1 for the LIVE files feed (M9 e1/e2, D10): the kernel-side builder+wire -> Shell-side parser
+// ROUND-TRIP (the two halves that must not drift), the envelope tolerance, the settle->refetch
+// cadence, the node-id -> identity mapping, the selection dispatch through the provider, and
+// (e2) the WRITE FAN-OUT: a landed operation becomes an undo checkpoint AND arms a refetch, a
+// refused one becomes a loud notice and arms NOTHING. Mirrors test_scenetree_feed.cpp — see that
+// file's header for the fuller rationale.
 
 #include "context/editor/shell/panels/files_feed.h"
 
@@ -27,6 +29,7 @@ namespace builders = context::editor::gui::panels::builders;
 namespace assetdb = context::editor::assetdb;
 namespace filesync = context::editor::filesync;
 namespace gc = context::editor::gui::contract;
+namespace undo = context::editor::gui::session::undo;
 using Json = context::editor::contract::Json;
 
 namespace
@@ -240,6 +243,242 @@ void selection_dispatches_through_the_provider()
     CHECK(gateway.requests.size() == 1);
 }
 
+// --- M9 e2: the write fan-out --------------------------------------------------------------------
+
+// The file write double, at the same fidelity as the daemon (records, answers, never reaches in).
+class RecordingFileWrites final : public files::FileWriteGateway
+{
+public:
+    std::vector<std::string> calls;
+    bool refuse = false;
+    std::string token = "00000000000000000000000000000aaa";
+
+    files::FileWriteResult move_file(const std::string& from, const std::string& to) override
+    {
+        calls.push_back("move");
+        return answer(from, to, "");
+    }
+    files::FileWriteResult delete_file(const std::string& path) override
+    {
+        calls.push_back("delete");
+        return answer(path, "", token);
+    }
+    files::FileWriteResult restore_file(const std::string& restore_token) override
+    {
+        calls.push_back("restore");
+        return answer("art/hero.png", "", restore_token);
+    }
+
+private:
+    [[nodiscard]] files::FileWriteResult answer(const std::string& path, const std::string& other,
+                                                const std::string& tok) const
+    {
+        files::FileWriteResult out;
+        if (refuse)
+        {
+            out.status = files::FileWriteResult::Status::refused;
+            out.code = "asset.delete_referenced";
+            out.message = "`scenes/main.json` references this asset at `/texture`";
+            out.path = path;
+            return out;
+        }
+        out.status = files::FileWriteResult::Status::applied;
+        out.path = path;
+        out.other_path = other;
+        out.restore_token = tok;
+        return out;
+    }
+};
+
+// A two-row reply in the envelope shape the pump hands over — the fixture the write cases act on.
+[[nodiscard]] Json two_row_reply()
+{
+    Json tree = Json::object();
+    Json roots = Json::array();
+    Json readme = Json::object();
+    readme.set("identity", Json(std::string("README.md")));
+    readme.set("displayName", Json(std::string("README.md")));
+    readme.set("kind", Json(std::string("file")));
+    roots.push_back(std::move(readme));
+    Json wall = Json::object();
+    wall.set("identity", Json(std::string("textures/wall.tex.json")));
+    wall.set("displayName", Json(std::string("wall.tex.json")));
+    wall.set("kind", Json(std::string("file")));
+    roots.push_back(std::move(wall));
+    tree.set("roots", std::move(roots));
+    tree.set("fileCount", Json(std::uint64_t{2}));
+    Json data = Json::object();
+    data.set("files", std::move(tree));
+    Json envelope = Json::object();
+    envelope.set("ok", Json(true));
+    envelope.set("data", std::move(data));
+    return envelope;
+}
+
+void a_landed_write_journals_a_step_and_arms_a_refetch()
+{
+    shell::PanelHost host(roster_with_files());
+    panels::FilesFeed feed(host, kPanelId);
+    CHECK(feed.apply_result(two_row_reply()));
+    feed.mark_fetched();
+    CHECK(!feed.fetch_due());
+
+    RecordingFileWrites writes;
+    feed.bind_write_gateway(&writes);
+    CHECK(feed.has_write_gateway());
+
+    std::vector<undo::FileEdit> journaled;
+    std::vector<std::string> labels;
+    feed.bind_checkpoint_sink([&](undo::FileEdit edit, std::string label)
+                              {
+                                  journaled.push_back(std::move(edit));
+                                  labels.push_back(std::move(label));
+                              });
+    std::vector<std::string> notices;
+    feed.bind_notice_sink([&](const char* verb, const files::FileWriteResult&)
+                          { notices.emplace_back(verb); });
+
+    CHECK(feed.panel().remove("README.md"));
+    CHECK(feed.writes_landed() == 1);
+    CHECK(feed.writes_refused() == 0);
+    // The undo step, minted from what the write path ANSWERED.
+    CHECK(journaled.size() == 1);
+    CHECK(journaled[0].op == undo::FileEdit::Op::remove);
+    CHECK(journaled[0].from == "README.md");
+    CHECK(journaled[0].restore_token == writes.token);
+    // NAMED for Session History — a file step has no field name to identify it by.
+    CHECK(labels[0] == "delete README.md");
+    // No notice: nothing was refused.
+    CHECK(notices.empty());
+    // READ-YOUR-WRITES: the write went out over the gateway, so the tree this panel is rendering is
+    // stale by exactly the row the human acted on.
+    CHECK(feed.fetch_due());
+}
+
+void a_refused_write_is_loud_and_arms_nothing()
+{
+    shell::PanelHost host(roster_with_files());
+    panels::FilesFeed feed(host, kPanelId);
+    CHECK(feed.apply_result(two_row_reply()));
+    feed.mark_fetched();
+
+    RecordingFileWrites writes;
+    writes.refuse = true;
+    feed.bind_write_gateway(&writes);
+
+    std::size_t journaled = 0;
+    feed.bind_checkpoint_sink([&](undo::FileEdit, std::string) { ++journaled; });
+    std::vector<std::string> notice_verbs;
+    std::vector<files::FileWriteResult> notice_results;
+    feed.bind_notice_sink([&](const char* verb, const files::FileWriteResult& result)
+                          {
+                              notice_verbs.emplace_back(verb);
+                              notice_results.push_back(result);
+                          });
+
+    CHECK(!feed.panel().remove("README.md"));
+    CHECK(feed.writes_refused() == 1);
+    CHECK(feed.writes_landed() == 0);
+    // LOUD: the refusal reaches the notice sink, carrying the daemon's own code and message. This is
+    // the assertion that makes "a silent failure on a destructive operation" impossible by test.
+    CHECK(notice_verbs.size() == 1);
+    CHECK(notice_verbs[0] == "delete");
+    CHECK(notice_results[0].code == "asset.delete_referenced");
+    CHECK(!notice_results[0].message.empty());
+    // NOTHING was journaled (there is no step to undo) and NO refetch was armed (nothing changed).
+    CHECK(journaled == 0);
+    CHECK(!feed.fetch_due());
+
+    // The producible sibling: the SAME feed, the SAME call, lands once the write path says yes.
+    writes.refuse = false;
+    CHECK(feed.panel().remove("README.md"));
+    CHECK(feed.writes_landed() == 1);
+    CHECK(feed.fetch_due());
+}
+
+void an_irreversible_delete_is_not_journaled()
+{
+    // An applied delete with NO restore token is not undoable. Recording it would offer the human an
+    // undo guaranteed to refuse; not recording it costs one history entry. The second is the honest
+    // failure — asserted here so the choice cannot silently flip.
+    shell::PanelHost host(roster_with_files());
+    panels::FilesFeed feed(host, kPanelId);
+    CHECK(feed.apply_result(two_row_reply()));
+    feed.mark_fetched();
+
+    RecordingFileWrites writes;
+    writes.token.clear();
+    feed.bind_write_gateway(&writes);
+    std::size_t journaled = 0;
+    feed.bind_checkpoint_sink([&](undo::FileEdit, std::string) { ++journaled; });
+
+    CHECK(feed.panel().remove("README.md"));
+    CHECK(feed.writes_landed() == 1);
+    CHECK(journaled == 0);
+    CHECK(feed.fetch_due()); // the row IS gone, so the panel must still re-read
+
+    // Sibling: a delete that DOES come back with a token is journaled, so the check above is about
+    // the token and not about deletes in general.
+    writes.token = "00000000000000000000000000000aaa";
+    CHECK(feed.panel().remove("textures/wall.tex.json"));
+    CHECK(journaled == 1);
+}
+
+void a_restore_is_never_journaled_as_a_new_step()
+{
+    // The only caller that issues a restore is the journal's own undo replay; recording its inverse
+    // as a NEW step would make Ctrl+Z followed by Ctrl+Z undo itself forever.
+    shell::PanelHost host;
+    panels::FilesFeed feed(host, kPanelId);
+    RecordingFileWrites writes;
+    feed.bind_write_gateway(&writes);
+    std::size_t journaled = 0;
+    feed.bind_checkpoint_sink([&](undo::FileEdit, std::string) { ++journaled; });
+
+    feed.mark_fetched();
+    CHECK(feed.panel().restore("00000000000000000000000000000aaa"));
+    CHECK(feed.writes_landed() == 1);
+    CHECK(journaled == 0);
+    // ...but it DID happen, so the panel must still re-read: a restore brings back a row that is by
+    // definition absent from the tree currently rendered. "Not journaled" and "not observed" are
+    // different things, and conflating them would leave the restored file invisible until the next
+    // unrelated settle.
+    CHECK(feed.fetch_due());
+}
+
+void the_authoring_commands_dispatch_through_the_provider()
+{
+    shell::PanelHost host(roster_with_files());
+    panels::FilesFeed feed(host, kPanelId);
+    CHECK(host.provide(kPanelId, feed.make_provider()));
+    CHECK(feed.apply_result(two_row_reply()));
+
+    RecordingFileWrites writes;
+    feed.bind_write_gateway(&writes);
+    CHECK(feed.panel().apply_selection({"README.md"}));
+
+    bool dispatched = false;
+    std::string error;
+    Json rename = Json::object();
+    rename.set("name", Json(std::string("READ.md")));
+    CHECK(host.invoke(kPanelId, files::kRenameCommand, rename, dispatched, error));
+    CHECK(dispatched);
+    CHECK(writes.calls == std::vector<std::string>{"move"});
+
+    Json none = Json::object();
+    CHECK(host.invoke(kPanelId, files::kDeleteCommand, none, dispatched, error));
+    CHECK(dispatched);
+    CHECK(writes.calls.size() == 2);
+    CHECK(writes.calls[1] == "delete");
+
+    // A rename with NO name is refused locally and never reaches the write path — the provider does
+    // not invent one.
+    Json empty = Json::object();
+    CHECK(host.invoke(kPanelId, files::kRenameCommand, empty, dispatched, error));
+    CHECK(!dispatched);
+    CHECK(writes.calls.size() == 2);
+}
+
 } // namespace
 
 int main()
@@ -249,5 +488,10 @@ int main()
     apply_result_tolerates_the_envelope_and_touches_the_host();
     settle_marks_a_refetch_due();
     selection_dispatches_through_the_provider();
+    a_landed_write_journals_a_step_and_arms_a_refetch();
+    a_refused_write_is_loud_and_arms_nothing();
+    an_irreversible_delete_is_not_journaled();
+    a_restore_is_never_journaled_as_a_new_step();
+    the_authoring_commands_dispatch_through_the_provider();
     PANELS_TEST_MAIN_END();
 }

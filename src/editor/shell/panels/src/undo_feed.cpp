@@ -102,6 +102,12 @@ void UndoFeed::bind_gateway(const inspector::OverrideWriteGateway* gateway)
     gateway_bound_ = gateway != nullptr;
 }
 
+void UndoFeed::bind_file_gateway(files::FileWriteGateway* gateway)
+{
+    journal_.set_file_gateway(gateway);
+    file_gateway_bound_ = gateway != nullptr;
+}
+
 void UndoFeed::bind_notice_sink(NoticeSink sink)
 {
     notice_sink_ = std::move(sink);
@@ -113,6 +119,17 @@ void UndoFeed::record(undo::FieldEdit edit)
     // field per gesture. Recording a NEW gesture invalidates the redo stack inside the journal, so
     // the blob genuinely moved either way.
     journal_.capture(std::move(edit));
+    ++checkpoints_recorded_;
+    dirty_ = true;
+    host_.touch(panel_id_);
+}
+
+void UndoFeed::record_file(undo::FileEdit edit, std::string label)
+{
+    // `capture_file` auto-checkpoints a lone file operation as its own gesture (L-20) — the shape
+    // the Files panel produces, one operation per human action. Recording a NEW gesture invalidates
+    // the redo stack inside the journal, so the blob genuinely moved either way.
+    journal_.capture_file(std::move(edit), std::move(label));
     ++checkpoints_recorded_;
     dirty_ = true;
     host_.touch(panel_id_);

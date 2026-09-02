@@ -125,18 +125,23 @@ std::vector<Contribution> build_roster()
                                       .min_height = 200,
                                       .capabilities = Caps{kCapabilityReadQuery}}));
 
-    // M9 e1 — the Files observer panel (gui/panels/files/), D10 read half. Publishes
-    // `subject: "file"` selections through the c1 typed-selection surface; read-only (the write
-    // half — rename/move/delete — is task e2, which will add file_write).
-    roster.push_back(to_contribution({.id = "builtin.files",
-                                      .title = "Files",
-                                      .icon = "folder",
-                                      .zone = DockZone::left,
-                                      .mode = InstanceMode::singleton,
-                                      .path = "Project",
-                                      .min_width = 240,
-                                      .min_height = 200,
-                                      .capabilities = Caps{kCapabilityReadQuery}}));
+    // M9 e1/e2 — the Files panel (gui/panels/files/), D10. Publishes `subject: "file"` selections
+    // through the c1 typed-selection surface (e1, read half), and since e2 authors rename / move /
+    // DELETE through the ONE L-30 write path — so it declares the file_write grant EXPLICITLY, never
+    // ambiently, exactly as the Inspector does. That declaration is not decoration: the Shell derives
+    // the daemon session's scope set from these capabilities (shell/package_grants.cpp), so a build
+    // that dropped it would have every `editor.file-*` call refused `scope.denied` at the bridge —
+    // which is the enforcement, and is asserted in both directions by the roster suite.
+    roster.push_back(
+        to_contribution({.id = "builtin.files",
+                         .title = "Files",
+                         .icon = "folder",
+                         .zone = DockZone::left,
+                         .mode = InstanceMode::singleton,
+                         .path = "Project",
+                         .min_width = 240,
+                         .min_height = 200,
+                         .capabilities = Caps{kCapabilityReadQuery, kCapabilityFileWrite}}));
 
     // M5-F3 — the inspector panel (gui/panels/inspector/). Authors composed overrides through the
     // ONE L-30 write path, so it declares the file_write grant explicitly (never ambient).

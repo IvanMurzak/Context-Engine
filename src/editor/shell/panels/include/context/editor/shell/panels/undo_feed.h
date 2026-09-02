@@ -51,6 +51,7 @@ namespace context::editor::shell::panels
 // Redeclared alias (inspector_feed.h declares the same one to the same namespace, which is legal and
 // deliberate — either header may be included first).
 namespace inspector = gui::panels::inspector;
+namespace files = gui::panels::files;
 // The journal's namespace. NOTE the member functions below are `replay_undo` / `replay_redo`, NOT
 // `undo` / `redo`: a member named `undo` would HIDE this alias inside the class body, so every
 // `undo::` there would fail to compile. Naming them after what they do keeps the alias reachable.
@@ -100,6 +101,15 @@ public:
     void bind_gateway(const inspector::OverrideWriteGateway* gateway);
     [[nodiscard]] bool has_gateway() const noexcept { return gateway_bound_; }
 
+    // M9 e2: the FILE write path a file checkpoint replays through — the SAME gateway the Files
+    // panel authors through, bound here for the same reason and with the same lifetime rule as the
+    // override gateway above (the journal holds a raw pointer to it, so it must OUTLIVE this feed;
+    // the composition root's member order guarantees that). Bound INDEPENDENTLY of the override
+    // gateway: a build with one and not the other replays what it can and refuses the rest, rather
+    // than refusing everything.
+    void bind_file_gateway(files::FileWriteGateway* gateway);
+    [[nodiscard]] bool has_file_gateway() const noexcept { return file_gateway_bound_; }
+
     // The M9 e09b-3 LOUD WRITE-NOTICE SINK — the same seam `InspectorFeed` takes, for the same
     // reason and with the same erasure (this feed must not name `shell::WriteNoticeRelay`).
     //
@@ -123,6 +133,11 @@ public:
     // which is what the Inspector produces — one field per gesture). Dirties the persistence blob and
     // touches the panel so the surface re-renders with the new depth.
     void record(undo::FieldEdit edit);
+
+    // The e2 twin: record ONE landed file operation as its own undo step. `label` is what Session
+    // History renders for it ("delete art/hero.png") — a file step has no field name to identify it
+    // by, so the label is the only thing distinguishing one entry from another.
+    void record_file(undo::FileEdit edit, std::string label);
 
     // Ctrl+Z / Ctrl+Y. Named `replay_*` for the namespace-alias reason above. Both dirty the blob
     // (and touch the panel) IFF the stacks actually moved, which is read off the journal's own
@@ -201,6 +216,7 @@ private:
     undo::UndoJournal journal_;
     // Mirrors "a non-null gateway was bound": UndoJournal exposes no gateway accessor.
     bool gateway_bound_ = false;
+    bool file_gateway_bound_ = false;
     bool dirty_ = false;
     bool replay_landed_ = false;
     std::size_t checkpoints_recorded_ = 0;

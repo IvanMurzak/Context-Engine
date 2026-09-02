@@ -27,6 +27,7 @@
 
 #pragma once
 
+#include "context/editor/gui/panels/files/files_panel.h" // e2: FileWriteGateway / FileWriteResult
 #include "context/editor/gui/panels/inspector/inspector_panel.h" // OverrideWriteGateway, CommitResult
 
 #include "context/editor/gui/uitree/panel.h"
@@ -42,6 +43,7 @@ namespace context::editor::gui::session::undo
 {
 
 namespace inspector = context::editor::gui::panels::inspector;
+namespace files = context::editor::gui::panels::files;
 namespace serializer = context::editor::serializer;
 namespace uitree = context::editor::gui::uitree;
 
@@ -59,6 +61,32 @@ struct FieldEdit
     serializer::JsonValue after;          // the value after the edit — the redo target / collision base
 };
 
+// One reversible FILE operation (M9 e2) — the journal's SECOND atom, beside FieldEdit.
+//
+// WHY A SECOND ATOM RATHER THAN A FIELD EDIT IN DISGUISE. A FieldEdit is addressed by
+// (root_scene, id_path, pointer) and carries before/after VALUES; a file operation has none of
+// those — its subject is a path and its inverse is another file operation. Modelling it as a
+// FieldEdit would mean inventing a pointer nothing can read and a value nothing can write.
+//
+// WHAT MAKES THE DELETE REVERSIBLE. `restore_token` is the handle `editor file-delete` returned: the
+// deleted bytes are quarantined under `.editor/trash/<token>/`, so the undo restores the SAME bytes
+// rather than bytes this journal re-serialized. That is why the checkpoint stays small enough to
+// live in `.editor/editor-state.json` and why it is binary-safe (an arbitrary asset has no
+// byte-faithful JSON string form).
+struct FileEdit
+{
+    enum class Op
+    {
+        move,   // rename IS move: undo moves `to` back to `from`, redo re-applies `from` -> `to`
+        remove, // undo RESTORES via `restore_token`; redo deletes `from` again
+    };
+
+    Op op = Op::move;
+    std::string from;          // the path before the operation (the deleted path for `remove`)
+    std::string to;            // the path after (`move` only; empty for `remove`)
+    std::string restore_token; // `remove` only: the quarantine handle the undo restores through
+};
+
 // A gesture checkpoint (L-20 gesture-batch auto-checkpointing): ONE undo step per gesture, not per
 // keystroke. Usually a single field edit (the inspector commits one field per gesture), but a batched
 // gesture may carry several — undo reverts them in reverse order, each with independent field-path
@@ -67,6 +95,12 @@ struct Checkpoint
 {
     std::string label;                    // human/AI-readable gesture label (may be empty)
     std::vector<FieldEdit> edits;
+    // M9 e2: the file operations this step performed. A checkpoint carries field edits OR file
+    // edits (the two surfaces that author today never batch together), but the shape allows both so
+    // a future gesture that does can be ONE undo step rather than two.
+    std::vector<FileEdit> file_edits;
+
+    [[nodiscard]] bool empty() const noexcept { return edits.empty() && file_edits.empty(); }
 };
 
 // The outcome of an undo/redo replay over one checkpoint: the aggregate status + the per-field
@@ -109,12 +143,23 @@ public:
     // the contract catalog should know and does not. `WireOverrideWriteGateway::kNoDaemonCode`
     // (`shell.no_daemon`) is the same shape for the same reason — a host-minted, uncatalogued code.
     static constexpr const char* kReadUnavailableCode = "undo.read_unavailable";
+    // The e2 twin for the FILE half: the replay had no file write path to go through. Same shape
+    // and same reason as the code above — host-minted, uncatalogued, and NOT `cas.mismatch`,
+    // because nothing was written and no concurrent writer was observed.
+    static constexpr const char* kFileWriteUnavailableCode = "undo.file_write_unavailable";
     // The `to_json` schema version (bumped if the on-disk journal shape changes).
     static constexpr int kJournalVersion = 1;
 
     UndoJournal() = default;
     explicit UndoJournal(const inspector::OverrideWriteGateway* gateway) : gateway_(gateway) {}
     void set_gateway(const inspector::OverrideWriteGateway* gateway) noexcept { gateway_ = gateway; }
+
+    // M9 e2: the FILE write path a file checkpoint replays through — the SAME seam the Files panel
+    // authors through, so an undo is not a privileged back door but the identical operation issued
+    // in reverse (R-HUX-001: undo/redo is replayed through the same write path as any other
+    // mutation). `nullptr` detaches; an unbound file gateway makes a file replay an honest REFUSAL
+    // (nothing written, the step KEPT), never a silent no-op that would consume the human's history.
+    void set_file_gateway(files::FileWriteGateway* gateway) noexcept { file_gateway_ = gateway; }
 
     // --- recording (L-20 gesture-batch auto-checkpointing) ------------------------------------------
     // Push a fully-formed gesture checkpoint (empty checkpoints are ignored). Recording ANY new
@@ -125,6 +170,10 @@ public:
     // Append one edit to the open gesture batch, or — when no batch is open — auto-checkpoint it as a
     // lone single-edit gesture (the inspector's common one-field-per-gesture case).
     void capture(FieldEdit edit);
+    // The e2 twin for a FILE operation. Same batching rule; `label` names the step in Session
+    // History when it auto-checkpoints (a file step's label is the only thing a human can read to
+    // tell one undo entry from another, since a path is not a field).
+    void capture_file(FileEdit edit, std::string label = {});
     // Close the open gesture batch, recording it as ONE checkpoint (no-op when nothing was captured).
     void end_gesture();
 
@@ -137,6 +186,10 @@ public:
     // write through the gateway, reverting in reverse order. A field a concurrent writer touched since
     // is DROPPED loudly (never clobbered, R-HUX-001). Only a cleanly-reverted checkpoint (every field
     // applied/rebased) moves onto the redo stack. `none` when there is nothing to undo / no gateway.
+    //
+    // Since e2 a checkpoint may hold FILE edits instead of field edits, and the two gateways are
+    // bound independently — so "is there anything to replay through" is per-checkpoint, not a
+    // single up-front gateway test. A step whose gateway is missing REFUSES (and is kept).
     //
     // AN ERROR KEEPS THE STEP; A DROP CONSUMES IT — the same caller contract every other user of
     // `commit_override_write` honours (inspector_panel.h; InspectorPanel::commit keeps its staged
@@ -177,6 +230,21 @@ private:
     // `before`). The up-front expected-value check is the R-HUX-001 no-clobber guard.
     [[nodiscard]] inspector::CommitResult replay_edit(const FieldEdit& edit, bool redo) const;
 
+    // Replay one FILE edit through the file gateway (M9 e2). NON-const and takes `edit` by
+    // reference because a REDONE delete re-quarantines the bytes and hands back a token, which must
+    // replace the stale one in the checkpoint — otherwise the next undo of that step would try to
+    // restore through a handle nothing is filed under.
+    //
+    // The outcome is reported as an inspector::CommitResult so the aggregate/keep-vs-consume rules
+    // stay in ONE place: `file` carries the path (a file operation has no field pointer, so
+    // `pointer` stays empty), `applied` means the write path performed it, and a REFUSAL is
+    // `error` — nothing was written, so the caller keeps the step, exactly as for a refused field
+    // write. There is deliberately no `dropped` arm: the L-30 collision that produces one is a
+    // field-value comparison, and the file operations refuse on their own never-overwrite rules
+    // instead (asset.move_destination_exists / asset.restore_destination_exists), which is the same
+    // guarantee expressed where the engine can actually check it.
+    [[nodiscard]] inspector::CommitResult replay_file_edit(FileEdit& edit, bool redo);
+
     // The ONE home for the keep-vs-consume policy `undo` and `redo` share: push `cp` onto `to` when
     // the replay cleanly landed, back onto `from` when it refused without writing anything, and
     // consume it otherwise. Both callers route through here so the rule cannot drift between the
@@ -185,6 +253,7 @@ private:
                 std::vector<Checkpoint>& to);
 
     const inspector::OverrideWriteGateway* gateway_ = nullptr;
+    files::FileWriteGateway* file_gateway_ = nullptr;
     std::vector<Checkpoint> undo_;
     std::vector<Checkpoint> redo_;
     std::optional<Checkpoint> open_gesture_;

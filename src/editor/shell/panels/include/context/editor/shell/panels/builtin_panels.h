@@ -109,6 +109,8 @@ class SessionFeed;
 // `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers holding
 // only the bag re-point its daemon connection through `bind_write_client` below.
 class WireOverrideWriteGateway;
+// M9 e2's FILE write gateway, forward-declared for the same reason and re-pointed by the same seam.
+class WireFileWriteGateway;
 // The M9 e09c session undo host, forward-declared for the SAME reason (undo_feed.h names
 // `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers
 // holding only the bag drive it through the two persistence seams below.
@@ -387,6 +389,10 @@ void bind_files_focus(SessionFeed& session, FilesFeed& files_feed);
 //
 // It takes the BAG, not the gateway, because the gateway type is only forward-declared here — and
 // because the two writes seams then read identically at the call site.
+//
+// Since e2 it re-points BOTH write gateways — the override one and the file one. They are re-pointed
+// together on purpose: they share one daemon link, so a seam that cleared only one would leave the
+// other holding a freed client, which is exactly the use-after-free this function exists to prevent.
 void bind_write_client(BuiltinPanels& panels, client::Client* client);
 
 // Point every REFUSED write in this bag at the Shell's loud-notice relay (M9 e09b-3, design 05 §8) —
@@ -460,6 +466,10 @@ struct BuiltinPanels
     // tree: it IS the OverrideWriteGateway the Inspector's panel holds a raw pointer to, and a
     // gateway is contractually required to outlive its panel (inspector_panel.h).
     std::unique_ptr<WireOverrideWriteGateway> writes;
+    // The M9 e2 WIRE file-write gateway. DECLARED BESIDE `writes` and before every consumer, for the
+    // identical lifetime reason: BOTH the Files panel and the undo journal hold a raw pointer to it,
+    // and a gateway must outlive its panel.
+    std::unique_ptr<WireFileWriteGateway> file_writes;
     // The e09c session undo host. DECLARED SECOND — after `writes`, before every panel feed — because
     // it sits between them in the lifetime order: its journal holds a raw pointer to the gateway
     // above (so the gateway must outlive it), and the Inspector's checkpoint sink holds a raw

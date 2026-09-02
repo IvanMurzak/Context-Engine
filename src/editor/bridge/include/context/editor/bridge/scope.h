@@ -62,7 +62,7 @@ private:
 // The scope a given RPC method-id (the registry's rpc_method) requires. Unknown / read-only methods
 // map to read_query. The install/build family (package.add, build, install) requires build_install;
 // the file-writer family (set, new, edit, edit-batch, migrate, merge-file, resolve-conflict, re-key,
-// asset.move, asset.rename) requires file_write; the session family (session.new/seed/step/inject/
+// asset.move, asset.rename, editor.file-move/-delete/-restore) requires file_write; the session family (session.new/seed/step/inject/
 // record, replay, ui.send, shutdown) requires session_control. Verbs still RESERVED on the bridge are
 // gated by SEMANTIC CLASS regardless (defense-in-depth): a mutating verb is denied fail-closed under
 // a read/query token the day its backing is wired, never silently exposed by the read baseline

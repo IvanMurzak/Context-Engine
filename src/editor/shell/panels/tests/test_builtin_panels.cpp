@@ -13,6 +13,7 @@
 // trips through a real editor-state file via the two bag seams editor_main.cpp drives.
 
 #include "context/editor/shell/panels/builtin_panels.h"
+#include "context/editor/shell/panels/wire_file_gateway.h" // M9 e2: kNoDaemonCode
 
 #include "context/editor/gui/contract/builtin_roster.h"
 #include "context/editor/gui/panels/files/files_model.h" // M9 e1: FilesModel/FileNode for the wiring test
@@ -414,6 +415,83 @@ void a_refused_write_reaches_the_relay_as_a_notice_hued_for_its_status()
               std::string(undo::UndoJournal::kReadUnavailableCode));
         // And the explanatory edit was lifted rather than left empty (notice_from_replay's
         // front()-skip), so the toast carries a reason and not just a headline.
+        CHECK(!queued[0].at("payload").at("message").as_string().empty());
+    }
+}
+
+// M9 e2 — THE FILE-WRITE WIRING, end to end through the BAG.
+//
+// Four bindings have to hold together for a rename/move/delete to reach the daemon, be undoable, and
+// be loud when refused: the gateway EXISTS in the bag, the Files panel AUTHORS through it, the undo
+// journal REPLAYS through it, and the refusal reaches the notice relay. Each is a one-line wiring in
+// `install_builtin_panels`, and each is silently droppable — the panel with no gateway simply stops
+// offering the commands, and a build with no checkpoint sink journals nothing. Nothing else in this
+// suite would notice.
+void the_file_write_surface_is_live_undoable_and_loud()
+{
+    namespace files = context::editor::gui::panels::files;
+
+    shell::PanelHost host;
+    panels::BuiltinPanels bound = panels::install_builtin_panels(host);
+    CHECK(bound.file_writes != nullptr);
+    CHECK(bound.files != nullptr);
+    CHECK(bound.undo != nullptr);
+    if (bound.file_writes == nullptr || bound.files == nullptr || bound.undo == nullptr)
+    {
+        return;
+    }
+
+    // (1) the panel authors through the gateway, and (2) the journal replays through the same one.
+    CHECK(bound.files->has_write_gateway());
+    CHECK(bound.undo->has_file_gateway());
+    CHECK(bound.files->has_checkpoint_sink());
+
+    // (3) `bind_write_client` re-points BOTH write gateways — they share one daemon link, so a seam
+    // that cleared only the override one would leave this one holding a freed client.
+    CHECK(!bound.file_writes->has_client());
+    panels::bind_write_client(bound, nullptr); // safe with nothing bound
+    CHECK(!bound.file_writes->has_client());
+
+    shell::UiMirrorStore mirror;
+    shell::WriteNoticeRelay relay;
+    relay.bind_store(&mirror);
+    panels::bind_write_notice_relay(bound, relay);
+    CHECK(bound.files->has_notice_sink());
+
+    // Give the panel a row to act on, then delete it WITH NO DAEMON BOUND. The gateway fails closed,
+    // so this is the honest end-to-end refusal — and it must be LOUD.
+    files::FilesModel model;
+    model.ok = true;
+    model.file_count = 1;
+    files::FileNode row;
+    row.identity = "art/hero.png";
+    row.display_name = "hero.png";
+    row.kind = files::FileNodeKind::file;
+    model.roots.push_back(row);
+    bound.files->panel().set_model(std::move(model));
+
+    CHECK(!bound.files->panel().remove("art/hero.png"));
+    CHECK(bound.files->writes_refused() == 1u);
+    CHECK(bound.files->writes_landed() == 0u);
+    // NOTHING was journaled: there is no step to undo, because nothing happened.
+    CHECK(!bound.undo->journal().can_undo());
+
+    // (4) ...and the refusal reached every window through the ONE relay, as a REFUSAL — not a drop
+    // (no co-writer was observed) and not an abandonment (the write WAS attempted).
+    CHECK(relay.published() == 1u);
+    const std::vector<Json> queued = mirror.take(shell::kPrimaryWindowId);
+    CHECK(queued.size() == 1u);
+    if (queued.size() == 1u)
+    {
+        CHECK(queued[0].at("topic").as_string() == shell::kUiTopicWriteNotice);
+        CHECK(queued[0].at("origin").as_string() == shell::kWriteNoticeOrigin);
+        CHECK(queued[0].at("payload").at("kind").as_string() == shell::kWriteNoticeKindRefusal);
+        CHECK(queued[0].at("payload").at("kind").as_string() != shell::kWriteNoticeKindDrop);
+        CHECK(queued[0].at("payload").at("kind").as_string() != shell::kWriteNoticeKindAbandoned);
+        // The human is told WHAT they were doing and WHY it did not happen.
+        CHECK(queued[0].at("payload").at("action").as_string() == "delete");
+        CHECK(queued[0].at("payload").at("code").as_string() ==
+              std::string(panels::WireFileWriteGateway::kNoDaemonCode));
         CHECK(!queued[0].at("payload").at("message").as_string().empty());
     }
 }
@@ -1114,6 +1192,7 @@ int main()
     the_inspector_gesture_surface_is_live_but_refuses_without_a_daemon();
     the_undo_replay_routes_through_the_shared_wire_gateway();
     a_refused_write_reaches_the_relay_as_a_notice_hued_for_its_status();
+    the_file_write_surface_is_live_undoable_and_loud();
     the_journal_publishes_to_and_restores_from_the_editor_state_store();
     the_pump_consumes_a_landed_replay_and_rearms_the_inspector();
     the_undo_persistence_seams_tolerate_a_bag_with_no_host();
