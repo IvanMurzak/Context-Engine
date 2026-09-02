@@ -1,0 +1,672 @@
+// T1 for the Scene viewport's editor-core half (M9 editor-UX e3, D7): the DOM HOLE, the `"always"`
+// renderer that keeps it in the document, and the PHYSICAL-px rect the Shell composites against.
+//
+// ⚠ THE SCALE CASES ARE THE POINT. The set's gate is that a geometry assertion at device scale 1.0 is
+// VACUOUS — physical and CSS pixels coincide there, so the correct code and the code that forgot to
+// multiply are byte-identical. Every rect case below therefore runs at 1.0 AND at 1.5 / 2 / 3, over
+// a fixture with FRACTIONAL CSS edges, and asserts the 1.0 result and the scaled result DIFFER — so
+// the scaled half cannot be satisfied by an implementation the 1.0 half already accepts. A separate
+// case pins the edge-rounding rule against the plausible-but-wrong `round(width · dpr)`, which
+// agrees at every integral scale and disagrees exactly where it matters.
+//
+// The mounted cases use REAL Dockview in a REAL browser, for the reason extpanel.test.ts states
+// about its frames: "the renderer is pinned to always" is a claim about what the ENGINE does with a
+// panel, and an assertion on the option value would prove only what someone wrote. What is asserted
+// instead is the CONSEQUENCE — an inactive viewport is still in the document and still measures —
+// with the ordinary `uitree` panel beside it as the control that proves Dockview really does detach
+// the ones it is allowed to.
+
+import { assert, assertEqual, waitFor, type TestCase } from "./harness.js";
+import { ShellBridge, type BridgeQuery, type BridgeQueryFunction } from "../bridge.js";
+import { detectDockview } from "../dockview.js";
+import { REGION_KIND_VIEWPORT } from "../editorstate.js";
+import { PanelHost } from "../panelhost.js";
+import { PANEL_LIST_METHOD, PanelClient, parsePanelManifest } from "../panels.js";
+import {
+    PANEL_INSTANCE_ATTRIBUTE,
+    VIEWPORT_PANEL_ID,
+    VIEWPORT_SURFACE_ATTRIBUTE,
+    isNativeSurfacePanel,
+    isNativeSurfacePanelId,
+    viewportRegions,
+} from "../viewport.js";
+
+// ------------------------------------------------------------------------------- the roster mock
+
+/** One `panel.list` entry in the WIRE shape `PanelHost::list()` emits (panel_host.cpp). */
+function manifestJson(
+    id: string,
+    mode: "singleton" | "unlimited" = "singleton",
+): Record<string, unknown> {
+    return {
+        id,
+        kind: "panel",
+        title: id,
+        icon: "",
+        contractVersion: 3,
+        dock: { zone: "center", minWidth: 0, minHeight: 0 },
+        instances: { mode, max: 0 },
+        path: "Scene",
+        content: { type: "uitree", entry: "" },
+        state: { schemaVersion: 1 },
+        capabilities: [],
+        commands: [],
+        hosted: true,
+        gestures: false,
+        persists: false,
+        revision: 1,
+    };
+}
+
+/** A Shell serving one roster and refusing everything else, exactly as the real router's default. */
+function mockShell(panels: readonly Record<string, unknown>[]): ShellBridge {
+    let served = 0;
+    const query: BridgeQueryFunction = (request: BridgeQuery): number => {
+        const parsed = JSON.parse(request.request) as { id: number; method: string };
+        served += 1;
+        const envelope =
+            parsed.method === PANEL_LIST_METHOD
+                ? { jsonrpc: "2.0", id: parsed.id, result: { contractMajor: 2, panels } }
+                : {
+                      jsonrpc: "2.0",
+                      id: parsed.id,
+                      error: {
+                          code: -32601,
+                          message: "unknown method",
+                          data: { reason: "bridge.unknown_method" },
+                      },
+                  };
+        request.onSuccess(JSON.stringify(envelope));
+        return served;
+    };
+    return new ShellBridge(query);
+}
+
+interface Mounted {
+    readonly host: PanelHost;
+    readonly container: HTMLElement;
+    dispose(): void;
+}
+
+async function mountHost(panels: readonly Record<string, unknown>[]): Promise<Mounted> {
+    const dockview = detectDockview();
+    assert(
+        dockview !== undefined,
+        "the pinned dockview-core UMD global is loaded — harness.html must load " +
+            "dockview-core.min.js before the test bundle, or this whole file passes vacuously",
+    );
+    const dv = dockview as NonNullable<typeof dockview>;
+    const container = window.document.createElement("div");
+    // FIXED at the origin, and SMALL ENOUGH TO FIT. `elementsFromPoint` answers in VIEWPORT
+    // coordinates, so a dock pushed below the fold by whatever else the harness page holds — or one
+    // simply larger than the harness window (measured 750x438 in the headless runner) — hit-tests to
+    // nothing, and the paint-stack case would then pass vacuously on an empty stack. The case
+    // asserts the stack has DEPTH for exactly that reason.
+    container.className = "dockview-theme-dark";
+    container.setAttribute(
+        "style",
+        "position: fixed; left: 0; top: 0; z-index: 9; width: 600px; height: 300px;",
+    );
+    window.document.body.appendChild(container);
+    const host = new PanelHost({
+        container,
+        client: new PanelClient(mockShell(panels)),
+        dockview: dv,
+    });
+    await host.start();
+    // RE-APPLIED after `start()`: the host mounts Dockview into this element and sets its own
+    // layout styles, so anything written before would be silently replaced. The explicit `layout`
+    // then makes Dockview recompute at the final size RIGHT NOW — its own resize observation is
+    // asynchronous, and every geometry assertion in this file would otherwise race it.
+    container.setAttribute(
+        "style",
+        "position: fixed; left: 0; top: 0; z-index: 9; width: 600px; height: 300px;",
+    );
+    host.api?.layout(600, 300);
+    return {
+        host,
+        container,
+        dispose: (): void => {
+            host.dispose();
+            container.remove();
+        },
+    };
+}
+
+/** The mounted body element of one panel COPY, or null. */
+function slotFor(container: HTMLElement, instanceId: string): HTMLElement | null {
+    return container.querySelector<HTMLElement>(
+        `[${PANEL_INSTANCE_ATTRIBUTE}="${instanceId}"]`,
+    );
+}
+
+/** The Dockview GROUP painting behind `element`, found in its paint stack (never its ancestors). */
+function groupBehind(element: Element, root: Element): Element | null {
+    return (
+        paintStack(element, root).find((candidate) =>
+            candidate.classList.contains("dv-groupview"),
+        ) ?? null
+    );
+}
+
+/** Is `slot` laid out INSIDE the dock's own box (as opposed to parked outside it)? */
+function isInsideDock(slot: Element, container: Element): boolean {
+    const rect = slot.getBoundingClientRect();
+    const dock = container.getBoundingClientRect();
+    return (
+        rect.width > 0 &&
+        rect.height > 0 &&
+        rect.right > dock.left &&
+        rect.bottom > dock.top &&
+        rect.left < dock.right &&
+        rect.top < dock.bottom
+    );
+}
+
+/** Is a computed background fully transparent (alpha 0 / `transparent` / `none`)? */
+function isTransparent(color: string): boolean {
+    const normalized = color.trim().toLowerCase();
+    if (normalized === "transparent" || normalized === "" || normalized === "none") {
+        return true;
+    }
+    // `rgba(r, g, b, 0)` — the only opaque-vs-not question a computed background-color answers.
+    const match = /^rgba?\(([^)]*)\)$/.exec(normalized);
+    if (match === null) {
+        return false;
+    }
+    const parts = match[1]?.split(",") ?? [];
+    return parts.length === 4 && Number.parseFloat(parts[3] ?? "1") === 0;
+}
+
+/**
+ * The elements the browser would PAINT under the centre of `element`, outermost-last, restricted to
+ * the dock (plus `html`/`body`, which are legitimately part of the stack).
+ *
+ * `elementsFromPoint`, not an ancestor walk: Dockview mounts an `always`-rendered panel in a SIBLING
+ * overlay container, so the group view that paints the docking surface is not an ancestor of the
+ * viewport's slot at all — it is BEHIND it, which is exactly where an opaque layer would hide the
+ * Shell's composited viewport while an ancestor walk reported everything transparent.
+ */
+function paintStack(element: Element, root: Element): Element[] {
+    const rect = element.getBoundingClientRect();
+    const x = rect.left + rect.width / 2;
+    const y = rect.top + rect.height / 2;
+    return window.document
+        .elementsFromPoint(x, y)
+        .filter(
+            (candidate) =>
+                root.contains(candidate) ||
+                candidate === root ||
+                candidate === window.document.body ||
+                candidate === window.document.documentElement,
+        );
+}
+
+function describe(element: Element): string {
+    return `${element.tagName.toLowerCase()}.${element.className || "(no class)"}`;
+}
+
+// ------------------------------------------------------------------------------ the DOM fixture
+//
+// A plain fixture with FRACTIONAL CSS edges, for the arithmetic tier. Deliberately not a Dockview
+// layout: the rounding rule must be provable at coordinates chosen to expose it, and a dock's own
+// geometry is not ours to choose.
+
+interface Fixture {
+    readonly root: HTMLElement;
+    dispose(): void;
+}
+
+function mountFixture(
+    rects: readonly (readonly [string, number, number, number, number])[],
+): Fixture {
+    const root = window.document.createElement("div");
+    root.style.position = "fixed";
+    root.style.left = "0px";
+    root.style.top = "0px";
+    root.style.width = "1000px";
+    root.style.height = "800px";
+    for (const [instanceId, left, top, width, height] of rects) {
+        const slot = window.document.createElement("div");
+        slot.setAttribute("data-panel-id", VIEWPORT_PANEL_ID);
+        slot.setAttribute(PANEL_INSTANCE_ATTRIBUTE, instanceId);
+        slot.setAttribute(VIEWPORT_SURFACE_ATTRIBUTE, "");
+        slot.style.position = "absolute";
+        slot.style.left = `${String(left)}px`;
+        slot.style.top = `${String(top)}px`;
+        slot.style.width = `${String(width)}px`;
+        slot.style.height = `${String(height)}px`;
+        root.appendChild(slot);
+    }
+    window.document.body.appendChild(root);
+    return {
+        root,
+        dispose: (): void => {
+            root.remove();
+        },
+    };
+}
+
+// ------------------------------------------------------------------------------------- the cases
+
+export const viewportTests: readonly TestCase[] = [
+    {
+        name: "viewport: the native-surface predicate is the closed set of one",
+        run: (): void => {
+            assert(isNativeSurfacePanelId(VIEWPORT_PANEL_ID), "the Scene viewport is one");
+            assert(
+                !isNativeSurfacePanelId("builtin.viewport-edit"),
+                "its SIBLING is not — the two ids differ by a suffix and share a directory, which " +
+                    "is exactly the confusion a substring test would introduce",
+            );
+            assert(!isNativeSurfacePanelId("builtin.files"), "an ordinary uitree panel is not");
+            assert(!isNativeSurfacePanelId(""), "and neither is nothing");
+            const manifest = parsePanelManifest(manifestJson(VIEWPORT_PANEL_ID));
+            assert(manifest !== null, "the fixture manifest parses");
+            if (manifest !== null) {
+                assert(isNativeSurfacePanel(manifest), "the manifest-shaped sibling agrees");
+                assert(
+                    manifest.contentType === "uitree",
+                    "and it is a `uitree` panel — the branch that takes Dockview's DEFAULT renderer, " +
+                        "which is why the native-surface question must be asked BEFORE the content type",
+                );
+            }
+        },
+    },
+    {
+        name: "viewport: the rect is PHYSICAL px at device scale 1 / 1.5 / 2 / 3, edges rounded",
+        run: (): void => {
+            // FRACTIONAL edges on purpose: at whole-pixel coordinates every rounding rule agrees.
+            const fixture = mountFixture([["builtin.viewport#1", 50.25, 40.25, 99.95, 60.7]]);
+            try {
+                const slot = fixture.root.firstElementChild;
+                assert(slot !== null, "the fixture slot is in the document");
+                if (slot === null) {
+                    return;
+                }
+                const css = slot.getBoundingClientRect();
+                assert(
+                    css.left % 1 !== 0 || css.top % 1 !== 0,
+                    "the fixture really did lay out on fractional CSS coordinates — without that " +
+                        "the edge-rounding rule below is untestable and this case is vacuous",
+                );
+
+                const at1 = viewportRegions(fixture.root, 1);
+                assertEqual(at1.length, 1, "one viewport, one region");
+                assertEqual(at1[0]?.kind, REGION_KIND_VIEWPORT, "published as a viewport region");
+                assertEqual(at1[0]?.id, "builtin.viewport#1", "keyed by the INSTANCE id");
+
+                for (const dpr of [1, 1.5, 2, 3]) {
+                    const regions = viewportRegions(fixture.root, dpr);
+                    const rect = regions[0]?.rect;
+                    assert(rect !== undefined, `a region at dpr ${String(dpr)}`);
+                    if (rect === undefined) {
+                        continue;
+                    }
+                    const x0 = Math.round(css.left * dpr);
+                    const y0 = Math.round(css.top * dpr);
+                    assertEqual(rect.x, x0, `x is physical at dpr ${String(dpr)}`);
+                    assertEqual(rect.y, y0, `y is physical at dpr ${String(dpr)}`);
+                    // THE EDGE RULE: round the far edge and subtract, never round the extent.
+                    assertEqual(
+                        rect.width,
+                        Math.round(css.right * dpr) - x0,
+                        `width derives from the ROUNDED edges at dpr ${String(dpr)}`,
+                    );
+                    assertEqual(
+                        rect.height,
+                        Math.round(css.bottom * dpr) - y0,
+                        `height derives from the ROUNDED edges at dpr ${String(dpr)}`,
+                    );
+                }
+
+                // ⚠ THE NON-VACUITY HALVES. Without these the four loops above would all pass for an
+                // implementation that ignored `dpr` entirely (at 1.0 it is correct) or that rounded
+                // the EXTENT (at 1.0 and 2.0 it agrees).
+                const scaled = viewportRegions(fixture.root, 1.5)[0]?.rect;
+                assert(scaled !== undefined && at1[0] !== undefined, "both measurements exist");
+                if (scaled === undefined || at1[0] === undefined) {
+                    return;
+                }
+                assert(
+                    scaled.x !== at1[0].rect.x && scaled.width !== at1[0].rect.width,
+                    "the 1.5 rect DIFFERS from the 1.0 rect — a producer that dropped the scale " +
+                        "would pass every assertion above and fail here",
+                );
+                // The plausible-but-wrong rule, `round(width · dpr)`, agrees with the edge rule at
+                // MOST coordinates and at every integral scale — which is why the fixture's edges are
+                // chosen to expose it, and why the disagreement is SEARCHED FOR rather than asserted
+                // at one scale: if no tested scale separated the two rules, the width assertions
+                // above would be satisfied by both and would pin neither.
+                const separating = [1, 1.5, 2, 3].filter((dpr) => {
+                    const x0 = Math.round(css.left * dpr);
+                    return Math.round(css.width * dpr) !== Math.round(css.right * dpr) - x0;
+                });
+                assert(
+                    separating.length > 0,
+                    "at least one tested scale SEPARATES the edge rule from `round(width · dpr)` — " +
+                        `none did, so the width assertions pin nothing (css ${String(css.left)}` +
+                        `..${String(css.right)})`,
+                );
+            } finally {
+                fixture.dispose();
+            }
+        },
+    },
+    {
+        name: "viewport: two copies are two regions, keyed by instance id, in DOM order",
+        run: (): void => {
+            // c3's `unlimited` mode: several scene views is the point, and the Shell keys a render
+            // target AND a camera by each id — so two copies sharing one key would share a camera.
+            const fixture = mountFixture([
+                ["builtin.viewport#1", 0.5, 40.5, 400.25, 300.5],
+                ["builtin.viewport#2", 400.75, 40.5, 399.25, 300.5],
+            ]);
+            try {
+                const regions = viewportRegions(fixture.root, 1.5);
+                assertEqual(regions.length, 2, "two copies, two regions");
+                assertEqual(regions[0]?.id, "builtin.viewport#1", "DOM order is publish order");
+                assertEqual(regions[1]?.id, "builtin.viewport#2", "…and the second follows");
+                assert(
+                    regions[0]?.rect.x !== regions[1]?.rect.x,
+                    "with independent rects, at a scale where they are not accidentally equal",
+                );
+                // They ABUT rather than overlap: the edge-rounding rule is what guarantees the right
+                // edge of one is the left edge of the next, at a fractional split and a fractional
+                // scale. A per-extent rounding leaves a seam or an overlap here.
+                const first = regions[0]?.rect;
+                const second = regions[1]?.rect;
+                assert(first !== undefined && second !== undefined, "both rects exist");
+                if (first !== undefined && second !== undefined) {
+                    assertEqual(
+                        first.x + first.width,
+                        second.x,
+                        "the two rects ABUT exactly — no seam, no overlap, at dpr 1.5",
+                    );
+                }
+            } finally {
+                fixture.dispose();
+            }
+        },
+    },
+    {
+        name: "viewport: an unlaid-out or unkeyed copy publishes nothing",
+        run: (): void => {
+            const fixture = mountFixture([["builtin.viewport#1", 10, 10, 0, 0]]);
+            try {
+                assertEqual(
+                    viewportRegions(fixture.root, 2).length,
+                    0,
+                    "a collapsed / mid-resize copy is DROPPED rather than published as a " +
+                        "degenerate hole the compositor would scissor to nothing",
+                );
+                const slot = fixture.root.firstElementChild;
+                if (slot !== null) {
+                    (slot as HTMLElement).style.width = "200px";
+                    (slot as HTMLElement).style.height = "150px";
+                    assertEqual(
+                        viewportRegions(fixture.root, 2).length,
+                        1,
+                        "and it comes back the moment it has a rect again",
+                    );
+                    slot.setAttribute(PANEL_INSTANCE_ATTRIBUTE, "");
+                    assertEqual(
+                        viewportRegions(fixture.root, 2).length,
+                        0,
+                        "an UNKEYED surface publishes nothing: a region id of \"\" would name a " +
+                            "render target and a camera by nothing",
+                    );
+                }
+            } finally {
+                fixture.dispose();
+            }
+        },
+    },
+    {
+        name: "viewport: the slot and the GROUP behind it stop painting; an ordinary panel's does not",
+        run: async (): Promise<void> => {
+            // ⚠ SCOPE, STATED SO THE ASSERTIONS ARE NOT READ AS MORE THAN THEY ARE. A composited
+            // native layer is visible only where the browser's frame is alpha-0 all the way down, and
+            // the measured paint stack under a viewport is
+            //
+            //     .ctx-panel-body | .dv-render-overlay | .dv-content-container | .dv-groupview |
+            //     … | .dv-grid-view.dv-dockview | body | html
+            //
+            // EDITOR-UX e3 DELIVERS THE VIEWPORT-SPECIFIC TWO — the slot, and the group behind it
+            // (which is not an ancestor of the slot: an `always`-rendered panel lives in
+            // `.dv-render-overlay`, a sibling subtree, so the group paints BEHIND the hole and no
+            // selector reaches it from the slot). That is what this case asserts.
+            //
+            // THE REMAINING THREE ARE GLOBAL AND ARE NOT THIS TASK'S: `.dv-grid-view`'s
+            // `--dv-background-color`, `html, body`'s canvas paint, and CEF's own
+            // `CefBrowserSettings.background_color` (unset today, so the browser composites onto an
+            // OPAQUE base and no alpha could reach the OSR buffer whatever the DOM says). Each is a
+            // one-line change and all three change the composited pixels that EVERY `editor-cef-smoke`
+            // coverage floor is calibrated against (cef_shell_smoke.cpp § kAppBackground*) — a
+            // CI-only surface. They are named here, and in `viewport.ts`, so the gap is a recorded
+            // boundary rather than something a later reader has to rediscover from a black viewport.
+            const mounted = await mountHost([
+                manifestJson(VIEWPORT_PANEL_ID, "unlimited"),
+                manifestJson("builtin.files"),
+            ]);
+            try {
+                const viewport = mounted.container.querySelector<HTMLElement>(
+                    `[${VIEWPORT_SURFACE_ATTRIBUTE}]`,
+                );
+                assert(
+                    viewport !== null,
+                    "the viewport's slot carries the native-surface marker — stamped by " +
+                        "`markPanelSlot`, which every renderer's slot goes through",
+                );
+                if (viewport === null) {
+                    return;
+                }
+                assertEqual(
+                    viewport.getAttribute("data-panel-id"),
+                    VIEWPORT_PANEL_ID,
+                    "and the marker is on the VIEWPORT's slot",
+                );
+                const ordinaryInstance = mounted.host.mounted.find(
+                    (id) => mounted.host.panelIdOf(id) === "builtin.files",
+                );
+                assert(ordinaryInstance !== undefined, "the ordinary panel mounted too");
+
+                // ACTIVATE THE VIEWPORT. Both panels land in the `center` group and the one added
+                // last is the active tab, so without this the hole would be measured on the copy the
+                // human is not looking at — which Dockview parks outside the dock entirely.
+                const viewportInstance = viewport.getAttribute(PANEL_INSTANCE_ATTRIBUTE) ?? "";
+                mounted.host.api?.getPanel(viewportInstance)?.api?.setActive();
+                await waitFor(
+                    "the viewport became the active tab and is laid out INSIDE the dock",
+                    () => isInsideDock(viewport, mounted.container),
+                );
+
+                assert(
+                    isTransparent(window.getComputedStyle(viewport).backgroundColor),
+                    "the SLOT stops painting",
+                );
+                const group = groupBehind(viewport, mounted.container);
+                assert(
+                    group !== null,
+                    "the group behind the viewport is in its paint stack — a null here means the " +
+                        "stack was empty and every assertion below would be vacuous",
+                );
+                if (group === null) {
+                    return;
+                }
+                assert(
+                    group.hasAttribute("data-group-native-surface"),
+                    `the GROUP is marked as showing a native surface (${describe(group)})`,
+                );
+                assert(
+                    isTransparent(window.getComputedStyle(group).backgroundColor),
+                    `…so it stops painting too (${window.getComputedStyle(group).backgroundColor})`,
+                );
+
+                // THE CONTROL, in BOTH directions. Switch to the ordinary panel: the SAME group must
+                // lose the mark and start painting again. Without this, "the group is transparent"
+                // would pass for a stylesheet that made every group transparent, or for one that
+                // never loaded at all.
+                mounted.host.api?.getPanel(ordinaryInstance ?? "")?.api?.setActive();
+                await waitFor(
+                    "the ordinary panel became the active tab and is laid out INSIDE the dock",
+                    () => {
+                        const slot = slotFor(mounted.container, ordinaryInstance ?? "");
+                        return slot !== null && isInsideDock(slot, mounted.container);
+                    },
+                );
+                assert(
+                    !group.hasAttribute("data-group-native-surface"),
+                    "the mark is WITHDRAWN when the group stops showing the viewport — a group " +
+                        "holding a background viewport tab is showing something else over its box",
+                );
+                assert(
+                    !isTransparent(window.getComputedStyle(group).backgroundColor),
+                    "and the docking surface is painted again " +
+                        `(${window.getComputedStyle(group).backgroundColor})`,
+                );
+                const ordinary = slotFor(mounted.container, ordinaryInstance ?? "");
+                assert(
+                    ordinary !== null && !ordinary.hasAttribute(VIEWPORT_SURFACE_ATTRIBUTE),
+                    "and the ordinary panel's own slot carries no native-surface marker",
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        name: "viewport: the renderer is pinned to always — an inactive copy stays in the DOM",
+        run: async (): Promise<void> => {
+            // The CONSEQUENCE, not the option: an `onlyWhenVisible` panel is REMOVED from the DOM
+            // when another tab in its group is activated, which makes its rect meaningless and takes
+            // the transparent hole with it (viewport.ts § THE HOLE PINS THE RENDERER).
+            const mounted = await mountHost([
+                manifestJson(VIEWPORT_PANEL_ID, "unlimited"),
+                manifestJson("builtin.files"),
+            ]);
+            try {
+                const api = mounted.host.api;
+                assert(api !== null, "the dock is up");
+                const viewportPanels = mounted.host.mounted.filter(
+                    (id) => mounted.host.panelIdOf(id) === VIEWPORT_PANEL_ID,
+                );
+                const otherPanels = mounted.host.mounted.filter(
+                    (id) => mounted.host.panelIdOf(id) === "builtin.files",
+                );
+                assertEqual(viewportPanels.length, 1, "one viewport copy is open");
+                assertEqual(otherPanels.length, 1, "and one ordinary panel beside it");
+                const viewportId = viewportPanels[0] ?? "";
+                const otherId = otherPanels[0] ?? "";
+
+                const viewportSlot = slotFor(mounted.container, viewportId);
+                const otherSlot = slotFor(mounted.container, otherId);
+                assert(viewportSlot !== null, "the viewport slot is mounted");
+                assert(otherSlot !== null, "the ordinary slot is mounted");
+                if (viewportSlot === null || otherSlot === null) {
+                    return;
+                }
+
+                // Activate the ORDINARY panel. In a `center`-zoned layout both land in one group, so
+                // this is the tab switch that detaches whatever Dockview is allowed to detach.
+                api?.getPanel(otherId)?.api?.setActive();
+                await waitFor(
+                    "the ordinary panel became the active tab",
+                    () => !otherSlot.isConnected || otherSlot.getBoundingClientRect().width > 0,
+                );
+
+                assert(
+                    viewportSlot.isConnected,
+                    "the INACTIVE viewport is STILL IN THE DOCUMENT — `renderer: \"always\"`. " +
+                        "Detached, its element would be destroyed and re-created on every tab " +
+                        "switch, and the region map would carry a rect for an element that is gone",
+                );
+                const rect = viewportSlot.getBoundingClientRect();
+                assert(
+                    rect.width > 0 && rect.height > 0,
+                    `and it still MEASURES (${String(rect.width)}×${String(rect.height)}) — which ` +
+                        "is exactly why the parked case must be handled: the rect is plausible",
+                );
+                assert(
+                    !isInsideDock(viewportSlot, mounted.container),
+                    "…but Dockview PARKED it outside the dock rather than deleting it, which is " +
+                        "what `always` means and what a naive publisher would miss",
+                );
+                assertEqual(
+                    viewportRegions(mounted.container, 2).length,
+                    0,
+                    "so the region is WITHDRAWN while the copy is parked — no render target, no " +
+                        "scene drawn and no layer composited for a viewport the human cannot see",
+                );
+
+                // BACK AGAIN: activating the copy restores its region, so the withdrawal above is a
+                // STATE and not a one-way loss.
+                api?.getPanel(viewportId)?.api?.setActive();
+                await waitFor(
+                    "the viewport is back inside the dock",
+                    () => isInsideDock(viewportSlot, mounted.container),
+                );
+                assertEqual(
+                    viewportRegions(mounted.container, 2).length,
+                    1,
+                    "the region returns the moment the copy is the active tab again",
+                );
+
+                // THE CONTROL, and what makes `always` mean anything at all: Dockview REMOVES an
+                // ordinary `uitree` panel from the document when it stops being active. Without this
+                // assertion "the viewport stayed" proves nothing — a Dockview that never detached
+                // anything would satisfy it for free.
+                await waitFor(
+                    "an ordinary `uitree` panel to be DETACHED once it stops being the active tab — " +
+                        "the default this task pins the viewport away from",
+                    () => !otherSlot.isConnected,
+                );
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+    {
+        name: "viewport: the mounted copy's region is measured off the REAL dock rect",
+        run: async (): Promise<void> => {
+            const mounted = await mountHost([manifestJson(VIEWPORT_PANEL_ID, "unlimited")]);
+            try {
+                const ids = mounted.host.mounted.filter(
+                    (id) => mounted.host.panelIdOf(id) === VIEWPORT_PANEL_ID,
+                );
+                assertEqual(ids.length, 1, "one copy");
+                const slot = slotFor(mounted.container, ids[0] ?? "");
+                assert(slot !== null, "its slot is mounted");
+                if (slot === null) {
+                    return;
+                }
+                await waitFor(
+                    "the single copy is laid out INSIDE the dock",
+                    () => isInsideDock(slot, mounted.container),
+                    5000,
+                    () =>
+                        `slot ${JSON.stringify(slot.getBoundingClientRect())} vs dock ` +
+                        `${JSON.stringify(mounted.container.getBoundingClientRect())}`,
+                );
+                const css = slot.getBoundingClientRect();
+                assert(css.width > 0, "the dock laid it out");
+
+                for (const dpr of [1, 2]) {
+                    const regions = viewportRegions(mounted.container, dpr);
+                    assertEqual(regions.length, 1, `one region at dpr ${String(dpr)}`);
+                    assertEqual(regions[0]?.id, ids[0], "keyed by the copy's instance id");
+                    assertEqual(
+                        regions[0]?.rect.width,
+                        Math.round(css.right * dpr) - Math.round(css.left * dpr),
+                        `the REAL dock rect, in physical px at dpr ${String(dpr)}`,
+                    );
+                }
+                const one = viewportRegions(mounted.container, 1)[0]?.rect.width ?? 0;
+                const two = viewportRegions(mounted.container, 2)[0]?.rect.width ?? 0;
+                assertEqual(two, one * 2, "and the two scales really do differ");
+            } finally {
+                mounted.dispose();
+            }
+        },
+    },
+];

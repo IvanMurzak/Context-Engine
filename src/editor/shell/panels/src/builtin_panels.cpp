@@ -14,6 +14,7 @@
 #include "context/editor/shell/panels/scenetree_feed.h"
 #include "context/editor/shell/panels/session_feed.h" // SessionFeed complete type (e08b)
 #include "context/editor/shell/panels/undo_feed.h"    // UndoFeed complete type (e09c)
+#include "context/editor/shell/panels/viewport_feed.h" // editor-UX e3: ViewportFeed complete type
 #include "context/editor/shell/panels/wire_override_gateway.h" // complete type (e09b-2)
 #include "context/editor/shell/panels/wire_file_gateway.h" // M9 e2: the FILE write gateway
 #include "context/editor/shell/write_notice.h" // WriteNoticeRelay complete type (e09b-3)
@@ -678,11 +679,20 @@ const std::vector<std::string>& hostable_panel_ids()
         // called its to_json/load_json either). Hosting it is what turns the R-CLI-001
         // keyboard/CLI path into a real one.
         undo::UndoJournal::kContributionId,
+        // M9 editor-UX e3 (D7): the Scene viewport. Rostered since M5-F1 and UNHOSTED until now —
+        // `builtin.viewport` had a model (a text summary of the observed scene) and no way to reach
+        // it, so "there is no window showing the scene" was literally true. Hosting it is what turns
+        // the compositor's viewport layer stack, the region map's `RegionKind::viewport` and the
+        // e11b render pass — all built, all tested, all reached by nothing — into a live viewport.
+        //
+        // THE ONE ENTRY BOUND THROUGH `provide_factory` (see install_builtin_panels): it is the one
+        // built-in declared `instances.mode: "unlimited"`, and two scene views must hold two cameras.
+        gui::viewport::ViewportPanel::kContributionId,
     };
     return ids;
 }
 
-BuiltinPanels install_builtin_panels(PanelHost& host)
+BuiltinPanels install_builtin_panels(PanelHost& host, ViewportBinding* viewports)
 {
     BuiltinPanels out;
 
@@ -914,7 +924,74 @@ BuiltinPanels install_builtin_panels(PanelHost& host)
         }
     }
 
+    // --- the Scene viewport (M9 editor-UX e3, context_gui_viewport, D7) ---------------------------
+    // THE ONLY `provide_factory` BINDING IN THE TREE, and the first shipping proof of c3's instance
+    // runtime: `builtin.viewport` is declared `instances.mode: "unlimited"`, so each live copy gets
+    // its OWN `ViewportPanel` model and its OWN camera. A `provide()` here would give two scene views
+    // one shared model — the exact failure `provide_factory` exists to prevent (panel_host.h).
+    //
+    // Bound LAST so a refusal costs nothing else, and dropped on refusal like every sibling feed.
+    {
+        auto viewport_feed = std::make_unique<ViewportFeed>(
+            host, gui::viewport::ViewportPanel::kContributionId, viewports);
+        if (host.provide_factory(gui::viewport::ViewportPanel::kContributionId,
+                                 viewport_feed->make_factory()))
+        {
+            ++out.bound;
+            out.viewport = std::move(viewport_feed);
+        }
+    }
+
     return out;
+}
+
+void bind_viewport_producer(BuiltinPanels& panels, ViewportBinding* viewports)
+{
+    if (panels.viewport != nullptr)
+    {
+        panels.viewport->bind_binding(viewports);
+    }
+}
+
+std::size_t pump_viewport_cameras(BuiltinPanels& panels, client::Client& client)
+{
+    if (panels.viewport == nullptr)
+    {
+        return 0;
+    }
+
+    // READ FIRST, deliberately. A copy that just opened has no camera of its own yet, and the daemon
+    // may hold the one the human left in it; hydrating before writing is what stops a freshly opened
+    // viewport's DEFAULT camera being pushed over the persisted one.
+    if (panels.viewport->fetch_due())
+    {
+        panels.viewport->mark_fetched(); // claim before the call (the sibling failure posture)
+        if (const std::optional<contract::Json> reply =
+                pump_read(client, "editor.cameras-get", contract::Json::object(), "viewport cameras"))
+        {
+            (void)panels.viewport->apply_cameras_result(*reply);
+        }
+    }
+
+    const std::vector<contract::Json> writes = panels.viewport->take_camera_writes();
+    std::size_t attempted = 0;
+    for (const contract::Json& params : writes)
+    {
+        ++attempted;
+        std::string error;
+        if (!client.call("editor.camera-set", params, error).has_value())
+        {
+            // A LOST WRITE, not a lost read: the human moved this camera and the daemon never heard.
+            // Reported loudly and RE-ARMED so the next pump tries again — the opposite trade from a
+            // failed read, which simply waits for the next reason to ask (see the header).
+            std::fprintf(stderr,
+                         "context_editor: persisting the viewport camera (editor.camera-set) "
+                         "failed (%s); it will be retried\n",
+                         error.c_str());
+            panels.viewport->rearm_camera_write(params.at("viewportId").as_string());
+        }
+    }
+    return attempted;
 }
 
 } // namespace context::editor::shell::panels

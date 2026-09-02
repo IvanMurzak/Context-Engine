@@ -50,6 +50,9 @@ add_library(context_editor_shell STATIC
     src/browser.cpp       # the CEF-free browser seam + the scripted host
     src/osr_drag.cpp      # b1: the OSR drag protocol's state machine + the operations-mask mirror (D11)
     src/compositor.cpp    # the layer stack, damage, resize protocol, both present paths (03 §4)
+    src/viewport_binding.cpp  # editor-UX e3: the Scene viewport PRODUCER — region map -> per-viewport
+                              #         render targets -> the D5 pass -> the compositor's layer stack,
+                              #         plus the opaque editor.camera-set payload codec (D7)
     src/app_scheme.cpp    # e05c: context-editor://app/ resolution + the strict CSP (04 §1)
     src/ext_scheme.cpp    # e13a-1: context-ext://<pkg>/ deny-by-default resolution + CSP (04 §5 / 08)
     src/ipc_bridge.cpp    # e05c: the privileged bridge envelope + token isolation (04 §1 / 08 §1)
@@ -300,6 +303,11 @@ set(_context_shell_tests
                        # (X11 keysyms, macOS virtual keys, and the cross-arm agreement), and the
                        # physical-pixels <-> Cocoa-points inverses (one extra link edge, added after
                        # context_editor_shell_smoke_support is defined below)
+    test_viewport_binding  # editor-UX e3: the viewport producer — the three-id map, the target
+                       #         lifecycle across appear/resize/close, the layer stack matching the
+                       #         published rects, the damage split (layout vs CONTENT), the opaque
+                       #         camera codec round-trip, TWO simultaneous instances with
+                       #         independent rects + cameras, and the adapter-absent degrade
     test_shell)        # the owner loop end to end + the authenticated-attach guard
 
 foreach(_t IN LISTS _context_shell_tests)

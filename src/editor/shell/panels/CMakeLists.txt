@@ -25,6 +25,12 @@
 #                                                            FORBIDDEN list is untouched)
 #   context_gui_playbar         -> gui_uitree                (e08b: session_control split OUT, so the
 #                                                             transport carries no runtime/render dep)
+#   context_gui_viewport        -> gui_uitree / gui_compositor / render   (editor-UX e3, D7)
+#
+# ⚠ `context_gui_viewport` ONLY — NOT its sibling `context_gui_viewport_edit`, which links
+# `context_compose` and is therefore on the D10 FORBIDDEN list. The two live in the same directory
+# and differ by five characters, which is exactly why this is written down rather than left to the
+# gate to discover at configure time.
 
 add_library(context_editor_panels STATIC
     src/problems_feed.cpp    # the live `diagnostics` topic -> ProblemsPanel projection (04 §4)
@@ -35,6 +41,8 @@ add_library(context_editor_panels STATIC
     src/wire_override_gateway.cpp # e09b-2: the Inspector's L-20/L-30 commit over the `edit` RPC
     src/wire_file_gateway.cpp     # M9 e2: the Files panel's rename/move/delete over the wire
     src/undo_feed.cpp        # e09c: the session undo HOST (records, replays over the wire, persists)
+    src/viewport_feed.cpp    # editor-UX e3: the Scene viewport's per-INSTANCE models (c3's provide_factory)
+                             #         + the editor.camera-set/cameras-get round trip (D7)
     src/builtin_panels.cpp)  # the provider bindings + the live-hydration pump
 
 target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_DIR}/include)
@@ -51,6 +59,7 @@ target_include_directories(context_editor_panels PUBLIC ${CMAKE_CURRENT_SOURCE_D
 target_link_libraries(context_editor_panels
     PUBLIC context_editor_shell context_gui_panel_problems context_gui_panel_scenetree
            context_gui_panel_inspector context_gui_panel_files context_gui_playbar context_gui_undo
+           context_gui_viewport
     PRIVATE context_warnings)
 
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
@@ -73,6 +82,8 @@ set(_context_editor_panels_tests
     test_wire_override_gateway # e09b-2: the `edit` wire shape, the CAS refusal, L-30 over the seam
     test_wire_file_gateway     # M9 e2: the file-write wire shape, refusal pass-through, fail-closed
     test_undo_feed         # e09c: record -> replay-over-the-wire -> persist -> RESTART -> undo again
+    test_viewport_feed     # editor-UX e3: per-INSTANCE models over provide_factory, the frame-scene ->
+                           #         camera-set -> cameras-get round trip, and the adapter-absent summary
     test_builtin_panels)   # the composition root: what binds, what stays unhosted, end to end
 
 # Every test here ALSO links context_gui_panel_builders, and three of them NEED it: the two e05d3

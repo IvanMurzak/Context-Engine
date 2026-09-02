@@ -102,6 +102,57 @@ export function parsePersistedState(value: unknown): PersistedState {
     return { layout: value["layout"] ?? null, panels };
 }
 
+// ---------------------------------------------------------------- the ONE physical-px measurement
+//
+// THE SINGLE DPI SEAM ON THIS SIDE OF THE BRIDGE (editor-window-chrome a2). `ShellRegion::rect` is
+// PHYSICAL client pixels — that is what the C++ `ShellRegion` documents, what the OS reports for a
+// pointer, and what `ViewportLayer::content_rect` composites against — while the DOM measures in CSS
+// pixels (DIP). Exactly one conversion may therefore exist, and this is it.
+//
+// It lived in chrome.ts through editor-UX e2, private to the titlebar. editor-UX e3 gave it a SECOND
+// caller (viewport.ts, measuring each Scene viewport's dock rect), and the task's own instruction was
+// "take the DPI scale from wherever a2 put it; never open a second source" — so the function moved
+// HERE, beside the `ShellRegion` it produces and the `publishRegions` that sends it, rather than
+// being copied. A copy is the bug: two roundings that agree today and diverge the first time one is
+// touched, invisible at scale 1.0 where physical and CSS pixels coincide.
+
+/** The live devicePixelRatio, 1 when there is no window to ask (a documentless host). */
+export function defaultDevicePixelRatio(): number {
+    if (typeof window === "undefined") {
+        return 1;
+    }
+    const ratio = window.devicePixelRatio;
+    return typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
+}
+
+/**
+ * One measured element as a region in PHYSICAL px, or `null` for an element that is not laid out.
+ *
+ * ⚠ ROUND THE EDGES AND DERIVE THE EXTENTS, never left+width independently. With fractional CSS
+ * coordinates (text-sized buttons, a dock sash at a fractional offset, a non-integral ratio)
+ * `round(left·dpr) + round(width·dpr)` can land a physical pixel away from `round(right·dpr)` — a
+ * region overhanging the window edge or biting a pixel out of its neighbour in the Shell's
+ * hit-test, for an element whose true edge never moved. For a VIEWPORT that same pixel is also the
+ * render target's width, so the error resamples the whole scene rather than merely mis-routing a
+ * click.
+ */
+export function physicalRegion(
+    element: Element,
+    id: string,
+    kind: ShellRegion["kind"],
+    dpr: number,
+): ShellRegion | null {
+    const rect = element.getBoundingClientRect();
+    const x0 = Math.round(rect.left * dpr);
+    const y0 = Math.round(rect.top * dpr);
+    const width = Math.round(rect.right * dpr) - x0;
+    const height = Math.round(rect.bottom * dpr) - y0;
+    if (width <= 0 || height <= 0) {
+        return null;
+    }
+    return { id, kind, rect: { x: x0, y: y0, width, height } };
+}
+
 // ------------------------------------------------------------------------------- the bridge client
 
 /**

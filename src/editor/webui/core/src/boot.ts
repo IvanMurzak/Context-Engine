@@ -43,7 +43,12 @@ import {
     type PlayCommandActions,
     type SessionCommandActions,
 } from "./commands.js";
-import { EditorStateClient, LayoutPersistence } from "./editorstate.js";
+import {
+    EditorStateClient,
+    LayoutPersistence,
+    type ShellRegion,
+} from "./editorstate.js";
+import { viewportRegions } from "./viewport.js";
 import { editorCoreInfo } from "./info.js";
 import { Keymap, KeybindingsClient } from "./keymap.js";
 import { Palette, PALETTE_TOGGLE_COMMAND_ID, paletteCommands } from "./palette.js";
@@ -380,6 +385,14 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
         // exactly what it did before a2.
         const isWelcome = welcomeState !== null && welcomeState.mode === WELCOME_MODE_WELCOME;
         const liveRegistry = { current: undefined as CommandRegistry | undefined };
+        // editor-UX e3: the LATE-BOUND dock root, filled once `startPanels` has a docking root, and
+        // read at publish time by the region provider below. A holder for the same reason
+        // `liveRegistry` is one: the chrome strips mount BEFORE the dock exists (the frame is the
+        // app's frame and renders on the welcome path too), but they own the ONE region provider —
+        // so the viewports have to join it through a value that is filled later, not a value that
+        // must already exist. Empty until then, which is the honest answer on the welcome screen and
+        // in any window whose dock failed to start: no dock, no viewport rects.
+        const liveDockRoot = { current: undefined as HTMLElement | undefined };
         let chromeStrips: ChromeStrips | undefined;
         try {
             const stripElements =
@@ -396,6 +409,12 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
                     },
                     publishRegions: (regions): Promise<boolean> =>
                         chromeStateClient.publishRegions(regions),
+                    // editor-UX e3: the Scene viewports' dock rects join the ONE provider here (see
+                    // StartChromeStripsOptions § extraRegions for why a second channel would be
+                    // wrong). Measured live on every publish, so a viewport dragged to another dock
+                    // position republishes on the SAME layout-change trigger the chrome does.
+                    extraRegions: (): readonly ShellRegion[] =>
+                        viewportRegions(liveDockRoot.current),
                 });
             }
         } catch {
@@ -535,6 +554,7 @@ export async function bootEditorCore(bridge = ShellBridge.detect()): Promise<Boo
             config,
             whenContext,
             chromeStrips,
+            liveDockRoot,
             liveRegistry,
             playActions,
             statusbarMount,
@@ -612,6 +632,9 @@ async function startPanels(
     // the SAME region set the resize/DPI publisher does), and the mount is threaded into the
     // window mechanism so the `editor.ui.chrome` maximized fact can flip the titlebar glyph.
     chrome: ChromeStrips | undefined,
+    // editor-UX e3: filled with the docking root once it exists, so the chrome's ONE region provider
+    // (wired long before the dock) can measure the Scene viewports at publish time.
+    liveDockRoot: { current: HTMLElement | undefined },
     // a2: THE one late-bound command-registry holder, created by bootEditorCore. Filled here once
     // startCommandLayer runs; read at call time by BOTH the panel verb tables below and the
     // titlebar's palette dispatch (which mounted BEFORE the registry existed) — one holder, so the
@@ -639,6 +662,10 @@ async function startPanels(
         // drifted apart, which is worth naming precisely rather than failing on a null deref.
         return { mounted: 0, unavailable: [], error: `no #${EDITOR_ROOT_ID} element in the document` };
     }
+    // editor-UX e3: the chrome's ONE region provider can measure the Scene viewports from here on.
+    // Set BEFORE anything mounts, so the first publish after the dock comes up already carries the
+    // viewport rects rather than waiting for a second layout change.
+    liveDockRoot.current = container;
     try {
         const client = new PanelClient(bridge);
         const windowClient = new WindowClient(bridge);

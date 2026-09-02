@@ -26,6 +26,17 @@ registered in the ONE registry, so CLI ≡ RPC ≡ MCP ≡ `describe` parity is 
 | `editor selection-focus-get` | `editor.selection-focus-get` | read WHICH selection the human is working on |
 | `editor camera-set {viewportId, transform, projection}` | `editor.camera-set` | set one viewport's camera (payloads carried **opaquely**) |
 | `editor cameras-get` | `editor.cameras-get` | read every viewport camera |
+
+⚠ **The camera payload's MEANING is the Shell's, not the daemon's (M9 editor-UX e3, D7).**
+`transform` / `projection` are carried opaquely here; the codec that defines them is
+`src/editor/shell/viewport_binding.h` (`camera_transform_json` / `camera_projection_json` and their
+total, member-wise-tolerant inverses), and nothing daemon-side may be taught to read them. That is
+what lets the viewport evolve its payload with no daemon release — and it is only safe because the
+blob round-trips through `.editor/session.json` untouched, which
+`editor-session-viewport-camera` (`src/tests/integration/test_e3_viewport_camera.cpp`) pins with a
+camera carrying members no build reads. `viewportId` is editor-core's panel INSTANCE id
+(`builtin.viewport#2`), so two Scene views persist two cameras and a restart restores each copy's
+own.
 | `editor play` / `pause` / `stop` / `step --ticks N` | `editor.play` / … | drive the L-51 play state over RPC |
 
 The deterministic `session *` family (`session new` / `step` / `seed` / `inject` / `hash` /
