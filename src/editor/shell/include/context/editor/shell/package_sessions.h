@@ -129,6 +129,18 @@ inline constexpr const char* kErrPackageNoSession = "panel.daemon.unavailable";
 inline constexpr const char* kErrPackageUnknownSubscription = "panel.daemon.unknown_subscription";
 /** The per-package SUBSCRIPTION cap is full — control 5. Distinct from the SESSION cap above. */
 inline constexpr const char* kErrPackageSubscriptionCapacity = "panel.daemon.subscription_capacity";
+/**
+ * `subscribe` named ANOTHER package's fact topic without the operator's consent — control 6 (D4).
+ *
+ * ⚠ DELIBERATELY DISTINCT FROM `kErrPackageMethodNotAllowed`, and the reasoning is the mirror image
+ * of the one that COLLAPSED the two subscription refusals. There, differentiating would have built
+ * an enumeration oracle over a global id namespace nobody may probe. Here the topic is ALREADY the
+ * caller's own string and the answer reveals nothing it did not supply — while the two faults are
+ * genuinely different repairs: a method refusal is a contract statement ("panels do not call that"),
+ * and this is a CONSENT state a human can change. One code would send a package author to argue
+ * with the wrong control.
+ */
+inline constexpr const char* kErrPackageTopicNotGranted = "panel.daemon.topic_not_granted";
 
 // ------------------------------------------------------------------------------------ the policy
 
@@ -266,6 +278,60 @@ public:
     // CLOSED.
     using ScopeResolver = std::function<std::string(const std::string& package_id)>;
 
+    // ⚠ CONTROL 6 (editor-UX d2, D4) — THE PACKAGE FACT BUS'S TWO SHELL-SIDE ANSWERS.
+    //
+    // WHY THIS CLASS AT ALL. Both questions are about a MANIFEST, and the daemon has never read one:
+    // `events.publish` can check its own grammar and its own registry, but "did THAT package declare
+    // THIS topic" and "was that package consented to another's" are answerable only where the store
+    // scan and the grant document are. That is the Shell, and specifically this class, because it is
+    // what owns a package's session and therefore the only place the two facts can be applied to a
+    // wire call. `package_facts.h` supplies the values; this file applies them.
+    //
+    //  * `publishes` — the topics a package DECLARED in `events.publishes[]`. Declared on the
+    //    package's OWN session the moment it opens, which is D4's "topics registered at
+    //    install/load": a package that never opens a session declares nothing, and a topic nobody
+    //    declared cannot be published on by anyone.
+    //  * `may_subscribe` — may `package_id` RECEIVE facts on `topic`? True for its own topics; true
+    //    for another package's only when the manifest declared it in `events.subscribes[]` AND the
+    //    operator consented. It is consulted on all THREE paths a fact can reach a package by,
+    //    deliberately: the `subscribe` REQUEST (`forward`, the good diagnostic), the `subscribe`
+    //    REPLY (`forward` again — the D5 snapshot and the replayed `catchup`, neither of which the
+    //    pump ever sees), and every delivered event (`pump`).
+    //
+    // std::function rather than a `PackageFactHost&`, for control 1's stated reason: this class must
+    // not acquire a dependency on the consent subsystem to open a session, and a value-returning
+    // seam cannot be tricked into answering for a DIFFERENT package the way a shared table could.
+    // ABSENT is the DENY-ALL build — no topic is declared and no package-namespaced fact is
+    // delivered — so a wiring that forgets to supply one is byte-for-byte the pre-d2 editor.
+    using TopicResolver = std::function<std::vector<std::string>(const std::string& package_id)>;
+    using SubscribeGate =
+        std::function<bool(const std::string& package_id, const std::string& topic)>;
+
+    // Supply control 6's two answers. Called once by the composition root, after the grant host and
+    // the store scan exist. Idempotent — the last call wins.
+    void set_fact_policy(TopicResolver publishes, SubscribeGate may_subscribe);
+
+    // Publish ONE package fact on `package_id`'s own baseline session (D4).
+    //
+    // ⚠ DELIBERATELY **NOT** REACHABLE THROUGH `panel.daemon.call`, and that is the whole reason it
+    // is a method rather than an allowlist entry. Adding `events.publish` to
+    // `panel_callable_daemon_methods()` would let a panel send it with any topic it liked —
+    // `bridge.call` forwards the method VERBATIM — and the Shell-side "did that package declare that
+    // topic" check would be an adapter a caller routes around, which is exactly the S4 failure the
+    // allowlist exists to prevent. So the allowlist stays closed at seven names and `panel.facts.publish`
+    // (package_facts.h) is the ONE door, with the declaration check standing on it.
+    [[nodiscard]] BridgeResult publish_fact(const std::string& package_id, const std::string& topic,
+                                            const contract::Json& payload);
+
+    /** May `package_id` receive a fact on `topic`? Control 6's predicate, exposed for the suite. */
+    [[nodiscard]] bool may_receive_fact(const std::string& package_id,
+                                        const std::string& topic) const;
+
+    /** `subscribe` calls refused because a named topic was another package's — control 6. */
+    [[nodiscard]] std::size_t refused_topics() const { return refused_topics_; }
+    /** Delivered events DROPPED by the pump filter because the topic was not this package's — control 6. */
+    [[nodiscard]] std::uint64_t events_filtered() const { return events_filtered_; }
+
     explicit PackageSessionHost(ClientFactory factory, std::size_t max_sessions = kMaxPackageSessions);
 
     // As above, plus the grant-derived scope source. The two-argument form above keeps the deny-all
@@ -356,9 +422,35 @@ private:
     [[nodiscard]] client::Client* session_for(const std::string& package_id, std::string& error_code,
                                               std::string& message);
 
+    // What an entry whose `topic` this Shell cannot READ should do — the ONE axis on which the two
+    // arms of the `subscribe`-reply filter differ, spelled as an argument rather than as an inverted
+    // conditional in a second copy of the loop.
+    //
+    // `drop` is the SNAPSHOT's: a `packageFacts` entry is a shape this Shell defines, so one it
+    // cannot read is one it cannot police either, and the deny direction is the only one that stays
+    // a control if that shape ever moves. `keep` is the CATCHUP's: those are the daemon's own WIRE
+    // envelopes, and `may_receive_fact` is about package topics and nothing else — so a pathless
+    // frame passes exactly as it does through `pump()`.
+    enum class UnreadableEntry
+    {
+        drop,
+        keep,
+    };
+
+    // `in` (an array) minus every entry `package_id` may not receive, counting each removal in
+    // `events_filtered_`. Control 6's reply-side filter, using the SAME `may_receive_fact` predicate
+    // the request and delivery sides use, so there is one answer to "may this package see this
+    // topic" rather than three that can drift.
+    [[nodiscard]] contract::Json filter_topic_array(const contract::Json& in,
+                                                    const std::string& package_id,
+                                                    UnreadableEntry unreadable);
+
     ClientFactory factory_;
     // EMPTY in the two-argument construction = the e13c-1 deny-all build (see `attach_scope_for`).
     ScopeResolver scope_resolver_;
+    // EMPTY = the pre-d2 deny-all fact bus: nothing declared, nothing package-namespaced delivered.
+    TopicResolver fact_topics_;
+    SubscribeGate fact_gate_;
     std::size_t max_sessions_;
     std::vector<Session> sessions_;
     // The e13c-2 bound. OWNED here rather than beside this class because its lifetime is exactly the
@@ -368,7 +460,9 @@ private:
     std::size_t refused_methods_ = 0;
     std::size_t refused_capacity_ = 0;
     std::size_t refused_subscriptions_ = 0;
+    std::size_t refused_topics_ = 0;
     std::uint64_t events_buffered_ = 0;
+    std::uint64_t events_filtered_ = 0;
 };
 
 } // namespace context::editor::shell

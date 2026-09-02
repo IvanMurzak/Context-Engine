@@ -14,6 +14,7 @@
 
 #include <cstddef>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::gui::contract
@@ -36,6 +37,20 @@ inline constexpr const char* kErrUnknownCapability = "gui.unknown_capability";
 // opinion would drift, and the drift would be invisible until a package was accepted at scan time and
 // rejected at registration — which is exactly the state that promise forbids.
 [[nodiscard]] std::string manifest_defect(const Contribution& contribution);
+
+// Is `name` a real SUB-name of `owner` — `<owner>.<something>`, never the bare owner id itself?
+//
+// BOTH HALVES MATTER. The bare package id is a NAMESPACE, not a member of it, so accepting it would
+// let one package's topic and its id be the same string — and a consumer could then not tell "the
+// package" from "a fact of the package" by reading the name.
+//
+// EXPOSED rather than duplicated, for `manifest_defect`'s reason and by the same argument: a second
+// reader exists. `names_defect` refuses a manifest entry that is not namespaced under its declaring
+// package, and `shell::PackageFactHost::publish` re-asks the identical question at the point of USE
+// (editor-UX d2 decision 4). A hand-copied second opinion would drift, and this particular drift is
+// a security one in both directions — a topic that installs cleanly and can never be published, or
+// one publishable under a package that never owned it.
+[[nodiscard]] bool is_namespaced_under(std::string_view name, std::string_view owner);
 
 struct RegistrationResult
 {

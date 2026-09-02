@@ -1141,6 +1141,49 @@
       ]
     },
     {
+      "method": "events.declare",
+      "ns": "",
+      "noun": "events",
+      "verb": "declare",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "topics"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
+      "method": "events.publish",
+      "ns": "",
+      "noun": "events",
+      "verb": "publish",
+      "stability": "operational",
+      "deprecated": false,
+      "params": [
+        "topic",
+        "payload"
+      ],
+      "flags": [
+        "json",
+        "project",
+        "if-match",
+        "after-generation",
+        "dry-run",
+        "idempotency-key",
+        "after-hash",
+        "atomic-plan"
+      ]
+    },
+    {
       "method": "reconcile",
       "ns": "",
       "noun": "",
@@ -2645,6 +2688,41 @@
       "retriable": false,
       "exitCode": 5,
       "origin": "R-BRIDGE-008"
+    },
+    {
+      "code": "package.topic_invalid",
+      "message": "The package fact topic is not a valid `<package-id>.<name>` — lowercase dotted segments, at least two, within the length bound. An unnamespaced name is contract-owned and can never be published on by a package.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-CLI-013"
+    },
+    {
+      "code": "package.topic_undeclared",
+      "message": "No package registered that fact topic on this daemon; a topic is registered from its declaring package's manifest at load, and the bus is deny-by-default (publishing never creates a topic).",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-CLI-013"
+    },
+    {
+      "code": "package.topic_capacity",
+      "message": "The daemon's package-topic registry is full; the topic was not registered.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-CLI-013"
+    },
+    {
+      "code": "package.fact_too_large",
+      "message": "The published package fact exceeds the per-topic retained-payload ceiling; nothing was retained and nothing was delivered.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-CLI-013"
+    },
+    {
+      "code": "package.fact_reentrant",
+      "message": "A package fact was published from INSIDE an event handler. A fact is a state, not an edge, and a handler that publishes in response to one is the loop shape the bus refuses rather than hangs on; publish from outside the handler instead.",
+      "retriable": false,
+      "exitCode": 5,
+      "origin": "R-CLI-013"
     }
   ],
   "largeResult": {

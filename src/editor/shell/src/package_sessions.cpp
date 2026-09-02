@@ -33,6 +33,20 @@ namespace
     return true;
 }
 
+// Is `topic` a PACKAGE-namespaced fact topic (as opposed to a contract-owned one)?
+//
+// The discriminator is the dot, and it is the SAME one `EventStream::package_topic_defect` uses one
+// layer down: every contract-owned topic (`files`, `derivation`, `diagnostics`, `session`,
+// `clients`, `log`) is a single bare segment, so "contains a dot" is exactly "is a package topic".
+// Written as a predicate over the SHAPE rather than as a list of core names deliberately — a list
+// here would have to track `Registry::topics()`, and a core topic this Shell had not heard of would
+// then be treated as a package topic and FILTERED OUT of every package's stream, which is a silent
+// delivery failure rather than a refusal.
+[[nodiscard]] bool is_package_fact_topic(const std::string& topic)
+{
+    return topic.find('.') != std::string::npos;
+}
+
 } // namespace
 
 const std::vector<std::string>& panel_callable_daemon_methods()
@@ -91,6 +105,54 @@ std::string PackageSessionHost::attach_scope_for(const std::string& package_id) 
     }
     std::string spec = scope_resolver_(package_id);
     return spec.empty() ? std::string(kPackageSessionScope) : spec;
+}
+
+void PackageSessionHost::set_fact_policy(TopicResolver publishes, SubscribeGate may_subscribe)
+{
+    fact_topics_ = std::move(publishes);
+    fact_gate_ = std::move(may_subscribe);
+}
+
+bool PackageSessionHost::may_receive_fact(const std::string& package_id,
+                                          const std::string& topic) const
+{
+    // A CONTRACT-OWNED topic is not this control's business: `files` / `diagnostics` / `session` are
+    // the ordinary daemon stream every baseline client may read, and gating them here would be a
+    // second, drifting copy of the R-SEC-007 scope decision the dispatcher already made.
+    if (!is_package_fact_topic(topic))
+    {
+        return true;
+    }
+    // FAIL CLOSED with no gate: an unwired build delivers no package facts at all, which is
+    // byte-for-byte the pre-d2 editor rather than an editor that quietly forwards everything.
+    return fact_gate_ ? fact_gate_(package_id, topic) : false;
+}
+
+contract::Json PackageSessionHost::filter_topic_array(const contract::Json& in,
+                                                      const std::string& package_id,
+                                                      UnreadableEntry unreadable)
+{
+    contract::Json kept = contract::Json::array();
+    for (std::size_t i = 0; i < in.size(); ++i)
+    {
+        const contract::Json& entry = in.at(i);
+        const bool readable =
+            entry.is_object() && entry.contains("topic") && entry.at("topic").is_string();
+        // The unreadable case is the header's `UnreadableEntry` axis and the ONLY thing the two
+        // callers disagree about — an argument here rather than a second copy of this loop with the
+        // conditional inverted, which is how the two policies drifted apart to begin with.
+        const bool pass = readable ? may_receive_fact(package_id, entry.at("topic").as_string())
+                                   : unreadable == UnreadableEntry::keep;
+        if (pass)
+        {
+            kept.push_back(entry);
+        }
+        else
+        {
+            ++events_filtered_;
+        }
+    }
+    return kept;
 }
 
 bool PackageSessionHost::has_session(const std::string& package_id) const
@@ -153,6 +215,27 @@ std::size_t PackageSessionHost::pump()
             // the daemon puts it OUTSIDE the event object — so dropping it here would make multiple
             // subscriptions per package unusable.
             contract::Json delivered = std::move(frame->event);
+            // ⚠ CONTROL 6's SECOND APPLICATION — THE DELIVERY FILTER, AND IT IS THE ONE THAT
+            // ACTUALLY BINDS. `forward` refuses a `subscribe` that NAMES another package's topic,
+            // but `subscribe` with an EMPTY topic list means EVERY topic (event_stream.h
+            // § Subscriber::wants), and that request names nothing to refuse — so without this the
+            // consent gate would be one `subscribe:{}` away from irrelevant. Filtering HERE, on the
+            // one path every delivered event passes, is what makes the grant a property of what a
+            // package RECEIVES rather than of what it asked for. Two controls, independently, in the
+            // discipline the allowlist note states.
+            //
+            // A DROPPED FACT IS NOT A GAP. `gapped` means "your cursor is worthless, re-snapshot",
+            // and a package that was never entitled to a topic has lost nothing it could act on —
+            // latching it here would order a re-snapshot on every foreign publish for the life of
+            // the window. It is counted instead (`events_filtered`), which is a wiring signal for a
+            // human and invisible to the package, exactly as an unconsented fact should be.
+            if (delivered.is_object() && delivered.contains("topic") &&
+                delivered.at("topic").is_string() &&
+                !may_receive_fact(session.package_id, delivered.at("topic").as_string()))
+            {
+                ++events_filtered_;
+                continue;
+            }
             if (delivered.is_object())
             {
                 delivered.set("subId", contract::Json(std::move(frame->sub_id)));
@@ -226,7 +309,39 @@ client::Client* PackageSessionHost::session_for(const std::string& package_id,
     }
 
     sessions_.push_back(Session{package_id, std::move(client), {}});
-    return sessions_.back().client.get();
+    client::Client* opened = sessions_.back().client.get();
+
+    // CONTROL 6's FIRST HALF — D4's "topics registered at install/load", applied at the one moment a
+    // package's session exists and before any call of its own rides it.
+    //
+    // ⚠ BEST-EFFORT, AND FAIL-CLOSED WHEN IT FAILS. A daemon that does not serve `events.declare`
+    // (an older build) answers `usage.unknown_verb`, and this must NOT abort the attach: the session
+    // is the transport for `query` / `editor.inspect` / `subscribe` too, and killing it over the
+    // fact bus would turn a missing feature into a dead panel. What the failure costs is exactly the
+    // fact bus and nothing else — the topic stays unregistered, so this package's later
+    // `panel.facts.publish` is refused `package.topic_undeclared` by the daemon, which is the
+    // truthful diagnostic and the direction to fail in.
+    //
+    // Declared as ONE request rather than per topic: `events.declare` is all-or-nothing (dispatcher.cpp
+    // states why), so a manifest with one malformed name registers none of them and the package's
+    // publishes are refused uniformly instead of half working.
+    if (fact_topics_)
+    {
+        const std::vector<std::string> topics = fact_topics_(package_id);
+        if (!topics.empty())
+        {
+            contract::Json list = contract::Json::array();
+            for (const std::string& topic : topics)
+            {
+                list.push_back(contract::Json(topic));
+            }
+            contract::Json declare_params = contract::Json::object();
+            declare_params.set("topics", std::move(list));
+            std::string declare_error;
+            (void)opened->call("events.declare", declare_params, declare_error);
+        }
+    }
+    return opened;
 }
 
 BridgeResult PackageSessionHost::forward(const std::string& package_id, const std::string& method,
@@ -298,6 +413,39 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
     }
     else if (method == "subscribe")
     {
+        // CONTROL 6's FIRST APPLICATION (editor-UX d2, D4) — the CONSENTED cross-package
+        // subscription. A request that NAMES another package's topic is refused here, with a
+        // diagnostic naming the topic, so a package author is told which grant is missing rather
+        // than left watching a subscription that never fires.
+        //
+        // ⚠ THIS ALONE WOULD NOT BE A CONTROL, and saying so is the point of the pump filter. An
+        // empty/absent `topics` means EVERY topic, and there is nothing in that request to refuse —
+        // so this arm handles the NAMED case (the good diagnostic) and `pump()` handles what is
+        // actually delivered (the binding one). Refusing the empty form instead would break every
+        // package that legitimately watches the core stream, to close a hole the filter closes
+        // without breaking anyone.
+        if (params.is_object() && params.contains("topics") && params.at("topics").is_array())
+        {
+            const contract::Json& topics = params.at("topics");
+            for (std::size_t i = 0; i < topics.size(); ++i)
+            {
+                if (!topics.at(i).is_string())
+                {
+                    continue; // the daemon's own parser ignores a non-string entry; so do we
+                }
+                const std::string& topic = topics.at(i).as_string();
+                if (may_receive_fact(package_id, topic))
+                {
+                    continue;
+                }
+                ++refused_topics_;
+                return BridgeResult::error(
+                    kErrPackageTopicNotGranted,
+                    "package '" + package_id + "' may not subscribe to '" + topic +
+                        "': another package's fact topic requires the operator's consent, "
+                        "clamped to what this package's manifest declared in events.subscribes[]");
+            }
+        }
         // THE SUBSCRIPTION SUB-CAP — control 5's second half. Without it a package can mint subIds
         // without bound; each costs the DAEMON a Subscriber with its own queue and one more fan-out
         // of every matching event, in the process that also serves the CLI and every AI client. The
@@ -327,7 +475,7 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
     ++calls_forwarded_;
     std::string call_error;
     bool rejected_by_daemon = false;
-    const std::optional<contract::Json> result =
+    std::optional<contract::Json> result =
         client->call(method, params, call_error, &rejected_by_daemon);
     if (!result.has_value())
     {
@@ -342,6 +490,42 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
                                        ? "the daemon refused '" + method + "' for package '" +
                                              package_id + "'"
                                        : "'" + method + "' could not be delivered to the daemon");
+    }
+
+    // ⚠ CONTROL 6's THIRD APPLICATION — THE SUBSCRIBE **REPLY**, which neither of the other two can
+    // see. `subscribe` answers with the daemon's CURRENT-STATE snapshot, and since d2 that snapshot
+    // carries `packageFacts` (D5 rule 2 — retention doubles as snapshot-on-subscribe); a reconnect
+    // carrying `sinceSeq` also gets the replayed `catchup` ring, which `replay_since` does NOT filter
+    // by the subscription's topics. Neither travels through `pump()`, so relaying the reply verbatim
+    // would hand a package every retained foreign fact the daemon holds in ONE allowlisted call —
+    // the consent gate bypassed rather than applied, and by the cheaper of the two paths, since the
+    // snapshot arrives whether or not any further event is ever published. Filtered here with the
+    // SAME predicate the delivery filter uses, so there is one answer to "may this package see this
+    // topic" rather than two that can drift.
+    //
+    // A filtered ENTRY IS NOT A GAP, for the pump filter's reason: `gapped` orders a re-snapshot, and
+    // re-snapshotting would only reproduce the same filtered reply. Counted in `events_filtered()`
+    // instead, which stays the one wiring signal for a human.
+    if (method == "subscribe" && result->is_object() && result->contains("data") &&
+        result->at("data").is_object())
+    {
+        contract::Json data = result->at("data");
+        if (data.contains("snapshot") && data.at("snapshot").is_object() &&
+            data.at("snapshot").contains("packageFacts") &&
+            data.at("snapshot").at("packageFacts").is_array())
+        {
+            contract::Json snapshot = data.at("snapshot");
+            snapshot.set("packageFacts",
+                         filter_topic_array(snapshot.at("packageFacts"), package_id,
+                                            UnreadableEntry::drop));
+            data.set("snapshot", std::move(snapshot));
+        }
+        if (data.contains("catchup") && data.at("catchup").is_array())
+        {
+            data.set("catchup",
+                     filter_topic_array(data.at("catchup"), package_id, UnreadableEntry::keep));
+        }
+        result->set("data", std::move(data));
     }
 
     // CONTROL 5's LEDGER, maintained from the DAEMON's own answer rather than from the request: the
@@ -389,6 +573,57 @@ BridgeResult PackageSessionHost::forward(const std::string& package_id, const st
             break;
         }
     }
+    return BridgeResult::ok(std::move(*result));
+}
+
+BridgeResult PackageSessionHost::publish_fact(const std::string& package_id,
+                                              const std::string& topic,
+                                              const contract::Json& payload)
+{
+    // The SAME id predicate `forward` uses, for the same reason: a package that is one thing to the
+    // scheme and another to the session table would publish from a connection nothing attributes.
+    if (!is_valid_package_id(package_id))
+    {
+        return BridgeResult::error(kErrPackageBadParams,
+                                   "panel.facts.publish requires a valid 'packageId'");
+    }
+    if (topic.empty())
+    {
+        return BridgeResult::error(kErrPackageBadParams,
+                                   "panel.facts.publish requires a non-empty string 'topic'");
+    }
+    // ⚠ THE DECLARATION CHECK IS **NOT** HERE. It is `PackageFactHost`'s, because the manifest is,
+    // and this method is unreachable except through it (the header's note on why this is not an
+    // allowlist entry). What IS here is the session, which is the only thing this class owns.
+    std::string error_code;
+    std::string message;
+    client::Client* client = session_for(package_id, error_code, message);
+    if (client == nullptr)
+    {
+        return BridgeResult::error(error_code, message);
+    }
+    contract::Json params = contract::Json::object();
+    params.set("topic", contract::Json(topic));
+    params.set("payload", payload);
+    std::string call_error;
+    bool rejected_by_daemon = false;
+    const std::optional<contract::Json> result =
+        client->call("events.publish", params, call_error, &rejected_by_daemon);
+    if (!result.has_value())
+    {
+        // THE DAEMON'S OWN CODE, VERBATIM — `package.topic_undeclared`, `package.fact_reentrant`,
+        // `package.fact_too_large`. Re-classifying them here would hide WHICH control fired, and
+        // every one of them is something the package author has to act on differently.
+        return BridgeResult::error(client->failure_code(kErrPackageNoSession),
+                                   rejected_by_daemon
+                                       ? "the daemon refused the fact published on '" + topic +
+                                             "' by package '" + package_id + "'"
+                                       : "the fact on '" + topic +
+                                             "' could not be delivered to the daemon");
+    }
+    // COUNTED BY `PackageFactHost::accepted_publishes()`, on the daemon's answer, and counted there
+    // ONLY: this method is unreachable except through that host, so a second counter here would be
+    // the same number under a second name — and the one no test pins is the one that drifts.
     return BridgeResult::ok(*result);
 }
 

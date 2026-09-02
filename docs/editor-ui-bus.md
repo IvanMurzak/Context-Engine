@@ -110,6 +110,20 @@ implemented** — so today the rule "a sink MUST target a Shell-local method" is
 rather than by the gate. Pointing a sink at `panel.daemon.call` would put chrome facts on the daemon
 wire.
 
+⚠ **AND THERE ARE NOW TWO.** editor-UX `d2` added `panel.facts.publish` — the package FACT BUS's one
+door ([`package-facts.md`](package-facts.md)) — which carries a package's declared fact onto its own
+baseline daemon session. It widens exactly the hole named above rather than opening a new kind of one:
+a mirror sink pointed at it would put this window's chrome facts on the daemon wire under a package's
+topic. So the deny-list `check_ui_bus_boundary.py` owes must name **both** methods, and `f1` is the
+task that adds it — verified the way that checker was verified originally, by planting a forwarding
+path and watching the gate go red. A boundary test that would still pass with a violation in place is
+worse than none.
+
+The `editor.ui` built-in topic set is **unchanged at nine** by `d2`, deliberately: package facts are
+daemon facts precisely so this bus does not have to grow a member, and `packageui.ts`'s refusal of
+cross-package `editor.ui` subscription **stays** — D4 answers that refusal's security reason with an
+explicit, operator-consented grant on the daemon tier rather than by removing the check.
+
 ## Publishers today
 
 `ThemeEngine.apply` (e06b, `theme.ts`) publishes `editor.ui.theme-changed`. e06b shipped a local

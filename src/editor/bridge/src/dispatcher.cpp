@@ -159,6 +159,133 @@ Envelope serve_subscription(EventStream& stream, const std::string& method, cons
     return Envelope::success(std::move(data));
 }
 
+// The editor-UX d2 package fact bus (`events.declare` / `events.publish`), served against the live
+// stream — the sibling of `serve_subscription` above and deliberately shaped like it.
+//
+// ⚠ `declare` IS ALL-OR-NOTHING, and that is the same argument `packageui.ts` control 2 makes for
+// `bridge.ui.subscribe`: a partial registration looks IDENTICAL, from the caller's side, to a full
+// one, so the package whose second topic was silently dropped discovers it as "my fact never
+// arrives" much later and blames the delivery path. One malformed name refuses the whole request.
+Envelope serve_package_facts(EventStream& stream, const std::string& method, const Json& params)
+{
+    if (method == "events.declare")
+    {
+        if (!params.contains("topics") || !params.at("topics").is_array())
+            return Envelope::failure("usage.missing_argument",
+                                     "the 'events.declare' method requires a 'topics' array.");
+        const Json& raw = params.at("topics");
+        std::vector<std::string> topics;
+        for (std::size_t i = 0; i < raw.size(); ++i)
+        {
+            if (!raw.at(i).is_string())
+                return Envelope::failure(kErrPackageTopicInvalid,
+                                         "every entry of 'topics' must be a string.");
+            topics.push_back(raw.at(i).as_string());
+        }
+        // VALIDATED WHOLE BEFORE ANYTHING IS REGISTERED. Registering as we validate would leave the
+        // registry holding the prefix of a refused request, so a retry of the corrected request
+        // would find a partially-applied earlier one — state a caller cannot observe or undo.
+        for (const std::string& topic : topics)
+            if (const std::string defect = EventStream::package_topic_defect(topic);
+                !defect.empty())
+                return Envelope::failure(kErrPackageTopicInvalid, defect);
+        for (const std::string& topic : topics)
+        {
+            std::string error;
+            if (!stream.declare_package_topic(topic, error))
+                return Envelope::failure(kErrPackageTopicCapacity, error);
+        }
+        Json data = Json::object();
+        Json accepted = Json::array();
+        for (const std::string& topic : topics)
+            accepted.push_back(Json(topic));
+        data.set("topics", std::move(accepted));
+        // The WHOLE registry, so a caller can see what this daemon knows without a second round
+        // trip — the surface `describe` also projects.
+        Json all = Json::array();
+        for (const std::string& topic : stream.package_topics())
+            all.push_back(Json(topic));
+        data.set("registered", std::move(all));
+        return Envelope::success(std::move(data));
+    }
+
+    // events.publish
+    if (!params.contains("topic") || !params.at("topic").is_string() ||
+        params.at("topic").as_string().empty())
+        return Envelope::failure("usage.missing_argument",
+                                 "the 'events.publish' method requires a 'topic'.");
+    if (!params.contains("payload"))
+        return Envelope::failure("usage.missing_argument",
+                                 "the 'events.publish' method requires a 'payload'.");
+    const std::string topic = params.at("topic").as_string();
+    const EventStream::PackageFactResult r = stream.publish_package_fact(topic, params.at("payload"));
+    if (!r.accepted)
+        return Envelope::failure(r.error_code, r.message);
+    Json data = Json::object();
+    data.set("topic", Json(topic));
+    // ⚠ `changed` IS THE REPLY'S POINT, not a detail. D5 dedups a repeat into a SUCCESS that emits
+    // nothing, so a publisher that could not tell the two apart would have no way to learn whether
+    // its fact moved — and design 05 §1's third rule is exactly "the writer learns its own outcome
+    // from the REPLY, never from the fact". `seq` is 0 on a dedup for the same reason: no seq was
+    // consumed, and reporting the previous one would invent an event that was not emitted.
+    data.set("changed", Json(r.changed));
+    data.set("seq", Json(r.seq));
+    return Envelope::success(std::move(data));
+}
+
+// `Registry::describe()` with this daemon's LIVE package topics folded into `eventTopics` —
+// R-CLI-013 parity for the editor-UX d2 fact bus.
+//
+// ⚠ WHY IT IS DONE HERE AND NOT BY MUTATING THE REGISTRY. `TopicSpec`'s own header says a
+// package-contributed topic "appears in introspection automatically through the same
+// register_topic() seam the engine topics use" — but `Registry::instance()` is a process-wide,
+// const, immutable singleton read from every dispatch thread, and package topics are discovered at
+// RUNTIME (a package is installed while the daemon is up). Registering into that singleton would
+// make a global mutable under concurrent readers, for a set that is per-DAEMON rather than
+// per-process. So the projection is composed where the live state already is: `describe` is a PURE
+// function of the registry, and this is that pure function plus this stream's registry.
+//
+// The static artifact is deliberately untouched: `client_schema()` still projects
+// `Registry::instance().describe()`, so the committed `context-client-schema.json` and the generated
+// TS typings describe the CONTRACT surface and do not move when a package is installed. A
+// runtime-discovered topic is a runtime discovery, and `describe` against a live daemon is where a
+// client asks for one.
+Json describe_with_package_topics(const Registry& reg, const EventStream* stream)
+{
+    Json document = reg.describe();
+    if (stream == nullptr)
+        return document;
+    const std::vector<std::string> topics = stream->package_topics();
+    if (topics.empty())
+        return document;
+    if (!document.contains("contract") || !document.at("contract").is_object())
+        return document;
+    Json contract_section = document.at("contract");
+    Json event_topics = contract_section.contains("eventTopics") &&
+                                contract_section.at("eventTopics").is_array()
+                            ? contract_section.at("eventTopics")
+                            : Json::array();
+    for (const std::string& topic : topics)
+    {
+        Json entry = Json::object();
+        entry.set("name", Json(topic));
+        entry.set("description",
+                  Json(std::string("A package FACT topic (editor-UX D4): the last value published "
+                                   "on it is RETAINED and carried in `subscribe`'s snapshot. "
+                                   "Registered by its declaring package's manifest at load.")));
+        // The payload is the PACKAGE's, so its schema is not the contract's to state. Saying so
+        // explicitly beats emitting an empty `fields` array, which a generator would read as "this
+        // topic carries nothing".
+        Json schema = Json::object();
+        schema.set("packageDefined", Json(true));
+        entry.set("payloadSchema", std::move(schema));
+        event_topics.push_back(std::move(entry));
+    }
+    contract_section.set("eventTopics", std::move(event_topics));
+    document.set("contract", std::move(contract_section));
+    return document;
+}
+
 // Translate a completed envelope into the JSON-RPC response for request `id`.
 Json envelope_to_response(const Json& id, const Envelope& env)
 {
@@ -244,6 +371,14 @@ Envelope Dispatcher::dispatch(const std::string& method, const Json& params,
         (method == "subscribe" || method == "unsubscribe" || method == "ack"))
         return serve_subscription(*stream_, method, params);
 
+    // The editor-UX d2 PACKAGE FACT BUS (D4/D5), served against the same live stream and for the
+    // same reason the three above are: the bus IS stream state, so a dispatcher constructed without
+    // one (pure contract introspection) has no bus and falls through to the reserved-surface
+    // handling below. Registered operational verbs, so the R-SEC-007 gate above already ran — both
+    // sit on the read/query baseline, deliberately (scope.cpp states why).
+    if (stream_ != nullptr && (method == "events.declare" || method == "events.publish"))
+        return serve_package_facts(*stream_, method, params);
+
     // Dispatch OVER the single registry (do NOT re-declare verbs). Resolve the method-id to a verb.
     const Registry& reg = Registry::instance();
     const VerbSpec* verb = nullptr;
@@ -262,7 +397,7 @@ Envelope Dispatcher::dispatch(const std::string& method, const Json& params,
     // the reserved bridge surface at M1 — its backing (file writes via filesync, install, session
     // control) lands in later tasks; invoking it returns contract.unimplemented (R-CLI-009).
     if (verb->noun.empty() && verb->verb == "describe")
-        return Envelope::success(reg.describe());
+        return Envelope::success(describe_with_package_topics(reg, stream_));
 
     return Envelope::failure("contract.unimplemented",
                              "'" + verb->cli_command() +

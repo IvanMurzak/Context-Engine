@@ -77,7 +77,7 @@ bool capability_supported(const std::string& capability)
     // NOT silently dropped to a weaker grant — the registry refuses the whole contribution.
     return capability == kCapabilityReadQuery || capability == kCapabilityFileWrite ||
            capability == kCapabilitySessionControl || capability == kCapabilityBuildInstall ||
-           capability == kCapabilityUiEvents;
+           capability == kCapabilityUiEvents || capability == kCapabilityPackageEvents;
 }
 
 } // namespace context::editor::gui::contract

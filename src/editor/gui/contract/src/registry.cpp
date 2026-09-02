@@ -123,12 +123,6 @@ bool is_segmented_name(std::string_view name)
 // Is `name` a real SUB-name of `owner` — `<owner>.<something>`, never the bare owner id? Both halves
 // matter, exactly as validatePackageTopic states: the bare package id is a namespace, not a member of
 // it, and accepting it would let one package's topic and its id be the same string.
-bool is_namespaced_under(std::string_view name, std::string_view owner)
-{
-    return name.size() > owner.size() + 1 && name.compare(0, owner.size(), owner) == 0 &&
-           name[owner.size()] == '.';
-}
-
 bool is_reserved_name(std::string_view name)
 {
     return name == kReservedNamespace || is_namespaced_under(name, kReservedNamespace);
@@ -262,6 +256,12 @@ std::string names_defect(const Contribution& c, const std::vector<std::string>& 
 // time. Declared in registry.h — `shell::read_package_manifest` asks THIS function rather than
 // restating its rules, which is what keeps the scan from ever accepting a package registration would
 // then refuse (see the header).
+bool is_namespaced_under(std::string_view name, std::string_view owner)
+{
+    return name.size() > owner.size() + 1 && name.compare(0, owner.size(), owner) == 0 &&
+           name[owner.size()] == '.';
+}
+
 std::string manifest_defect(const Contribution& c)
 {
     if (c.id.empty())

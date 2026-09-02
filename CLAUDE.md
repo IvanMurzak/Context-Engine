@@ -224,6 +224,10 @@ facts, the `origin` echo-suppression contract, and `.editor/session.json`) ·
 `editor-ui-bus.md` (the M9 e08c `editor.ui` local bus — D7's chrome tier: the daemon-shaped envelope,
 the closed built-in topic set + package topic namespacing, the two checks that PROVE chrome never
 reaches the daemon, and the cross-window mirror SEAM whose drill is e10's) ·
+`package-facts.md` (the editor-UX D4/D5 package FACT BUS: the publish verb, the daemon-side topic
+registry + last-value retention/dedup that breaks the A -> B -> A mirror, snapshot-on-subscribe, the
+reentrancy refusal, the CONSENTED cross-package subscription grant, and the two places the grant is
+applied) ·
 `present-path.md` (surface/swapchain, OSR import + composite, the CPU present fallback, and the
 headless-invariant gate) · `shell.md` (the native Shell: windows, the single-threaded owner loop, the
 per-window compositor + `PET_POPUP`, input arbitration, DPI, the D10 shell boundary, and the deferred

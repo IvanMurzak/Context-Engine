@@ -625,6 +625,8 @@ PANEL_BUNDLE = (
     # it has no production caller yet, so esbuild tree-shakes it out of the real bundle and the gate
     # does not enroll it — a fixture that carried it would be MORE CAPABLE THAN THE REAL BUNDLE.
     'var PACKAGE_GRANTS_LIST_METHOD = "package.grants.list";\n'
+    # editor-UX d2 package FACT publish method (packagefacts.ts).
+    'var PANEL_FACTS_PUBLISH_METHOD = "panel.facts.publish";\n'
     # d2 review 3c: the Problems panel's node ids the statusbar counts by (statusbar.ts).
     'var PROBLEMS_LIST_NODE_ID = "problems.list";\n'
     'var PROBLEMS_ROW_NODE_ID_PREFIX = "problems.row.";\n'
@@ -849,6 +851,15 @@ PANEL_CPP_PACKAGE_GRANTS = (
     'inline constexpr const char* kPackageGrantsDecideMethod = "package.grants.decide";\n'
 )
 
+# The editor-UX d2 package FACT publish route lives in its own header (package_facts.h), like the
+# three above and for the same reason: the header that OWNS the surface owns the constant. Its drift
+# symptom is the third distinct one in the family — every publisher goes silent while each consented
+# subscriber keeps rendering the last RETAINED value, so the editor reads as stale rather than broken.
+PANEL_CPP_PACKAGE_FACTS = (
+    'inline constexpr const char* kPanelFactsPublishMethod = "panel.facts.publish";\n'
+    'inline constexpr const char* kErrFactsBadParams = "panel.facts.bad_params";\n'
+)
+
 PANEL_DOCUMENT = (
     "<!DOCTYPE html>\n"
     '<html lang="en">\n'
@@ -888,6 +899,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
                    package_sessions: str = PANEL_CPP_PACKAGE_SESSIONS,
                    package_events: str = PANEL_CPP_PACKAGE_EVENTS,
                    package_grants: str = PANEL_CPP_PACKAGE_GRANTS,
+                   package_facts: str = PANEL_CPP_PACKAGE_FACTS,
                    panels: str = PANEL_CPP_PANELS,
                    extension: str = PANEL_CPP_EXTENSION,
                    package: dict | None = None,
@@ -915,6 +927,7 @@ def _panel_fixture(tmp_path: Path, *, bundle: str = PANEL_BUNDLE, document: str 
     (include_dir / "package_sessions.h").write_text(package_sessions, encoding="utf-8")
     (include_dir / "package_events.h").write_text(package_events, encoding="utf-8")
     (include_dir / "package_grants.h").write_text(package_grants, encoding="utf-8")
+    (include_dir / "package_facts.h").write_text(package_facts, encoding="utf-8")
 
     contract_dir = tmp_path / "contractinclude"
     contract_dir.mkdir(parents=True, exist_ok=True)
@@ -1322,6 +1335,41 @@ def test_a_renamed_package_grants_cpp_constant_is_a_config_error(tmp_path: Path)
                                                "kPackageGrantsReadMethod")
     with pytest.raises(check_webui_assets.CheckError):
         _run_panel(tmp_path, package_grants=renamed)
+
+
+# --- editor-UX d2: the package FACT publish method ------------------------------------------------
+#
+# The same three shapes again, and the symptom is the third distinct one in this family. A drift here
+# does not error and does not empty the editor: every `bridge.facts.publish` answers `unknown_method`,
+# `PanelPortBridge` maps it onto `verb_not_granted`, and — because a package fact is a STATE with
+# daemon-side RETENTION — every consented subscriber keeps rendering the last value it ever received.
+# The editor therefore looks like it is showing correct-but-old data rather than like a broken
+# channel, which is the reading that sends an investigation to the publishing package.
+
+
+def test_a_drifted_package_facts_publish_method_fails(tmp_path: Path) -> None:
+    """The Shell would route one name and editor-core would publish over another."""
+    drifted = re.sub(r'(PANEL_FACTS_PUBLISH_METHOD = ")[^"]*(")', r"\1panel.facts.drifted\2",
+                     PANEL_BUNDLE)
+    assert drifted != PANEL_BUNDLE
+    assert _run_panel(tmp_path, bundle=drifted) == 1
+
+
+def test_bundle_missing_the_package_facts_constant_fails(tmp_path: Path) -> None:
+    """An ABSENT constant means editor-core never publishes at all, so every cross-package
+    integration silently stops at the first hop with nothing reporting it."""
+    stripped = "\n".join(
+        line for line in PANEL_BUNDLE.splitlines() if "PANEL_FACTS_PUBLISH_METHOD" not in line)
+    assert _run_panel(tmp_path, bundle=stripped + "\n") == 1
+
+
+def test_a_renamed_package_facts_cpp_constant_is_a_config_error(tmp_path: Path) -> None:
+    """Rot-into-a-no-op guard: rename the C++ constant and the gate can verify NOTHING -> exit 2,
+    rather than reporting a green it did not earn."""
+    renamed = PANEL_CPP_PACKAGE_FACTS.replace("kPanelFactsPublishMethod",
+                                              "kPanelFactsSendMethod")
+    with pytest.raises(check_webui_assets.CheckError):
+        _run_panel(tmp_path, package_facts=renamed)
 
 
 # --- e09b-3: the LOUD write-notice vocabulary ----------------------------------------------------

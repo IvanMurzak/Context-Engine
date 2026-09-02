@@ -28,6 +28,7 @@
 #include "context/editor/shell/user_config.h"
 #include "context/editor/shell/package_sessions.h" // e13c-1: per-package BASELINE daemon sessions
 #include "context/editor/shell/package_grants.h"   // e13c-4: the persisted grants + install consent
+#include "context/editor/shell/package_facts.h"    // editor-UX d2: the package FACT BUS (D4/D5)
 #include "context/editor/shell/package_store.h"    // e13c-3: ~/.context/packages — the mount producer
 #include "context/editor/shell/panel_host.h"
 #include "context/editor/shell/panels/builtin_panels.h"
@@ -1070,6 +1071,20 @@ int main(int argc, char** argv)
     if (!package_sessions.install(bridge))
     {
         std::fprintf(stderr, "context_editor: could not install the package daemon-session surface\n");
+        return 1;
+    }
+
+    // editor-UX d2 - THE PACKAGE FACT BUS's Shell half (D4/D5). It is installed AFTER the session
+    // host, and the order is load-bearing rather than tidy: `install` is what supplies control 6's
+    // policy (`set_fact_policy`), so until this line runs `PackageSessionHost` is the deny-all fact
+    // bus - no package topic is registered on a session, and no package-namespaced event reaches a
+    // panel. A build that fails here therefore fails CLOSED, which is why the failure is fatal
+    // rather than a degraded start: an editor that mounted panels with a half-installed bus would
+    // differ from this one only in ways nothing reports.
+    shell::PackageFactHost package_facts(package_scan, package_grants, package_sessions);
+    if (!package_facts.install(bridge))
+    {
+        std::fprintf(stderr, "context_editor: could not install the package fact bus\n");
         return 1;
     }
 

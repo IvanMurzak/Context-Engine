@@ -31,14 +31,21 @@ constexpr const char* kCapabilityVocabulary[] = {
     gc::kCapabilitySessionControl,
     gc::kCapabilityBuildInstall,
     gc::kCapabilityUiEvents,
+    // editor-UX d2 (D4): the cross-package FACT subscription grant. Like `ui_events` it maps to NO
+    // daemon scope, so it can never widen a package session — see `scope_for_capability`.
+    gc::kCapabilityPackageEvents,
 };
 
 // The daemon scope a manifest capability confers, or nullopt when it confers NONE.
 //
-// `read_query` returns nullopt because it is the baseline every `ScopeSet` holds by construction, and
+// `read_query` returns nullopt because it is the baseline every `ScopeSet` holds by construction;
 // `ui_events` returns nullopt because it is an editor-core-LOCAL grant over the `editor.ui` bus with
-// no daemon meaning at all — which is what makes granting it structurally unable to widen a package's
-// daemon session (package_grants.h § granted_scope_set).
+// no daemon meaning at all; and `package_events` (editor-UX d2) returns nullopt because a package
+// fact rides the ORDINARY baseline subscription — what the grant decides is which TOPICS the Shell
+// lets through to that package (package_facts.h), never what its session may do. All three are
+// therefore structurally unable to widen a package's daemon session (package_grants.h
+// § granted_scope_set), which is the property that lets an operator consent to a fact subscription
+// without consenting to anything the dispatcher gates.
 std::optional<bridge::Scope> scope_for_capability(const std::string& capability)
 {
     if (capability == gc::kCapabilityFileWrite)

@@ -42,6 +42,8 @@ import {
     PANEL_VERB_EVENTS_ACK,
     PANEL_VERB_EVENTS_SUBSCRIBE,
     PANEL_VERB_EVENTS_UNSUBSCRIBE,
+    PANEL_VERB_FACTS_PUBLISH,
+    PANEL_FACT_TOPIC_MAX_LENGTH,
     PANEL_VERB_STATE_SET,
     PANEL_VERB_THEME_TOKENS,
     PANEL_VERB_UI_SUBSCRIBE,
@@ -58,6 +60,7 @@ import type {
     PanelCommandRejection,
     PanelCommandView,
     PanelDaemonOutcome,
+    PanelFactOutcome,
     PanelUiSubscribeOutcome,
 } from "../panelverbs.js";
 import type { ThemeChangedPayload } from "../theme.js";
@@ -123,6 +126,14 @@ interface VerbFixture {
      * assertion can express. `arity` is what pins the no-package-argument shape (see `uiSubscribe`).
      */
     readonly uiSubscriptions: { topics: string[]; arity: number }[];
+    /**
+     * Every `bridge.facts.publish` the table forwarded to the publish seam, in order (editor-UX d2).
+     *
+     * The witness for what no refusal assertion can express: an entry here means the request got
+     * past the parser and reached the Shell-bound seam. `arity` pins the no-package-argument shape,
+     * exactly as it does for the two above.
+     */
+    readonly factPublishes: { topic: string; payload: unknown; arity: number }[];
 }
 
 interface FixtureOptions {
@@ -157,6 +168,11 @@ interface FixtureOptions {
      * Default: ACCEPT every requested topic. Supply a `diagnostic` to drive the refusing arm.
      */
     readonly uiOutcome?: PanelUiSubscribeOutcome;
+    /**
+     * What the d2 FACT publisher answers. Default: ACCEPT, echoing the topic and `changed:true`, so
+     * the refusing cases below are measured against a channel that demonstrably works.
+     */
+    readonly factOutcome?: PanelFactOutcome;
 }
 
 /**
@@ -226,6 +242,8 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
     const daemonCalls: { method: string; params: unknown; arity: number }[] = [];
     // The e13c-4 `editor.ui` fan-in, recorded the same way and for the same reason.
     const uiSubscriptions: { topics: string[]; arity: number }[] = [];
+    // The d2 FACT publisher, recorded the same way and for the same reason.
+    const factPublishes: { topic: string; payload: unknown; arity: number }[] = [];
     const table = makePanelBridgeVerbs({
         panelId: PANEL_ID,
         packageId: PACKAGE_ID,
@@ -265,6 +283,17 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
             uiSubscriptions.push({ topics: [...topics], arity: args.length });
             return options.uiOutcome ?? { topics: [...topics], diagnostic: "" };
         },
+        // editor-UX d2 — the FACT publish seam. RECORDS ITS FULL ARITY for the reason `daemonCall`
+        // and `uiSubscribe` do: the production type promises NO package argument, and a fixture
+        // declared `(topic, payload)` would silently discard one, making the plant "give
+        // `PanelFactPublish` a package argument" vacuous.
+        factPublish: (...args: unknown[]): Promise<PanelFactOutcome> => {
+            const topic = args[0] as string;
+            factPublishes.push({ topic, payload: args[1], arity: args.length });
+            return Promise.resolve(
+                options.factOutcome ?? { ok: true, result: { topic, changed: true, seq: 1 } },
+            );
+        },
         request: (verb: string, params: unknown): Promise<PanelBridgeReply> => {
             invoked.push(`${verb}:${JSON.stringify(params)}`);
             return Promise.resolve(options.invokeReply ?? { ok: true, result: null });
@@ -276,6 +305,7 @@ function fixture(options: FixtureOptions = {}): VerbFixture {
         writes,
         daemonCalls,
         uiSubscriptions,
+        factPublishes,
         verbs: table.verbs,
         dispose: table.dispose,
         setContext: (context: WhenContext): void => {
@@ -325,6 +355,143 @@ async function refusalFrom(fx: VerbFixture, verb: string, params?: unknown): Pro
 // ------------------------------------------------------------------------------------------ cases
 
 export const panelVerbsTests: readonly TestCase[] = [
+    // ---------------------------------- the package FACT publish (editor-UX d2, D4/D5, design 05 §3)
+    {
+        // PLANT: give `PanelFactPublish` a package argument, or route the verb through
+        // `forwardDaemon("events.publish", …)` instead of `context.factPublish`. Both go RED here,
+        // and only here — which is what proves the fact bus is its OWN route rather than the
+        // allowlist entry D4 deliberately refused to add.
+        name: "panelverbs: bridge.facts.publish carries (topic, payload) and NOTHING that names a package",
+        run: async (): Promise<void> => {
+            const fx = fixture();
+            const result = await call(fx, PANEL_VERB_FACTS_PUBLISH, {
+                topic: "ext.hello.brush",
+                payload: { size: 3 },
+                // A `packageId` in the REQUEST reaches no code that reads one — the closure IS the
+                // package. Sent anyway, exactly as the `bridge.call` case sends one, so the claim is
+                // measured rather than argued.
+                packageId: "somebody.else",
+            });
+            assertEqual(fx.factPublishes.length, 1, "one publish, one forward");
+            assertEqual(fx.factPublishes[0]?.topic, "ext.hello.brush", "the topic travels verbatim");
+            assertEqual(
+                JSON.stringify(fx.factPublishes[0]?.payload),
+                JSON.stringify({ size: 3 }),
+                "…and so does the payload: the fact is the package's, not this module's to reshape",
+            );
+            assertEqual(
+                fx.factPublishes[0]?.arity,
+                2,
+                "(topic, payload) and nothing more — no request member can name another package",
+            );
+            // ⚠ THE REPLY IS RETURNED WHOLE. `changed` is what a publisher reads to learn whether
+            // its fact MOVED (design 05 §1: the writer learns its outcome from the REPLY), so a
+            // handler that swallowed it would leave a package unable to tell a dedup from a publish.
+            assertEqual(
+                JSON.stringify(result),
+                JSON.stringify({ topic: "ext.hello.brush", changed: true, seq: 1 }),
+                "the daemon's {topic, changed, seq} reaches the panel unwrapped",
+            );
+            // NO DAEMON CALL WAS MADE — the publish did not ride `panel.daemon.call`, which is the
+            // structural half of "the allowlist stays closed".
+            assertEqual(fx.daemonCalls.length, 0, "the fact bus never touches the daemon allowlist");
+        },
+    },
+    {
+        // ⚠ D5's ACCEPTED COST, PINNED AS BEHAVIOUR RATHER THAN LEFT AS PROSE. A deduplicated repeat
+        // is a SUCCESS (`changed:false`), not a refusal — a handler that turned it into one would
+        // make every package author build a retry loop around the cycle breaker itself.
+        name: "panelverbs: a DEDUPLICATED fact (changed:false) is a success, not a refusal",
+        run: async (): Promise<void> => {
+            const deduped = fixture({
+                factOutcome: {
+                    ok: true,
+                    result: { topic: "ext.hello.brush", changed: false, seq: 0 },
+                },
+            });
+            const result = await call(deduped, PANEL_VERB_FACTS_PUBLISH, {
+                topic: "ext.hello.brush",
+                payload: { size: 3 },
+            });
+            assertEqual(
+                JSON.stringify(result),
+                JSON.stringify({ topic: "ext.hello.brush", changed: false, seq: 0 }),
+                "the repeat resolves — the panel is told it did not move, not that it failed",
+            );
+        },
+    },
+    {
+        // ⚠ PLANT: relay `outcome.code` through a fresh mapping instead of `daemonRefusalCode`. This
+        // goes RED, which is what keeps the fact bus on the ONE translation `bridge.call` uses — two
+        // mappings would give a package a different answer depending on which verb provoked it.
+        name: "panelverbs: a refused fact relays its ORIGINATING code through the one mapping",
+        run: async (): Promise<void> => {
+            const refused = fixture({
+                factOutcome: {
+                    ok: false,
+                    code: "panel.facts.topic_not_declared",
+                    message: "package 'ext.hello' did not declare 'ext.hello.brush'",
+                },
+            });
+            const refusal = await refusalFrom(refused, PANEL_VERB_FACTS_PUBLISH, {
+                topic: "ext.hello.brush",
+                payload: 1,
+            });
+            assert(
+                refusal.message.includes("panel.facts.topic_not_declared"),
+                "the originating code travels verbatim, or the manifest check is unobservable",
+            );
+            assertEqual(
+                refusal.code,
+                daemonRefusalCode("panel.facts.topic_not_declared"),
+                "…mapped by the SAME function bridge.call uses, never a second copy",
+            );
+        },
+    },
+    {
+        // The request parser, both directions. The `payload` half is the one that matters: a MISSING
+        // payload must be refused rather than defaulted to null, because a retained null then
+        // deduplicates against the author's next deliberate null and their first real publish
+        // silently vanishes.
+        name: "panelverbs: bridge.facts.publish refuses a bad topic or an ABSENT payload",
+        run: async (): Promise<void> => {
+            const fx = fixture();
+            for (const bad of [
+                {},
+                { payload: 1 },
+                { topic: "", payload: 1 },
+                { topic: 7, payload: 1 },
+                { topic: "x".repeat(PANEL_FACT_TOPIC_MAX_LENGTH + 1), payload: 1 },
+            ]) {
+                const refusal = await refusalFrom(fx, PANEL_VERB_FACTS_PUBLISH, bad);
+                assertEqual(
+                    refusal.code,
+                    PANEL_BRIDGE_REFUSALS.malformedRequest,
+                    "a malformed request is the panel's to fix, so it is a malformed_request",
+                );
+            }
+            // AN ABSENT payload, specifically — distinct from a null one.
+            const missing = await refusalFrom(fx, PANEL_VERB_FACTS_PUBLISH, {
+                topic: "ext.hello.brush",
+            });
+            assert(
+                missing.message.includes("payload"),
+                "the diagnostic names the missing member, not merely 'malformed'",
+            );
+            assertEqual(fx.factPublishes.length, 0, "not one malformed request reached the Shell");
+
+            // THE SIBLING that stops every refusal above from passing against a verb that refuses
+            // everything: a topic AT the bound, with an explicit `null` payload, is ACCEPTED. `null`
+            // is a legal fact value — only its ABSENCE is refused, and nothing else in this case
+            // could tell those apart.
+            await call(fx, PANEL_VERB_FACTS_PUBLISH, {
+                topic: "e.".padEnd(PANEL_FACT_TOPIC_MAX_LENGTH, "x"),
+                payload: null,
+            });
+            assertEqual(fx.factPublishes.length, 1, "a topic AT the bound is accepted, not refused");
+            assertEqual(fx.factPublishes[0]?.payload, null, "…and an explicit null IS a fact value");
+        },
+    },
     // -------------------------------- the daemon EVENT subscription (M9 e13c-2, design 04 §5 / 05 §1)
     {
         // ⚠ PLANT: point any of the three at another daemon method (`subscribe` -> `query`). The
