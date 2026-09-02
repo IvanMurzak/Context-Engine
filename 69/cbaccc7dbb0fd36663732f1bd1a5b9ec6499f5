@@ -1,0 +1,21 @@
+src/render/CMakeLists.txt
+  s_782aa603d2bdb2::t_389734b470614d 206-216
+src/editor/shell/CMakeLists.txt
+  s_782aa603d2bdb2::t_b4cc10851277cc 779-807
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "69cbaccc7dbb0fd36663732f1bd1a5b9ec6499f5",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
