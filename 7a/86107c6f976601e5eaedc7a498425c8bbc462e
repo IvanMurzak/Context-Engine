@@ -1,0 +1,78 @@
+src/editor/webui/core/src/viewport.ts
+  s_782aa603d2bdb2::t_d929c1a6bea8ea 1-208
+src/editor/shell/src/viewport_binding.cpp
+  s_782aa603d2bdb2::t_ffa3fd57d3897c 389
+  s_782aa603d2bdb2::t_e5f82fd9689723 489-490,495-503
+  s_782aa603d2bdb2::t_f46e7d9d472692 1-388,390-488,491-494,504-509
+src/editor/shell/tests/test_viewport_binding.cpp
+  s_782aa603d2bdb2::t_5c5fd02f3de514 1-559
+src/tests/integration/test_e3_viewport_camera.cpp
+  s_782aa603d2bdb2::t_eb2efae591f1fe 1-283
+src/editor/shell/panels/src/viewport_feed.cpp
+  s_782aa603d2bdb2::t_bb95c04194e0ff 1-195
+  s_782aa603d2bdb2::t_5c0121093d2f1e 196-222
+src/editor/shell/panels/tests/test_viewport_feed.cpp
+  s_782aa603d2bdb2::t_9ea60f4ae9d79b 1-334
+src/editor/shell/panels/include/context/editor/shell/panels/viewport_feed.h
+  s_782aa603d2bdb2::t_61b2bf2e3dfac0 1-145
+  s_782aa603d2bdb2::t_7e5f897ff6d01f 146-169
+src/editor/webui/core/src/test/viewport.test.ts
+  s_782aa603d2bdb2::t_9273e59f5340a2 1-538
+  s_782aa603d2bdb2::t_b10b44cb69c537 539-672
+src/editor/shell/include/context/editor/shell/viewport_binding.h
+  s_782aa603d2bdb2::t_d12989c1048988 1-252
+docs/editor-session-state.md
+  s_782aa603d2bdb2::t_c3746b3eeb257d 29-39
+docs/shell.md
+  s_782aa603d2bdb2::t_5626329f1843bb 439-486,721-724,1475-1494
+src/editor/shell/CMakeLists.txt
+  s_782aa603d2bdb2::t_5b4f3de093f723 53-55,306-310
+src/editor/shell/app/editor_main.cpp
+  s_782aa603d2bdb2::t_6d821dbf381793 1546-1573,1580-1584,1603,1605-1609
+src/editor/shell/include/context/editor/shell/shell.h
+  s_782aa603d2bdb2::t_9e6261e8e06cf4 28,115-125,246-250,260-263
+src/editor/shell/panels/CMakeLists.txt
+  s_782aa603d2bdb2::t_d19df97d5c109b 28-33,44-45,62,85-86
+src/editor/shell/panels/include/context/editor/shell/panels/builtin_panels.h
+  s_782aa603d2bdb2::t_90cf4e1d34e194 32-38,84-88,120-124,517-522,534-540,575-598
+src/editor/shell/panels/src/builtin_panels.cpp
+  s_782aa603d2bdb2::t_2782a21e0c7c7c 17,682-690,695,927-944,948-996
+src/editor/shell/panels/tests/test_builtin_panels.cpp
+  s_782aa603d2bdb2::t_6ad064d4ab2b2c 166-172,182-184,197-198
+src/editor/shell/src/shell.cpp
+  s_782aa603d2bdb2::t_460a0ebab62051 186-189,200-204,427,438-445,571-586
+src/editor/shell/tests/test_shell.cpp
+  s_782aa603d2bdb2::t_04ec68daf0a15e 323-325,331-384,1111
+src/editor/webui/app/app.css
+  s_782aa603d2bdb2::t_370a9702ff8bc4 911-959
+src/editor/webui/core/src/boot.ts
+  s_782aa603d2bdb2::t_aba17d2b150bd4 46-51,388-395,412-417,557,635-637,665-668
+src/editor/webui/core/src/chrome.ts
+  s_782aa603d2bdb2::t_f500f03987f916 61-62,289-292,675-688,712-727
+src/editor/webui/core/src/dockview.ts
+  s_782aa603d2bdb2::t_e8aa267952761e 114-132
+src/editor/webui/core/src/editorstate.ts
+  s_782aa603d2bdb2::t_5774d47bb5763b 105-155
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_8d47a3e525004e 40-45,66-71,222-229,911-915,1189-1194,1600-1612,1614-1615,1837-1840,1854-1860
+src/editor/webui/core/src/test/main.ts
+  s_782aa603d2bdb2::t_1c0816a3182ee5 47,96
+src/tests/integration/CMakeLists.txt
+  s_782aa603d2bdb2::t_f07fb05272b720 185-206
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "7a86107c6f976601e5eaedc7a498425c8bbc462e",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
