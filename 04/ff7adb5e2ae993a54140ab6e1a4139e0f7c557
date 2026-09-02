@@ -1,0 +1,35 @@
+src/editor/bridge/include/context/editor/bridge/scope.h
+  s_782aa603d2bdb2::t_ab5210a19e03e9 65
+src/editor/bridge/src/scope.cpp
+  s_782aa603d2bdb2::t_8af44f66de5258 138-143,148-149
+src/editor/client/schema/context-client-schema.json
+  s_782aa603d2bdb2::t_5f0f4d1daa1415 895-958,1852-1893
+src/editor/contract/src/error_catalog.cpp
+  s_782aa603d2bdb2::t_efa9fb663f04ba 222-247
+src/editor/contract/src/registry.cpp
+  s_782aa603d2bdb2::t_edf9395beb8c8b 979-1056
+src/editor/editorkernel/src/kernel_server.cpp
+  s_782aa603d2bdb2::t_b34d8ca599d0a5 179-223,1023-1131
+src/editor/editorkernel/tests/test_kernel_server.cpp
+  s_782aa603d2bdb2::t_1e5b08fb10f1a4 13-16,463-676
+src/editor/webui/core/src/generated/client-schema.ts
+  s_782aa603d2bdb2::t_7a5c089a44b210 67-69,483-512,666,821-826,1327-1368,2233
+src/tests/integration/test_redteam_boundaries.cpp
+  s_782aa603d2bdb2::t_26f54d9285cfd6 105-106,178-184
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "04ff7adb5e2ae993a54140ab6e1a4139e0f7c557",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
