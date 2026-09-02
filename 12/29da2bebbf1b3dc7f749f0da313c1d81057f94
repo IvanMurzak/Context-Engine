@@ -1,0 +1,77 @@
+src/editor/webui/core/src/viewport.ts
+  s_af461e00fe677b::t_b6249d4c78f1e2 85-94,98-126
+  s_af461e00fe677b::t_8d1f9790be13fb 238-249
+  s_af461e00fe677b::t_17f873b8103676 285-321
+  s_af461e00fe677b::t_0992578adcdef1 127
+src/editor/webui/core/src/boot.ts
+  s_af461e00fe677b::t_10ceff9f1929a3 564-583
+  s_af461e00fe677b::t_9df46591457c26 736-748
+src/editor/shell/panels/src/viewport_feed.cpp
+  s_af461e00fe677b::t_46295a0be5d207 132
+  s_af461e00fe677b::t_3a9c8db0b24bcd 63
+  s_af461e00fe677b::t_96cc53d8b4d751 72-75
+  s_af461e00fe677b::t_a7d57ec6c83e6a 99,107,111-119,124-131,133-150
+  s_af461e00fe677b::t_3b030761327963 60-62
+src/editor/shell/panels/tests/test_viewport_feed.cpp
+  s_af461e00fe677b::t_92229c8f62ace7 524-538,543,546-594
+  s_af461e00fe677b::t_898a8319e8fc05 646
+  s_af461e00fe677b::t_1918cb0de9cb01 22,539-542,544-545
+docs/shell.md
+  s_af461e00fe677b::t_da45c8bd66e45c 479-496,1526-1533
+src/editor/shell/panels/include/context/editor/shell/panels/viewport_feed.h
+  s_af461e00fe677b::t_1f63992553cf07 257-263
+  s_af461e00fe677b::t_7f53a501785d68 145-147,150-165
+  s_af461e00fe677b::t_116aa41e919cb2 166
+src/editor/shell/panels/CMakeLists.txt
+  s_af461e00fe677b::t_753573c7a6d557 105-108,111-112
+src/editor/webui/app/app.css
+  s_af461e00fe677b::t_98c3150cd5e485 1041
+  s_af461e00fe677b::t_4d5d6f70448a39 927-929
+  s_af461e00fe677b::t_e8baeafd816d24 1014-1040,1042-1044,1046-1056
+  s_af461e00fe677b::t_5a070d6e55e380 953-985
+  s_af461e00fe677b::t_7acc3feed167e1 930-946,986-987
+  s_af461e00fe677b::t_217e73dc796e53 1045
+src/editor/webui/core/src/test/viewport.test.ts
+  s_af461e00fe677b::t_e782b66373a581 611-615,620,622-628
+  s_af461e00fe677b::t_ae8efa235be9fa 498,500-502,507-515,517-526
+  s_af461e00fe677b::t_9fbd732c864238 150-153,180-186,712
+  s_af461e00fe677b::t_eb63774724fc36 677,688,690-702,713-718,723-726,731,735-739,745-746,771
+  s_af461e00fe677b::t_cf729e198716f0 719-722
+  s_af461e00fe677b::t_e9370642cf55e4 148-149,154,178-179
+  s_af461e00fe677b::t_9756c75067a605 616-619,621
+  s_af461e00fe677b::t_0c010b554681f5 678-687,689,703,727-730,732-734,744,747-748,762-766,769-770,772-773
+  s_af461e00fe677b::t_a6748885dada23 740-743
+  s_af461e00fe677b::t_68c5a90f92f933 21,23
+  s_af461e00fe677b::t_afda29652c5dc2 749-761,767-768
+  s_af461e00fe677b::t_51c36fcafa1f54 28-29
+  s_af461e00fe677b::t_ce200809db7f32 704-711
+  s_af461e00fe677b::t_a5343c8231213a 567-592
+  s_af461e00fe677b::t_252065b23d1610 651-665
+  s_af461e00fe677b::t_a52f8adf4078ee 674-676
+src/editor/webui/core/src/panelhost.ts
+  s_af461e00fe677b::t_296a9ff70496bf 1692
+  s_af461e00fe677b::t_dd49326e2c9d81 841-861
+  s_af461e00fe677b::t_4bf61868d35eae 942-943,952
+  s_af461e00fe677b::t_fd842f011319a7 1674-1679,1681-1685
+src/editor/webui/core/src/chrome.ts
+  s_af461e00fe677b::t_b49a9c5459f395 614-623
+  s_af461e00fe677b::t_425ff708ca9885 594,652
+src/editor/shell/cef/src/cef_shell_smoke.cpp
+  s_af461e00fe677b::t_53a9a7fca4d7a7 810-846
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "1229da2bebbf1b3dc7f749f0da313c1d81057f94",
+  "prompts": {},
+  "sessions": {
+    "s_af461e00fe677b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "7edfa0ee-3954-4c9e-9919-0bd45aec5608",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
