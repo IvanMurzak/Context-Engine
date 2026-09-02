@@ -1543,12 +1543,45 @@ int main(int argc, char** argv)
                 front->backend().request_activation();
             }
         }
+        // editor-UX e3: re-point the Scene viewport feed at window 0's producer, per frame and for
+        // the same reason `bind_write_client` is re-derived per frame — the bag was built before the
+        // window (and before its `render::IDevice`) existed, and a window that re-attaches its
+        // present path gets a NEW producer with no bookkeeping here. Cheap: an unchanged pointer is
+        // a compare (viewport_feed.h § bind_binding).
+        if (shell::EditorWindow* primary = manager.window(0))
+        {
+            shell::panels::bind_viewport_producer(builtin, &primary->viewports());
+        }
+        else
+        {
+            shell::panels::bind_viewport_producer(builtin, nullptr);
+        }
+        // …and the SAME for every live secondary window: its own bag, its own window, its own
+        // producer. Walked directly rather than through `for_each_secondary_bag`, because that
+        // visitor hands out the bag and the CLIENT and this is the one per-frame step that needs the
+        // WINDOW — widening the visitor for one caller would touch five unrelated call sites.
+        for (const SecondaryFeed& entry : secondary_feeds)
+        {
+            const std::shared_ptr<SecondaryWindowSurfaces> surfaces = entry.surfaces.lock();
+            if (surfaces == nullptr)
+            {
+                continue;
+            }
+            shell::EditorWindow* secondary = manager.window(entry.id);
+            shell::panels::bind_viewport_producer(
+                surfaces->builtin, secondary == nullptr ? nullptr : &secondary->viewports());
+        }
         if (client::Client* live_client = lifecycle.client())
         {
             // e05d3: drain the live-hydration work the feeds marked due (Scene tree re-reads on settle;
             // the Inspector's selection fetch). Uses the CURRENT client, so a reconnect's new client is
             // picked up automatically. Synchronous on the owner loop; a no-op when nothing is due.
             shell::panels::pump_panel_feeds(builtin, *live_client, options.scene);
+            // editor-UX e3 (D7): the Scene viewport's camera round trip — hydrate every camera the
+            // daemon holds, then push the ones this window moved. Kept OUT of `pump_panel_feeds`
+            // because that one is a pure READ loop and this one also WRITES; see its header on why
+            // folding a write into a read's failure posture would silently cover a lost camera.
+            (void)shell::panels::pump_viewport_cameras(builtin, *live_client);
         }
         // e09e-3: the SAME three per-frame steps for every OTHER live window — its bag's non-owning
         // client views re-derived, then its due hydration work drained. Each secondary window reads and
@@ -1567,7 +1600,13 @@ int main(int argc, char** argv)
                 if (surfaces.builtin.session != nullptr)
                     shell::panels::bind_session_client(*surfaces.builtin.session, window_client);
                 if (window_client != nullptr)
+                {
                     shell::panels::pump_panel_feeds(surfaces.builtin, *window_client, options.scene);
+                    // editor-UX e3: each secondary window's viewport cameras ride ITS OWN connection,
+                    // so its `origin` and its writes are genuinely its own — the same split the
+                    // per-window read/write loop above already makes.
+                    (void)shell::panels::pump_viewport_cameras(surfaces.builtin, *window_client);
+                }
             });
         // e07c: watch the per-user keybindings file. A cheap stat gates the re-read, so an unchanged
         // file costs one stat per loop; a change bumps the generation editor-core re-reads over the

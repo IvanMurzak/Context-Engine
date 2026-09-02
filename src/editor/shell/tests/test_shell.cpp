@@ -320,11 +320,66 @@ void test_a_viewport_region_takes_input_away_from_the_browser()
     harness.backend->post(in_chrome);
 
     CHECK(harness.window->pump_once(1000));
-    // Only the chrome sample reached the browser; the viewport one took the native path (whose
-    // consumer — camera/picking/gizmos over the bridge — arrives with e11).
+    // Only the chrome sample reached the browser; the viewport one took the native path. Its
+    // consumer is the e3 producer + camera transport (viewport_binding.h); the GESTURE math that
+    // would turn this sample into a camera move is e4's and later (shell.cpp § the viewport arm).
     CHECK(harness.browser->pointers().size() == 1u);
     CHECK(harness.browser->pointers()[0].position == (PointI{500, 400}));
     CHECK(harness.window->input().pointer_dispatches() == 2);
+}
+
+void test_the_owner_loop_builds_the_viewport_layer_stack_from_the_region_map()
+{
+    // editor-UX e3: the producer driven by the REAL owner loop rather than called directly. The
+    // Harness presents through the CPU path with no device, which is also the DEGRADED case the DoD
+    // names — the layers publish (rects and routing are unaffected) but carry no content, and
+    // `viewport.adapter_absent` is what the panel feed reports off `adapter_available()`.
+    Harness harness;
+    CHECK(!harness.window->viewports().adapter_available());
+    CHECK(std::string(harness.window->viewports().degraded_code()) == "viewport.adapter_absent");
+
+    const render::Rect2D first = shelltest::rect(0, 40, 400, 300);
+    harness.window->input().regions().publish(
+        {ShellRegion{"builtin.viewport#1", first, RegionKind::viewport},
+         ShellRegion{"chrome.caption", shelltest::rect(0, 0, 800, 38), RegionKind::caption}});
+    CHECK(harness.window->pump_once(1000));
+
+    // ONE layer — the caption region is not a viewport — carrying the published rect verbatim.
+    CHECK(harness.window->viewports().layers().size() == 1u);
+    CHECK(harness.window->viewports().layers()[0].id == "builtin.viewport#1");
+    CHECK(shelltest::rect_eq(harness.window->viewports().layers()[0].content_rect, first));
+    CHECK(harness.window->viewports().layers()[0].content == nullptr);
+    // And it reached the compositor, which is the thing that actually composites the hole.
+    CHECK(harness.window->compositor().viewports().size() == 1u);
+    CHECK(shelltest::rect_eq(harness.window->compositor().viewports()[0].content_rect, first));
+
+    const std::size_t after_first = harness.window->viewports().publishes();
+    CHECK(after_first == 1u);
+
+    // AN IDLE PUMP DOES NOT REPUBLISH. The generation gate is what keeps a damage-driven shell from
+    // re-rendering every viewport once per iteration; without it an idle editor would draw forever.
+    CHECK(harness.window->pump_once(2000));
+    CHECK(harness.window->viewports().publishes() == after_first);
+
+    // A LAYOUT CHANGE moves the layer with the rect, on the very next pump.
+    const render::Rect2D moved = shelltest::rect(400, 40, 400, 300);
+    harness.window->input().regions().publish(
+        {ShellRegion{"builtin.viewport#1", moved, RegionKind::viewport}});
+    CHECK(harness.window->pump_once(3000));
+    CHECK(harness.window->viewports().publishes() == after_first + 1u);
+    CHECK(shelltest::rect_eq(harness.window->viewports().layers()[0].content_rect, moved));
+    CHECK(shelltest::rect_eq(harness.window->compositor().viewports()[0].content_rect, moved));
+
+    // TWO COPIES AT ONCE (c3's `unlimited` mode on a real panel), with independent rects.
+    harness.window->input().regions().publish(
+        {ShellRegion{"builtin.viewport#1", shelltest::rect(0, 40, 400, 300), RegionKind::viewport},
+         ShellRegion{"builtin.viewport#2", shelltest::rect(400, 40, 400, 300), RegionKind::viewport}});
+    CHECK(harness.window->pump_once(4000));
+    CHECK(harness.window->viewports().layers().size() == 2u);
+    CHECK(harness.window->viewports().layers()[0].id == "builtin.viewport#1");
+    CHECK(harness.window->viewports().layers()[1].id == "builtin.viewport#2");
+    CHECK(!shelltest::rect_eq(harness.window->viewports().layers()[0].content_rect,
+                              harness.window->viewports().layers()[1].content_rect));
 }
 
 void test_caption_samples_are_suppressed_and_control_samples_reach_the_browser()
@@ -1053,6 +1108,7 @@ int main()
     test_a_placement_change_with_no_move_event_still_repositions_the_browser();
     test_input_round_trip_reaches_the_browser();
     test_a_viewport_region_takes_input_away_from_the_browser();
+    test_the_owner_loop_builds_the_viewport_layer_stack_from_the_region_map();
     test_caption_samples_are_suppressed_and_control_samples_reach_the_browser();
     test_pump_pushes_republished_chrome_regions_down_to_the_backend();
     test_focus_events_reach_the_browser_and_drop_a_live_drag();

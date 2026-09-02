@@ -145,6 +145,12 @@ void EditorWindow::DragObserver::on_update_drag_cursor(DragOperation operation)
 
 PresentPath EditorWindow::attach_present(render::IRhi& rhi)
 {
+    // e3: drop every viewport target FIRST. `device_` is replaced (or reset) below, and a target is
+    // created ON that device — `attach_device`'s own contract is that the device outlives the
+    // binding, so releasing the old targets has to happen while the old device is still alive.
+    // A no-op on the first attach, and it also arms the republish that stops the compositor keeping
+    // a layer whose `content` view this destroys.
+    viewports_.detach_device();
     const render::NativeWindowDesc native = backend_->native_window();
     surface_ = rhi.create_surface(native);
     if (surface_ == nullptr)
@@ -183,6 +189,10 @@ PresentPath EditorWindow::attach_present(render::IRhi& rhi)
         attach_cpu_present();
         return compositor_.path();
     }
+    // e3: the viewport producer draws into targets created on THIS device. Adopted here, at the one
+    // place a device comes into existence, so a viewport can never be rendered against a device the
+    // window has since replaced.
+    viewports_.attach_device(*device_);
     diagnostic_.clear();
     return compositor_.path();
 }
@@ -193,6 +203,11 @@ void EditorWindow::attach_cpu_present()
     // The WHOLE native-window descriptor, not a platform tag plus a handle (e12a; docs/present-path.md
     // § the e03 follow-up): a 2D present primitive is window-system-granular, and X11 needs the
     // Display* alongside the Window.
+    // e3: no device on this path, so the viewports degrade HONESTLY rather than silently — their
+    // layers still publish (the rects and the routing are unaffected) but carry no content, and the
+    // panel feed reports `viewport.adapter_absent` (R-HEAD-002). Detached BEFORE the blitter is
+    // selected, so an early return below cannot leave a binding pointing at a dead device.
+    viewports_.detach_device();
     render::present::BlitterSelection selection = render::present::make_present_blitter(native);
     if (selection.blitter == nullptr && !selection.diagnostic.empty())
     {
@@ -415,8 +430,7 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
             break;
         case InputTarget::viewport:
         case InputTarget::native:
-            // The native path (03 §6.3): camera controls / picking / gizmo gestures (e11 drives the
-            // viewport verbs over the bridge — until then dispatch stays honestly empty), and the
+            // The native path (03 §6.3): camera controls / picking / gizmo gestures, and the
             // CAPTION drag surface (editor-window-chrome b1/c1, 02 §6): both OS consumers sit
             // UPSTREAM of this arm. On Windows the NC hit-test consumes caption points BEFORE
             // client routing (they arrive as NC messages the pump never forwards); on macOS c1's
@@ -427,6 +441,14 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
             // Dropping them here IS the suppression: a caption press must never half-reach the
             // browser (ROADMAP risk 3). The caption CONTROLS are deliberately NOT this arm's —
             // they are web-drawn browser content and route InputTarget::browser (input.cpp).
+            //
+            // ⚠ THE VIEWPORT ARM IS STILL EMPTY, and that is a scope statement rather than an
+            // oversight. editor-UX e3 landed the viewport's PRODUCER and its camera TRANSPORT (the
+            // opaque `editor.camera-set` payload, hydrated from `editor.cameras-get`), and the one
+            // thing that MOVES a camera today is the panel's keyboard-reachable `viewport.frame-scene`
+            // command — which arrives over `panel.invoke`, not here. Orbit/pan/zoom gesture math and
+            // picking are e4 and its successors; a half-written gesture here would be a second,
+            // untested camera writer beside the one the feed already owns.
             break;
         case InputTarget::keymap:
         case InputTarget::swallowed:
@@ -551,6 +573,27 @@ bool EditorWindow::pump_once(std::uint64_t now_us)
     }
 
     poll_placement(now_us);
+
+    // e3: rebuild the viewport layer stack from the window's region map — AFTER the browser drain,
+    // because editor-core's `editor.regions.publish` lands INSIDE `browser_->pump()` (the bridge
+    // call), so publishing before it would composite this iteration against last iteration's layout.
+    // (The chrome push above cannot move: an NC hit-test answered during the drain needs the rects
+    // BEFORE it, and it pays the one-iteration staleness that buys.)
+    //
+    // GENERATION-GATED, one integer compare per pump — the change detection RegionMap's counter
+    // exists for, and its first consumer. A viewport whose CONTENT moved without its rect moving is
+    // not covered by this gate and never will be: that is `mark_viewport_content()`'s job, which the
+    // producer marks itself, and which a live scene feed will drive when one exists.
+    //
+    // A DEVICE CHANGE IS ITS OWN TRIGGER (`needs_publish`): attaching or detaching a device destroys
+    // every render target, and the compositor holds the published layers by raw `ITextureView*`, so
+    // a device swap under an unchanged layout must still republish or those pointers dangle.
+    if (alive_ && (viewports_.needs_publish() ||
+                   input_.regions().generation() != viewport_regions_generation_))
+    {
+        viewport_regions_generation_ = input_.regions().generation();
+        (void)viewports_.publish(input_.regions().regions(), viewport_scene_, compositor_);
+    }
 
     if (alive_)
     {

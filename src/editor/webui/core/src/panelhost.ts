@@ -37,7 +37,12 @@
 // write from editor-core would be a defect even if it worked.
 
 import { BridgeError, isRecord } from "./bridge.js";
-import type { DockviewApi, DockviewContentRenderer, DockviewModule } from "./dockview.js";
+import type {
+    DockviewApi,
+    DockviewContentRenderer,
+    DockviewDisposable,
+    DockviewModule,
+} from "./dockview.js";
 import { detectDockview } from "./dockview.js";
 import {
     IFRAME_ALLOW,
@@ -58,6 +63,13 @@ import {
     panelIdOfInstance,
 } from "./panels.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
+import {
+    PANEL_INSTANCE_ATTRIBUTE,
+    VIEWPORT_SURFACE_ATTRIBUTE,
+    isNativeSurfacePanel,
+    isNativeSurfacePanelId,
+    syncNativeSurfaceGroups,
+} from "./viewport.js";
 import { PANEL_BRIDGE_REFUSALS, PanelPortBridge } from "./panelport.js";
 import type { PanelBridgeReply, PanelVerbHandler } from "./panelport.js";
 // `panelverbs.ts` does not import this module, so both directions here are acyclic. The TYPE import
@@ -207,7 +219,18 @@ export type LocalPanelFactory = (container: HTMLElement) => (() => void) | void;
  */
 function markPanelSlot(element: HTMLElement, panelId: string, instanceId: string): void {
     element.setAttribute("data-panel-id", panelId);
-    element.setAttribute("data-panel-instance", instanceId);
+    // Through the constant the READER uses (`viewportRegions`), not a second spelling of the same
+    // string: a rename that reached only one of the two would silently stop every viewport
+    // publishing, which is precisely the drift `VIEWPORT_SURFACE_ATTRIBUTE` below is keyed once for.
+    element.setAttribute(PANEL_INSTANCE_ATTRIBUTE, instanceId);
+    // editor-UX e3: a THIRD attribute, and only for a native-surface panel. It is what `app.css`
+    // makes transparent (the hole the Shell's composited viewport shows through) and what
+    // `viewportRegions` measures. Stamped HERE, in the one function every renderer's slot goes
+    // through, so a new renderer cannot mount a viewport without it — the failure mode being a
+    // panel the Shell draws a layer for and the browser paints opaquely over.
+    if (isNativeSurfacePanelId(panelId)) {
+        element.setAttribute(VIEWPORT_SURFACE_ATTRIBUTE, "");
+    }
 }
 
 /** A panel PanelHost is currently hosting — ONE live copy, keyed in `#panels` by its instance id. */
@@ -889,6 +912,11 @@ export class PanelHost {
      */
     readonly #revisions = new Map<string, number>();
     #api: DockviewApi | null = null;
+    // editor-UX e3: the layout subscription that keeps the native-surface GROUP marking current.
+    // Owned here rather than by LayoutPersistence (which subscribes the same event) because this one
+    // must NOT be debounced: it decides whether a group paints over a viewport, and a 400 ms window
+    // in which the docking surface is drawn over live scene pixels is a visible flash.
+    #layoutSub: DockviewDisposable | null = null;
     #roster: PanelRoster | null = null;
 
     constructor(options: PanelHostOptions) {
@@ -1162,6 +1190,15 @@ export class PanelHost {
                 mounted += 1;
             }
         }
+        // editor-UX e3: mark the groups whose active panel is a native surface, now and on every
+        // layout change. Subscribed AFTER the mount loop so the first sync sees the whole
+        // arrangement, and undebounced (see `#layoutSub`).
+        // Disposed first: `start()` has no re-entry guard and replaces `#api`, so a second call
+        // would otherwise strand a live subscription on the discarded api that keeps firing forever.
+        this.#layoutSub?.dispose();
+        this.#layoutSub = this.#api.onDidLayoutChange((): void => this.#syncNativeSurfaces());
+        this.#syncNativeSurfaces();
+
         // The FIRST render is driven per panel by `UitreePanelRenderer.init` — Dockview's own
         // lifecycle hook, fired as each `addPanel` above materialises the panel. Mount and
         // first-render therefore stay separate passes (a slow render never delays the arrangement)
@@ -1224,7 +1261,7 @@ export class PanelHost {
             return refusal(admission);
         }
         const instanceId = this.#reserveInstanceId(manifest.id, requestedInstanceId);
-        const previous = this.mounted[this.mounted.length - 1];
+        const previous = this.#referenceFor(manifest.dock.zone);
         this.#api.addPanel({
             // THE DOCKVIEW PANEL ID IS THE INSTANCE ID (c3). Dockview keys its whole arrangement —
             // and the blob `captureLayout` persists — on this, so two copies of one kind need two
@@ -1233,8 +1270,10 @@ export class PanelHost {
             component: componentFor(manifest),
             title: manifest.title,
             ...rendererFor(manifest),
-            // Placement follows the manifest's declared zone. `referencePanel` is only set once
-            // something is already mounted — Dockview has nothing to place relative to otherwise.
+            // Placement follows the manifest's declared zone — for the DIRECTION and, since e3, for
+            // the REFERENCE too (`#referenceFor`, which is where the reason lives). `referencePanel`
+            // is only set once something is already mounted — Dockview has nothing to place relative
+            // to otherwise.
             ...(previous === undefined
                 ? {}
                 : {
@@ -1247,6 +1286,47 @@ export class PanelHost {
         return this.#panels.has(instanceId)
             ? { outcome: "opened", instanceId, diagnostic: "" }
             : refusal(`the docking root did not create '${instanceId}'`);
+    }
+
+    /**
+     * The panel a new mount is placed RELATIVE TO — the last live copy that declares the SAME zone,
+     * falling back to the last one mounted when this zone has no occupant yet (editor-UX e3).
+     *
+     * ⚠ THE ZONE MATCH IS THE WHOLE POINT, and it is load-bearing for exactly one direction:
+     * `center`. `ZONE_DIRECTION` maps every other zone to a SPLIT (`left`/`right`/`above`/`below`),
+     * and a split makes a NEW group beside the reference — so which panel it splits from moves an
+     * edge, never a membership, and a plain "whatever was mounted last" reference is harmless there.
+     * `center` alone maps to `"within"`, which means JOIN THE REFERENCE PANEL'S GROUP as a tab. With
+     * an unqualified reference, a `center` panel therefore tabs itself onto whatever happened to be
+     * mounted immediately before it, wherever that panel lives — and Dockview's default
+     * `onlyWhenVisible` renderer DETACHES the group's now-inactive panel from the DOM (dockview.ts
+     * § the renderer contract). The displaced panel is still mounted, still listed, still driveable
+     * over the bridge, and simply NOT IN THE DOCUMENT.
+     *
+     * That is not hypothetical: hosting `builtin.viewport` (center) put it directly after
+     * `builtin.inspector` (right) in roster order, so the Scene view tabbed itself over the
+     * Inspector and took the Inspector's DOM subtree with it — `editor-cef-smoke-shell-inspector-
+     * fanout` timed out on all three OS legs because its `querySelector` for an Inspector widget
+     * returned null. Keying on the zone docks the viewport `within` the `center` `placeholder`
+     * group, which is where a scene view belongs anyway.
+     */
+    #referenceFor(zone: string): string | undefined {
+        const mounted = this.mounted;
+        for (let index = mounted.length - 1; index >= 0; index -= 1) {
+            const candidate = mounted[index];
+            if (
+                candidate !== undefined &&
+                this.manifestForInstance(candidate)?.dock.zone === zone
+            ) {
+                return candidate;
+            }
+        }
+        // NO OCCUPANT YET — fall back to the previous behaviour rather than to nothing. A `center`
+        // panel opening into an empty zone still wants to be placed relative to the arrangement
+        // (Dockview would otherwise drop it into the root group), and every other zone splits, which
+        // is unaffected by the choice. Returns undefined only when NOTHING is mounted, which is the
+        // first panel and has nothing to be relative to.
+        return mounted[mounted.length - 1];
     }
 
     /**
@@ -1566,8 +1646,23 @@ export class PanelHost {
         }
     }
 
+    /**
+     * Re-mark the Dockview groups whose ACTIVE panel is a native surface (editor-UX e3).
+     *
+     * Kept as a one-line forwarder to `viewport.ts` so the rule itself lives beside the attribute it
+     * stamps and the stylesheet that reads it, rather than being split across two modules.
+     */
+    #syncNativeSurfaces(): void {
+        if (this.#api === null) {
+            return;
+        }
+        syncNativeSurfaceGroups(this.#api.panels, (instanceId) => this.panelIdOf(instanceId));
+    }
+
     /** Dispose every panel and the docking root. Idempotent. */
     dispose(): void {
+        this.#layoutSub?.dispose();
+        this.#layoutSub = null;
         for (const panel of this.#panels.values()) {
             panel.renderer.dispose();
         }
@@ -1789,6 +1884,10 @@ export function admits(manifest: PanelManifest, live: number): string {
  * switch for the same reason: this is the content type picking behaviour, so a new content type must
  * confront the choice rather than inherit it.
  *
+ * ⚠ A NATIVE-SURFACE PANEL MUST NEVER BE DETACHED (editor-UX e3) — see the guard's own comment and
+ * viewport.ts. Checked FIRST, because such a panel is a `uitree` one and would otherwise inherit the
+ * default below.
+ *
  * ⚠ AN IFRAME PANEL MUST NEVER BE DETACHED (M9 e13b-1). Dockview's default `onlyWhenVisible` removes
  * an inactive panel's element from the DOM; for a frame that discards its browsing context and
  * re-navigates `src` on return, which (a) throws away the third-party document's state — the promise
@@ -1802,6 +1901,13 @@ export function admits(manifest: PanelManifest, live: number): string {
  * `exactOptionalPropertyTypes` forbids passing an explicit `undefined` for an optional field.
  */
 function rendererFor(manifest: PanelManifest): { renderer?: "always" } {
+    // editor-UX e3, BEFORE the content-type switch and deliberately so: a viewport is a `uitree`
+    // panel, and `uitree` is precisely the branch that takes Dockview's default. Detaching it would
+    // break the hole AND the rect at once (viewport.ts § THE HOLE PINS THE RENDERER), so the
+    // question "is this content a native surface?" outranks "what content type is it?".
+    if (isNativeSurfacePanel(manifest)) {
+        return { renderer: "always" };
+    }
     switch (manifest.contentType) {
         case "iframe":
             return { renderer: "always" };

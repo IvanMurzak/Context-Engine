@@ -58,6 +58,8 @@ import {
     REGION_KIND_CAPTION_CLOSE,
     REGION_KIND_CAPTION_MAX,
     REGION_KIND_CAPTION_MIN,
+    defaultDevicePixelRatio,
+    physicalRegion,
     type RegionProvider,
     type ShellRegion,
 } from "./editorstate.js";
@@ -284,37 +286,10 @@ function el(doc: Document, tag: string, className: string, text = ""): HTMLEleme
     return node;
 }
 
-/** The live devicePixelRatio, 1 when there is no window to ask (a documentless host). */
-function defaultDevicePixelRatio(): number {
-    if (typeof window === "undefined") {
-        return 1;
-    }
-    const ratio = window.devicePixelRatio;
-    return typeof ratio === "number" && Number.isFinite(ratio) && ratio > 0 ? ratio : 1;
-}
-
-/** One measured region in PHYSICAL px, or `null` for an element that is not laid out. */
-function physicalRegion(
-    element: HTMLElement,
-    id: string,
-    kind: ShellRegion["kind"],
-    dpr: number,
-): ShellRegion | null {
-    const rect = element.getBoundingClientRect();
-    // Round the EDGES and derive the extents, never left+width independently: with fractional CSS
-    // coordinates (text-sized buttons, fractional ratios) `round(left·dpr) + round(width·dpr)` can
-    // land a physical pixel away from `round(right·dpr)` — a region overhanging the window edge or
-    // biting a pixel out of its neighbour in the Shell's hit-test, for an element whose true edge
-    // never moved.
-    const x0 = Math.round(rect.left * dpr);
-    const y0 = Math.round(rect.top * dpr);
-    const width = Math.round(rect.right * dpr) - x0;
-    const height = Math.round(rect.bottom * dpr) - y0;
-    if (width <= 0 || height <= 0) {
-        return null;
-    }
-    return { id, kind, rect: { x: x0, y: y0, width, height } };
-}
+// THE MEASUREMENT MOVED (editor-UX e3). `defaultDevicePixelRatio` + `physicalRegion` were private to
+// this module through editor-UX e2; e3's viewport rects are the SECOND caller of the same arithmetic,
+// so both now live beside `ShellRegion` in editorstate.js and are imported above. Copying them here
+// would be the a2 bug re-introduced one module over — two roundings, invisible at scale 1.0.
 
 /**
  * Render the titlebar's content and gate the strips on the chrome mode (02 §2).
@@ -697,6 +672,20 @@ export class ChromeRegionPublisher {
 
 export interface StartChromeStripsOptions extends MountChromeOptions {
     readonly publishRegions: (regions: readonly ShellRegion[]) => Promise<boolean>;
+    /**
+     * Regions from OUTSIDE the titlebar that must ride the SAME publish (editor-UX e3 — the Scene
+     * viewports' dock rects, viewport.ts's `viewportRegions`).
+     *
+     * They join the ONE provider rather than opening a second channel, because that provider is what
+     * both publish triggers read: LayoutPersistence's layout-change path and ChromeRegionPublisher's
+     * resize/DPI path. A viewport wired into only one of them would have its rect go stale on
+     * exactly the other trigger — and a stale viewport rect is a native layer composited where the
+     * panel no longer is.
+     *
+     * Called on every publish, so it always measures live geometry; it must be cheap and must never
+     * throw.
+     */
+    readonly extraRegions?: RegionProvider;
     readonly debounceMs?: number;
     readonly resizeTarget?: ResizeTargetLike;
     readonly matchMedia?: (query: string) => MediaQueryListLike | null;
@@ -720,8 +709,22 @@ export async function startChromeStrips(
     options: StartChromeStripsOptions,
 ): Promise<ChromeStrips> {
     const mount = mountChrome(elements, options);
-    // `mount.regions` is a `this`-free closure already — it IS the provider, no wrapper needed.
-    const provider: RegionProvider = mount.regions;
+    // `mount.regions` is a `this`-free closure already — it IS the provider when nothing else
+    // contributes.
+    //
+    // editor-UX e3: the Scene viewports contribute too, and they join HERE rather than through a
+    // second publish channel — the ONE provider is what keeps the layout-change path
+    // (LayoutPersistence) and the resize/DPI path (ChromeRegionPublisher) publishing the same set,
+    // and a viewport wired into only one of them would have its rect go stale on exactly the other
+    // trigger. VIEWPORTS FIRST, chrome LAST: the Shell hit-tests back-to-front, last match wins
+    // (input.h), so a caption control must be able to win over dock content beneath it.
+    // Captured once: inside the ternary's second arm `extraRegions` is known to be defined, so the
+    // optional call and its `?? []` fallback there were unreachable by construction.
+    const extraRegions = options.extraRegions;
+    const provider: RegionProvider =
+        extraRegions === undefined
+            ? mount.regions
+            : (): readonly ShellRegion[] => [...extraRegions(), ...mount.regions()];
     const doc = elements.titlebar.ownerDocument;
     // Everything but the two counters is fixed at mount (the cluster never gains or loses buttons
     // afterwards), so the prefix is computed ONCE instead of re-queried on every republish. The

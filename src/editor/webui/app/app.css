@@ -908,6 +908,55 @@ html .dockview-theme-dark .dv-tab:hover {
     line-height: var(--ctx-typography-line-height, 1.5);
 }
 
+/* THE TRANSPARENT HOLE (M9 editor-UX e3, D7) — a native-surface panel's slot.
+ *
+ * The Shell composites each Scene viewport's render target BENEATH the CEF layer and lets it show
+ * through wherever the browser's own frame is transparent (compositor.h §4 step 3). This rule IS
+ * that transparency, and it is the whole of editor-core's side of the hole.
+ *
+ * `background: transparent` is not enough on its own and both halves are load-bearing:
+ *
+ *   * the DOCKING GROUP paints its own surface behind the slot (that is why `.ctx-panel-body`
+ *     deliberately sets no background — it INHERITS the group's), so the group's own background is
+ *     re-pointed to transparent for a group whose active panel is a viewport;
+ *   * `padding: 0`, because an 8px inset would put an opaque editor-surface border around a
+ *     viewport whose measured rect covers the WHOLE slot — the native layer would be drawn under a
+ *     frame the browser paints over, one ring of pixels wide.
+ *
+ * The measured rect (viewport.ts) is this element's, so what is transparent and what is composited
+ * are the same rectangle by construction rather than by two numbers agreeing. */
+.ctx-panel-body[data-panel-native-surface] {
+    background: transparent;
+    padding: 0;
+    overflow: hidden;
+}
+
+/* THE OTHER HALF OF THE HOLE (M9 editor-UX e3) — the GROUP behind it.
+ *
+ * Transparency on the slot alone is NOT sufficient, and the reason is a Dockview DOM fact rather
+ * than a cascade one: a `renderer: "always"` panel is mounted in `.dv-render-overlay`, a SIBLING
+ * subtree, positioned over its group. So `.dv-groupview` — which paints `colors.panel` — sits
+ * BEHIND the transparent slot, reachable from it by no selector. Measured paint stack under a
+ * viewport, outermost-last:
+ *
+ *     .ctx-panel-body | .dv-render-overlay | .dv-content-container | .dv-groupview | … | html
+ *
+ * `viewport.ts`'s `syncNativeSurfaceGroups` marks the group whose ACTIVE panel is a native surface
+ * (active, because a background viewport tab is not over the box), and this rule stops the paint.
+ *
+ * ⚠ SCOPED TO THE GROUP'S OWN BOX, not its subtree. The TAB STRIP is a child of `.dv-groupview` and
+ * keeps its own `--dv-tabs-and-actions-container-background-color`, so the strip above a viewport
+ * still reads as chrome. Widening this to a descendant selector would punch a hole through the tabs
+ * as well — and, because the strip sits outside every viewport's measured rect, through pixels the
+ * Shell composites nothing into.
+ *
+ * ⚠ THE `html` PREFIX IS LOAD-BEARING for the same reason the variable block above documents at
+ * length: `dockview.css` is ALSO injected at runtime and would otherwise win at equal specificity. */
+html .dockview-theme-dark .dv-groupview[data-group-native-surface] {
+    --dv-group-view-background-color: transparent;
+    background-color: transparent;
+}
+
 /* A THIRD-PARTY package panel's slot (M9 e13a-2) — the same `.ctx-panel-body` slot, minus the two
  * rules that only make sense for content we lay out ourselves.
  *

@@ -44,6 +44,7 @@ import { bootTests } from "./boot.test.js";
 import { chromeTests } from "./chrome.test.js";
 import { packageEventTests } from "./packageevents.test.js";
 import { packageGrantsTests } from "./packagegrants.test.js";
+import { viewportTests } from "./viewport.test.js";
 
 // AWAITED since M9 e08d: `runTests` is async because the e08d boot cases drive the real, async
 // `bootEditorCore` (see boot.test.ts on why a synchronously-reachable seam would not prove the
@@ -92,6 +93,7 @@ void runTests([
     ...bootTests,
     ...packageEventTests,
     ...packageGrantsTests,
+    ...viewportTests,
 ])
     .then(report)
     // The harness catches per-CASE failures; this catches a failure of the RUN ITSELF (or of

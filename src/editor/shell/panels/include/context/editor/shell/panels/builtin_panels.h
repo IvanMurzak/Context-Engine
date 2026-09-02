@@ -29,6 +29,13 @@
 //                             up front rather than retrofitted.
 //   * `builtin.session.undo`— `context_gui_undo` -> the inspector panel + uitree + serializer. Clean
 //                             since e09c: every one of those was ALREADY on this target's closure.
+//   * `builtin.viewport`    — `context_gui_viewport` -> uitree + gui_compositor + render (editor-UX
+//                             e3, D7). Clean: none of the three is on the D10 FORBIDDEN list, and
+//                             the sibling `context_gui_viewport_edit` — which DOES link
+//                             `context_compose` — is deliberately NOT linked here. THE ONE PANEL
+//                             BOUND THROUGH `provide_factory` (c3's `instances.mode: "unlimited"`):
+//                             several scene views at once is the point, and two copies must hold
+//                             different cameras (viewport_feed.h states why `provide()` is wrong).
 //
 // `builtin.playbar` (hostable e08b..e09) was RETIRED by editor-window-chrome e1 (D2): the d1
 // titlebar strip is the Play Bar's only home. The `SessionFeed` below survives as PURE TRANSPORT —
@@ -74,6 +81,11 @@ struct EditorState;
 // Including `write_notice.h` here would put the mirror store + the window registry on the include
 // path of every TU that hosts a panel — including the `-fno-rtti` CEF smokes — for one signature.
 class WriteNoticeRelay;
+// Forward-declared for the SAME reason (M9 editor-UX e3): `install_builtin_panels` takes the
+// window's viewport producer by pointer, and only builtin_panels.cpp needs the complete type.
+// Including `viewport_binding.h` here would put render/rhi.h + the compositor header on the include
+// path of every TU that hosts a panel — the `-fno-rtti` CEF smokes included — for one parameter.
+class ViewportBinding;
 } // namespace context::editor::shell
 
 namespace context::editor::shell::panels
@@ -105,6 +117,11 @@ class FilesFeed;
 // and reaches the typeid chain through scene_tree_panel.h). Callers holding only the bag drive it
 // through the free seams below.
 class SessionFeed;
+// The M9 editor-UX e3 Scene-viewport feed, forward-declared for the SAME reason (viewport_feed.h
+// names `shell::ViewportBinding`, which reaches render/rhi.h + the compositor header — a chain the
+// `-fno-rtti` CEF smokes should not pay for two signatures). Callers holding only the bag drive it
+// through the free seams below.
+class ViewportFeed;
 // The M9 e09b-2 wire write gateway, forward-declared for the SAME reason (its header names
 // `inspector::OverrideWriteGateway`, so it reaches the panel headers' include chain). Callers holding
 // only the bag re-point its daemon connection through `bind_write_client` below.
@@ -497,6 +514,12 @@ struct BuiltinPanels
     // declaration order (destruction is reverse order) gives by placing it AFTER `session` here.
     std::unique_ptr<FilesFeed> files;
 
+    // The M9 editor-UX e3 Scene-viewport feed. Declaration position is NOT load-bearing here (it
+    // holds no gateway anybody else points at, and points at nothing declared in this bag): it holds
+    // its own per-instance `ViewportPanel` models and a NON-owning pointer to the window's
+    // `ViewportBinding`, which lives in `EditorWindow` and outlives every bag by construction.
+    std::unique_ptr<ViewportFeed> viewport;
+
     // How many providers actually bound. Checked by the caller: a silently dropped binding presents
     // later as a panel that mysteriously reports `hosted: false`.
     std::size_t bound = 0;
@@ -508,7 +531,13 @@ struct BuiltinPanels
 // `hostable_panel_ids().size()`. A partial result is REPORTED rather than fatal: an editor that
 // refused to start because one panel could not bind would be less useful than one that opens with
 // the rest and says so.
-[[nodiscard]] BuiltinPanels install_builtin_panels(PanelHost& host);
+// `viewports` (M9 editor-UX e3) is the WINDOW's viewport producer — `EditorWindow::viewports()` in
+// the live editor, a stack instance in the T1 suite, and `nullptr` for a caller with no window (the
+// headless harnesses, and every existing call site, which is why it is trailing and defaulted). With
+// it the Scene viewport's copies drive real cameras and read a real adapter verdict; without it they
+// still render, keep their cameras locally and push nothing.
+[[nodiscard]] BuiltinPanels install_builtin_panels(PanelHost& host,
+                                                   ViewportBinding* viewports = nullptr);
 
 // Drain the live-hydration work the feeds have marked due — called once per owner-loop frame, AFTER
 // the subscription pump (M9 e05d3, design 05 §7 "hydrate from reads + subscriptions"):
@@ -542,5 +571,29 @@ struct BuiltinPanels
 // direction for the same reason (the feeds mutate the very models the bridge handlers render).
 // Defined in builtin_panels.cpp; safe to call with any subset of the feeds bound.
 void pump_panel_feeds(BuiltinPanels& panels, client::Client& client, const std::string& scene_path);
+
+// Re-point the Scene viewport feed at a window's viewport producer (M9 editor-UX e3).
+//
+// The `bind_write_client` seam's twin, and it exists for the same ordering reason: the bag is built
+// at boot, before any window (and therefore before any `render::IDevice`) exists, so the producer
+// cannot be a constructor argument. Called per frame from the owner loop; safe with no viewport feed
+// bound, and `nullptr` detaches.
+void bind_viewport_producer(BuiltinPanels& panels, ViewportBinding* viewports);
+
+// --- the M9 editor-UX e3 viewport camera round trip (D7) ----------------------------------------
+//
+// The viewport's daemon traffic, kept OUT of `pump_panel_feeds` on purpose: that pump is a pure READ
+// loop (every branch issues a read and adopts the reply), while this one both READS
+// (`editor.cameras-get`, once, then whenever a new copy opens) and WRITES (`editor.camera-set`, per
+// locally-moved camera). Folding a write path into a function documented as "the live-hydration
+// work the feeds have marked due" would make its failure posture — a failed fetch waits for the next
+// settle — silently cover a lost WRITE, which is a different and much worse outcome.
+//
+// FAILURE POSTURE. The read claims its fetch before issuing (the sibling rule). A failed WRITE is
+// reported and the camera is RE-ARMED, because a camera the daemon never received is a camera the
+// human loses on restart — the opposite trade from a read, which can simply be retried later.
+//
+// Returns how many `editor.camera-set` calls were attempted. Safe with no viewport feed bound.
+std::size_t pump_viewport_cameras(BuiltinPanels& panels, client::Client& client);
 
 } // namespace context::editor::shell::panels

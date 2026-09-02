@@ -183,6 +183,28 @@ if(CONTEXT_SANITIZE)
 endif()
 
 # ===================================================================================================
+# The M9 editor-UX e3 VIEWPORT CAMERA T2 (D7) — the Shell's OPAQUE `editor.camera-set` payload
+# through the daemon's `EditorSessionState`, `.editor/session.json`, a RESTART and
+# `editor.cameras-get`, back into a `render::View`.
+#
+# THE ONLY PLACE THE CLAIM CAN BE CHECKED. The two halves sit on opposite sides of the D10 boundary
+# and nothing else links both: the Shell's own suites cannot reach `context_editorkernel` (the
+# boundary gate FATAL_ERRORs at configure time on exactly that), so a Shell-side test can only feed
+# the payload back to itself — which proves the codec self-consistent and says nothing about whether
+# the daemon persists it. This executable links `context_editor_shell` AND `context_editorkernel`,
+# which is exactly why it lives here rather than beside either one.
+#
+# NO daemon process and no `context` binary: what it pins is the STATE plus the FILE, and the RPC
+# surface has its own parity test. So it needs neither CONTEXT_BINARY nor a timeout beyond the
+# default. A plain `editor-session-` ctest, auto-run by the build job's general step on all three OS
+# legs with NO ci.yml `--target` bookkeeping.
+add_executable(context_test_e3_viewport_camera test_e3_viewport_camera.cpp)
+target_link_libraries(context_test_e3_viewport_camera
+    PRIVATE context_editor_shell context_editorkernel context_warnings)
+target_link_options(context_test_e3_viewport_camera PRIVATE ${_m1_exit_static_runtime})
+add_test(NAME editor-session-viewport-camera COMMAND context_test_e3_viewport_camera)
+
+# ===================================================================================================
 # The M9 e09b-2 CONCURRENT-CAS T2 DRILL (design 05 §7-§8, L-20 / L-30 / R-CLI-006) — the parent e09
 # DoD box 2 at the ENGINE level: the REAL Shell panel composition (`install_builtin_panels` ->
 # InspectorFeed + WireOverrideWriteGateway) committing a real gesture over the REAL daemon `edit` RPC

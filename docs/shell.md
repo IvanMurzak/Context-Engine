@@ -436,6 +436,54 @@ and writes RGBA8, while this is the SHIPPING arithmetic over a BGRA8 destination
 straight to the OS — routing through the oracle would mean a swizzle per frame purely to reuse a
 function whose destination format is wrong.
 
+## 4b. The Scene viewport producer (M9 editor-UX e3, D7)
+
+`viewport_binding.h` is the seam that turns the compositor's viewport layer stack — built and unit
+tested since e03, reached by nothing but `test_compositor.cpp` — into a live viewport. It does four
+things and rebuilds none of what already existed:
+
+1. **the target lifecycle** — one `render::ViewportTargetRegistry` entry per live viewport, created
+   on first sight, resized in place, and RELEASED when the panel closes so a closed viewport gives
+   its GPU memory back;
+2. **the pass** — `render::render_viewport_view` (e11b's D5 pass: the ground grid plus a box proxy
+   per renderable) into that target, with `draw_grid` off for a `ViewType::game` view;
+3. **the layer** — `WindowCompositor::publish_viewports`, `content_rect` byte-identical to the rect
+   editor-core reported;
+4. **the camera** — the OPAQUE `editor.camera-set` / `editor.cameras-get` payload, whose meaning is
+   defined here and nowhere else (the daemon is its custodian, not its interpreter).
+
+**Three ids name a viewport and none may be derived from another** — the shell REGION id (a string,
+editor-core's panel instance id, e.g. `builtin.viewport#2`), the RENDER slot (a `std::uint32_t`,
+session-local, `render::View::viewport_id`), and the DAEMON `viewportId` the camera is persisted
+under. (1) and (3) are deliberately the SAME string: the human's camera belongs to the panel copy
+they arranged, so a restart that restores `builtin.viewport#2` restores the camera they left in it.
+
+**Damage is split.** A moved / added / removed rect republishes the stack (`layout` damage). The SAME
+stack redrawn marks `mark_viewport_content()` instead — the seam `compositor.h` reserved for "a
+viewport's CONTENT changed without its rect changing" and that nothing had reached until now.
+Republishing it under `layout` would file the redraw under the wrong reason, which is the one thing
+the damage flags exist to prevent.
+
+**There is no `DpiScale` in this file, and that is the point (a2).** Region rects arrive ALREADY
+PHYSICAL — editor-core measures them through the single `devicePixelRatio` seam a2 established
+(`editorstate.ts`'s `physicalRegion`, shared by the titlebar and `viewport.ts`) — and the layer rect,
+the compositor surface and the OS pointer stream are physical too. Re-applying a scale here is the
+popup bug a2 fixed, one module over; `editor-shell-test_viewport_binding` pins it by publishing the
+same DIP rect converted at 96 and at 144 dpi with the compositor's own scale set to 144.
+
+**Scene data, honestly.** The producer takes the `RenderSnapshot` to draw and the live editor passes
+an EMPTY one: there is still no daemon scene-data read (the e11c verb was never built), so every
+viewport renders the grid and nothing else. The pass, the targets, the layers, the rects and the
+cameras are all real; the day a scene read lands it changes one argument at one call site.
+
+**The transparent hole is NOT yet end to end, and the remainder is named in § 11.**
+
+`builtin.viewport` is also the tree's ONE `provide_factory` binding (c3's `instances.mode:
+"unlimited"`): each live copy gets its own `ViewportPanel` model and its own camera, because two
+scene views sharing one model would render one camera twice. `panels/viewport_feed.h` owns that, and
+the keyboard-reachable `viewport.frame-scene` command is what MOVES a camera today — the Shell's
+`InputTarget::viewport` pointer arm is still empty (orbit/pan/zoom is later work).
+
 ## 5. The browser (03 §1, §3)
 
 `IBrowserHost` is the CEF-free seam; `cef/` implements it over a real browser. The frame vocabulary is
@@ -670,7 +718,10 @@ runtime; `editor-shell-test_panel_host` asserts that over synthetic panels the h
 | `editor-shell-test_panel_host` | The panel-agnostic surface over SYNTHETIC panels: roster projection (hosted vs listed-but-unhosted), render payload, command dispatch + the stale-command refusal, the four gesture verbs and the refusal of a fifth, the D6 round-trip and all three degrade paths, every `panel.*` binding, and hostile params on every method |
 | `editor-shell-test_editor_state_bridge` | e05d2: the layout/panels publish→store→get round-trip (incl. a restart), all three persistence triggers (debounce, `flush_now`, crash-restore), region parsing (kind tokens, negative-pixel clamp, malformed-element skip) reaching a live `InputArbiter` and routing a pointer, the empty-publish clear, the `not_ready`/`bad_params` degrade paths, and the full `editor.*` JSON-RPC binding over a real router |
 | `editor-shell-test_problems_feed` | The LIVE `diagnostics` projection without a daemon: severity/stability tokens, all three snapshot shapes, every publisher shape the topic carries, hostile/degenerate payloads, R-BRIDGE-008 promotion + settle, and the node-id -> diagnostic-identity mapping |
-| `editor-shell-test_builtin_panels` | The composition root: that all five hostable panels bind and nothing else does (the e1-retired playbar stays unhosted and off the roster), the Scene tree's selection reaching the Inspector's fetch, a daemon event reaching a rendered panel end to end, and (e09c) that the undo replay left its mark on the bag's OWN wire-gateway instance, that the pump turns a landed replay into an Inspector re-read, and the two undo persistence seams against a real editor-state file |
+| `editor-shell-test_builtin_panels` | The composition root: that all SEVEN hostable panels bind and nothing else does (six through `provide`, and — since editor-UX e3 — `builtin.viewport` through `provide_factory`) (the e1-retired playbar stays unhosted and off the roster), the Scene tree's selection reaching the Inspector's fetch, a daemon event reaching a rendered panel end to end, and (e09c) that the undo replay left its mark on the bag's OWN wire-gateway instance, that the pump turns a landed replay into an Inspector re-read, and the two undo persistence seams against a real editor-state file |
+| `editor-shell-test_viewport_binding` | editor-UX e3: the Scene viewport PRODUCER against `rendertest::FakeDevice` — the layer stack matching the published rects byte for byte, the target lifecycle across appear/resize/close (a closed viewport's target RELEASED, not merely undrawn), the damage split (a moved rect is `layout`, a redraw of the same rect is the first-ever `mark_viewport_content()`), TWO copies with distinct targets and independent cameras, a degenerate rect DROPPED, the adapter-absent degrade and its recovery with the camera intact, the opaque camera codec's round trip and its member-wise tolerance, and — the set's scale-≠-1 gate — the same DIP rect published at 96 and at 144 dpi with the compositor's own a2 scale set to 144, so a producer that re-applied it (the a2 double-application) fails a case the 1.0 ones cannot see |
+| `editor-shell-test_viewport_feed` | editor-UX e3 / c3: the tree's ONE `provide_factory` binding — the bind-time probe materialising NO model, two copies with two models and two cameras (framing one leaves the other's generation and camera untouched), the `viewport.frame-scene` → `editor.camera-set` → `editor.cameras-get` round trip through the OPAQUE payload, a failed write RE-ARMED without changing what it retries, a new copy re-arming the hydration read, `persists: false` (the camera lives where cameras live), and the `viewport.adapter_absent` summary WITH its negative half |
+| `editor-session-viewport-camera` | editor-UX e3 (T2): the camera round trip across the D10 boundary — the Shell's opaque payload → `EditorSessionState` → `.editor/session.json` → RESTART → `cameras_json` → back into a `render::View`, two copies keyed by INSTANCE id and proved NOT collapsed into one; a blob carrying members no build reads surviving untouched (the opacity claim, from the daemon's side); and a fresh project adopting NOTHING rather than fabricating a default. The only place both halves can be linked at all |
 | `editor-shell-test_undo_feed` | e09c: the session undo host — a checkpoint recorded and replayed through the BOUND gateway, a co-writer's field DROPPED loudly on undo AND redo (R-HUX-001), a refused replay KEEPING the step while dirtying and touching nothing, the read-your-replays flag raised once then consumed, the provider's honest `dispatched` verdict, and the DoD line: the journal round-trips through a REAL `EditorStateStore` writing a REAL `.editor/editor-state.json`, survives a full teardown/rebuild, and Ctrl+Z still reverts the pre-restart edit |
 | `editor-shell-test_user_config` | e06d: the per-user config store - the total reader (absent / malformed / non-object / oversized), the merge-preserving read-modify-write (a member from a FUTURE build survives), the recents-and-theme co-existence regression, the CLOSED settable vocabulary (`config.unknown_key` / `config.bad_value` / `config.write_failed`), unique staging names, the generation watch (identical rewrite and cosmetic reformat are NOT changes), and the full `config.*` binding over a real router |
 | `editor-shell-config-writers` | e06d: the C-F14 SINGLE-WRITER source gate - exactly one TU writes `~/.context/config.json`, editor-core carries no client-side persistence API, and one module names `config.set` (`tools/check_config_writers.py`) |
@@ -1420,6 +1471,26 @@ context menu for every member below.
 ## 11. What this does NOT yet do
 
 Named so the gaps are visible rather than assumed:
+
+- **The Scene viewport's transparent hole is not end to end (editor-UX e3).** The layer IS composited
+  beneath the CEF layer, the rect IS published, and editor-core stops painting the two surfaces that
+  are the viewport's own — the panel slot (`.ctx-panel-body[data-panel-native-surface]`) and the
+  Dockview GROUP behind it (which is not an ancestor of the slot: an `always`-rendered panel lives in
+  `.dv-render-overlay`, a sibling subtree, so the group paints BEHIND the hole and no selector
+  reaches it from the slot — `viewport.ts` records the measured stack). What still paints over it is
+  everything GLOBAL beneath those two: `.dv-grid-view`'s `--dv-background-color`, `html, body`'s
+  canvas paint, and — the one that makes the rest moot — `CefBrowserSettings.background_color`, which
+  is unset, so the browser composites onto an OPAQUE base and no alpha could reach the OSR buffer
+  whatever the DOM says. Each is a one-line change; all three move the composited pixels that every
+  `editor-cef-smoke` coverage floor is calibrated against (`cef_shell_smoke.cpp` § `kAppBackground*`),
+  which is a CI-only surface and why e3 stopped at the viewport-specific two rather than at a green
+  local gate. Until they land the viewport renders the docking surface, not the scene.
+- **No camera GESTURES.** `EditorWindow::handle_event`'s `case InputTarget::viewport:` is still a bare
+  `break;`. e3 landed the producer and the camera TRANSPORT (`editor.camera-set` hydrated from
+  `editor.cameras-get`, persisted where cameras persist), and the one thing that moves a camera is the
+  panel's keyboard-reachable `viewport.frame-scene` command, which arrives over `panel.invoke`.
+  Orbit / pan / zoom and picking are later work; a half-written gesture in that arm would be a second,
+  untested camera writer beside the one the feed already owns.
 
 - **HTML5 drag-and-drop does not CROSS the application boundary (b1, D11).** Inside the editor's own
   document it works end to end — a Dockview tab lifts, splits, and re-docks (§ 16's drag rows). What

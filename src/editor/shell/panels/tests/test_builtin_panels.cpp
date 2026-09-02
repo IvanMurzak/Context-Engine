@@ -163,11 +163,13 @@ void binds_every_hostable_panel_and_nothing_else()
         CHECK(host.hosts(id));
     }
 
-    // SIX panels, from five different libraries (uitree / problems / the e05d3 pair / the M9 e1
-    // Files panel / the e09c session journal) — the panel-agnosticism claim exercised across every
-    // hosted shape. (AMENDED by editor-window-chrome e1: the docked `builtin.playbar` retired,
-    // 6 -> 5; AMENDED again by editor-UX e1: the Files panel joined hostable from day one, 5 -> 6.)
-    CHECK(panels::hostable_panel_ids().size() == 6);
+    // SEVEN panels, from six different libraries (uitree / problems / the e05d3 pair / the M9 e1
+    // Files panel / the e09c session journal / the editor-UX e3 Scene viewport) — the
+    // panel-agnosticism claim exercised across every hosted shape. (AMENDED by
+    // editor-window-chrome e1: the docked `builtin.playbar` retired, 6 -> 5; AMENDED again by
+    // editor-UX e1: the Files panel joined hostable from day one, 5 -> 6; AMENDED again by
+    // editor-UX e3: the Scene viewport, hostable at last, 6 -> 7.)
+    CHECK(panels::hostable_panel_ids().size() == 7);
     CHECK(host.hosts("placeholder"));
     CHECK(host.hosts(context::editor::gui::panels::problems::ProblemsPanel::kContributionId));
     CHECK(host.hosts("builtin.scene-tree"));
@@ -177,6 +179,9 @@ void binds_every_hostable_panel_and_nothing_else()
     // to_json/load_json had no caller. Hosting it is what gives `session.undo` / `session.redo` a
     // reachable path (R-CLI-001).
     CHECK(host.hosts("builtin.session.undo"));
+    // editor-UX e3: rostered since M5-F1 and UNHOSTED until now — "there is no window showing the
+    // scene" was literally true because nothing bound a provider for it.
+    CHECK(host.hosts("builtin.viewport"));
 
     // THE e1 RETIREMENT, pinned (D2 — the strip is the Play Bar's only home): the docked playbar is
     // not hosted and not even ON the roster any more — so the hydration runtime cannot reach it
@@ -189,7 +194,8 @@ void binds_every_hostable_panel_and_nothing_else()
     CHECK(bound.problems != nullptr);
     CHECK(bound.scenetree != nullptr);
     CHECK(bound.inspector != nullptr);
-    CHECK(bound.files != nullptr); // M9 e1
+    CHECK(bound.files != nullptr);    // M9 e1
+    CHECK(bound.viewport != nullptr); // editor-UX e3
     CHECK(bound.session != nullptr);
     // e09b-2: the Inspector's wire write gateway came back too — it is what the panel's raw gateway
     // pointer points at, so a bag missing it would leave the panel pointing at freed memory.

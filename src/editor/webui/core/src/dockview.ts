@@ -111,6 +111,25 @@ export interface DockviewPanelHandle {
      * open names.
      */
     readonly api?: { setActive(): void };
+    /**
+     * The GROUP this panel is docked in (editor-UX e3). Two members, for one reason each, and the
+     * pair is the minimum the transparent viewport hole needs:
+     *
+     *   * `element` — the group's own box, which paints the docking surface
+     *     (`--dv-group-view-background-color`). A viewport's slot is NOT a descendant of it: an
+     *     `always`-rendered panel is mounted in `.dv-render-overlay`, a SIBLING subtree, so the group
+     *     is BEHIND the hole rather than around it and no `:has()` selector can reach it from the
+     *     slot. Marking the element is the only way the stylesheet can know to stop painting there.
+     *   * `activePanel` — WHICH copy the group is currently showing, because only that one is over
+     *     the group's box. A group whose viewport tab is in the background must keep its surface.
+     *
+     * OPTIONAL for the same reason `api` is: a T1 harness may hand back a bare `{id}` handle, and
+     * the caller degrades to "no group marking" rather than throwing.
+     */
+    readonly group?: {
+        readonly element?: HTMLElement;
+        readonly activePanel?: { readonly id: string } | undefined;
+    };
 }
 
 /** A Dockview event registration; calling `dispose` detaches the listener. */

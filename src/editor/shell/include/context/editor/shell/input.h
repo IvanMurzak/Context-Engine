@@ -86,9 +86,10 @@ public:
 private:
     std::vector<ShellRegion> regions_;
     // Bumped on every publish, so a layout change is detectable by comparing one integer rather
-    // than diffing rect vectors every frame. NOTE: nothing consumes it yet — the compositor damages
-    // itself directly from publish_viewports() today. This is the seam e11's viewport-content
-    // damage path is expected to read; until then its only readers are the RegionMap tests.
+    // than diffing rect vectors every frame. Its first real consumer is the owner loop's viewport
+    // publish gate (editor-UX e3, shell.cpp): one integer compare per pump decides whether the
+    // viewport layer stack is rebuilt. A viewport whose CONTENT moved without its rect moving is
+    // deliberately NOT covered by it — that is `mark_viewport_content()`'s job.
     std::uint64_t generation_ = 0;
 };
 

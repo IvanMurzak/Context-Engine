@@ -25,6 +25,7 @@
 #include "context/editor/shell/compositor.h"
 #include "context/editor/shell/editor_state.h"
 #include "context/editor/shell/input.h"
+#include "context/editor/shell/viewport_binding.h"
 #include "context/editor/shell/window.h"
 #include "context/editor/shell/window_registry.h"
 
@@ -111,6 +112,17 @@ public:
     [[nodiscard]] IBrowserHost& browser() { return *browser_; }
     [[nodiscard]] WindowCompositor& compositor() { return compositor_; }
     [[nodiscard]] InputArbiter& input() { return input_; }
+    // The Scene viewport producer (editor-UX e3, D7). Exposed so the composition root can hydrate its
+    // cameras from `editor.cameras-get` and push local moves back through `editor.camera-set`, and so
+    // the panel feed can read `adapter_available()` for the degraded summary — all of which are the
+    // APP's wiring, not the window's, exactly like the panel host itself.
+    [[nodiscard]] ViewportBinding& viewports() { return viewports_; }
+    [[nodiscard]] const ViewportBinding& viewports() const { return viewports_; }
+    // The scene the viewports draw. EMPTY until a daemon scene-data read exists (viewport_binding.h
+    // § SCENE DATA, HONESTLY): every viewport renders the D5 grid and nothing else today, which is
+    // the honest state rather than a stub. Handed out by reference so the day that read lands, the
+    // feed fills THIS snapshot and the producer needs no new argument.
+    [[nodiscard]] render::RenderSnapshot& viewport_scene() { return viewport_scene_; }
     [[nodiscard]] std::size_t state_index() const { return config_.state_index; }
     [[nodiscard]] bool alive() const { return alive_; }
     // Whether the OS last reported this window focused (a1: `chrome.state.focused`). False until the
@@ -231,6 +243,11 @@ private:
     InputArbiter input_;
     std::unique_ptr<render::IDevice> device_;
     std::unique_ptr<render::ISurface> surface_;
+    // e3: DECLARED AFTER `device_` ON PURPOSE. Members destroy in reverse declaration order, and the
+    // binding owns per-viewport textures created ON that device — so it must be torn down while the
+    // device is still alive. (The same ordering argument `drag_` above makes about the browser.)
+    ViewportBinding viewports_;
+    render::RenderSnapshot viewport_scene_;
     WindowPlacement last_placement_;
     // Reused across pumps rather than constructed per frame: this is drained every loop iteration,
     // so a local would malloc/free once per frame with input. The Win32 backend keeps its own
@@ -240,6 +257,10 @@ private:
     // push). Starts at 0 — the map's own pre-first-publish generation — so an empty map is never
     // pushed at boot, and the first real publish is.
     std::uint64_t chrome_regions_pushed_generation_ = 0;
+    // e3: the RegionMap generation the viewport layer stack was last built from — the seam input.h
+    // reserved ("this is the seam e11's viewport-content damage path is expected to read") and that
+    // nothing consumed until now. One integer compare per pump, mirroring the chrome push above.
+    std::uint64_t viewport_regions_generation_ = 0;
     std::uint64_t last_placement_poll_us_ = 0;
     std::string diagnostic_;
     bool placement_dirty_ = false;
