@@ -776,6 +776,35 @@ else()
     target_link_libraries(context_editor PRIVATE context_warnings)
 endif()
 
+# --- the wgpu runtime DLL, staged beside the editor on Windows -------------------------------------
+# Windows has no RPATH and resolves DLLs at LOAD time, so a GPU-enabled context_editor that does not
+# find wgpu_native.dll next to itself exits with STATUS_DLL_NOT_FOUND (0xC0000135) BEFORE main: no
+# window, no message, no log line, exit code only. Measured 2026-09-02 — and it went unnoticed
+# because the GPU path was opt-in AND there is deliberately no Windows GPU leg in CI, so no
+# wgpu-linked Windows binary had ever been launched anywhere.
+#
+# A per-target POST_BUILD is right HERE, unlike CEF's shared payload: this stages ONE small file for
+# ONE consumer, so it cannot race the sibling copies that forced CEF onto a single stage target
+# (issue #360). If a second Windows consumer of context_render_wgpu ever appears, move this to a
+# shared stage target rather than copying the pattern.
+if(WIN32 AND CONTEXT_BUILD_RENDER_WGPU)
+    # FAIL CLOSED at configure time. If the render tree stops publishing this path (renamed variable,
+    # restructured fetch), silently skipping the copy would hand back exactly the invisible
+    # no-window startup failure this block exists to prevent.
+    if(NOT CONTEXT_WGPU_RUNTIME_DLL OR NOT EXISTS "${CONTEXT_WGPU_RUNTIME_DLL}")
+        message(FATAL_ERROR
+            "wgpu staging: CONTEXT_BUILD_RENDER_WGPU is ON but CONTEXT_WGPU_RUNTIME_DLL "
+            "(\"${CONTEXT_WGPU_RUNTIME_DLL}\") does not name an existing file. context_editor would "
+            "link wgpu_native.dll and then fail to START with 0xC0000135 and no diagnostic. Fix the "
+            "publisher in src/render/CMakeLists.txt rather than removing this check.")
+    endif()
+    add_custom_command(TARGET context_editor POST_BUILD
+        COMMAND ${CMAKE_COMMAND} -E copy_if_different
+                "${CONTEXT_WGPU_RUNTIME_DLL}" "$<TARGET_FILE_DIR:context_editor>"
+        COMMENT "Staging wgpu_native.dll beside context_editor (Windows has no RPATH)"
+        VERBATIM)
+endif()
+
 # --- THE ONE ROSTER of CEF-hosting executables in this tree, read by BOTH configure-time audits -----
 # ⚠ KEEP THIS COMPLETE. Both audits below iterate THE LIST, so a target missing from it is silently
 # UNDER-AUDITED rather than caught — and that has already happened: context_editor_shell_uimirror_smoke

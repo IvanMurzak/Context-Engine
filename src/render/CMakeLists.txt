@@ -203,6 +203,17 @@ prebuilt (${_wgpu_asset}, ~14-17 MB) + verifying SHA256 before use (R-SEC-009)")
 
     if(WIN32)
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/wgpu_native.dll.lib")
+        # Windows resolves DLLs at LOAD time and has no RPATH, so an executable linking the import
+        # lib above does not start unless wgpu_native.dll sits beside it — and it fails as
+        # STATUS_DLL_NOT_FOUND (0xC0000135): the process dies before main, printing NOTHING and
+        # opening no window. Measured on `context_editor` 2026-09-02. The ELF/Mach-O branches below
+        # link the shared library by full path, so CMake writes an RPATH and they need no staging;
+        # this is the one platform that does. Published as a cache variable because the consumers
+        # that must stage it live in sibling directories (src/editor/shell), where a plain variable
+        # set here is not visible.
+        set(CONTEXT_WGPU_RUNTIME_DLL "${_wgpu_pkg}/lib/wgpu_native.dll" CACHE INTERNAL
+            "wgpu-native runtime DLL that every Windows executable linking context_render_wgpu \
+must have staged beside it")
     elseif(APPLE)
         target_link_libraries(context_render_wgpu PUBLIC "${_wgpu_pkg}/lib/libwgpu_native.dylib")
         # The e03 accelerated OSR blit: Metal for the encoder, IOSurface for the producer's frame.
