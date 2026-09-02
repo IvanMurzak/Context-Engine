@@ -1596,7 +1596,6 @@ export class PanelHost {
         }
     }
 
-    /** Dispose every panel and the docking root. Idempotent. */
     /**
      * Re-mark the Dockview groups whose ACTIVE panel is a native surface (editor-UX e3).
      *
@@ -1610,6 +1609,7 @@ export class PanelHost {
         syncNativeSurfaceGroups(this.#api.panels, (instanceId) => this.panelIdOf(instanceId));
     }
 
+    /** Dispose every panel and the docking root. Idempotent. */
     dispose(): void {
         this.#layoutSub?.dispose();
         this.#layoutSub = null;
