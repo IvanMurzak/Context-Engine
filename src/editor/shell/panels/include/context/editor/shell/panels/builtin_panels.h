@@ -527,10 +527,17 @@ struct BuiltinPanels
     // declaration order (destruction is reverse order) gives by placing it AFTER `session` here.
     std::unique_ptr<FilesFeed> files;
 
-    // The M9 editor-UX e3 Scene-viewport feed. Declaration position is NOT load-bearing here (it
-    // holds no gateway anybody else points at, and points at nothing declared in this bag): it holds
-    // its own per-instance `ViewportPanel` models and a NON-owning pointer to the window's
-    // `ViewportBinding`, which lives in `EditorWindow` and outlives every bag by construction.
+    // The M9 editor-UX e3 Scene-viewport feed. It holds a NON-owning pointer to the window's
+    // `ViewportBinding`, which lives in `EditorWindow` and outlives every bag by construction — that
+    // half of its state needs no ordering here.
+    //
+    // ⚠ DECLARATION POSITION IS NOW LOAD-BEARING (M9 editor-UX e4, D8): `install_builtin_panels`
+    // calls `bind_scene_tree(&scenetree->panel())` on this feed, handing it a raw, non-owning
+    // `SceneTreePanel*` into the `scenetree` member declared ABOVE. `viewport` MUST stay declared
+    // AFTER `scenetree` so it is destroyed FIRST (members destroy in reverse declaration order) —
+    // the same "a raw pointer's target must outlive it" rule every other member in this struct is
+    // ordered by. Moving `viewport` earlier would leave a pick mid-teardown dereferencing a
+    // dangling `SceneTreePanel*`.
     std::unique_ptr<ViewportFeed> viewport;
 
     // How many providers actually bound. Checked by the caller: a silently dropped binding presents
