@@ -1,0 +1,55 @@
+src/editor/shell/panels/include/context/editor/shell/panels/viewport_feed.h
+  s_782aa603d2bdb2::t_c1291c6b5a8341 52
+  s_782aa603d2bdb2::t_f3ffb5fd4af0ef 65-75
+src/editor/shell/include/context/editor/shell/viewport_binding.h
+  s_782aa603d2bdb2::t_b8762a3fb8bb5a 115-127
+  s_782aa603d2bdb2::t_304f0270768172 266-269
+  s_782aa603d2bdb2::t_0c859b24dfa438 89-94
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_d34aafa56eaeed 222-225
+  s_782aa603d2bdb2::t_368260a1d59f63 1196-1198
+  s_782aa603d2bdb2::t_b7c663d1fdcb14 67
+src/editor/webui/core/src/viewport.ts
+  s_782aa603d2bdb2::t_db6aeaa1da242d 35
+  s_782aa603d2bdb2::t_6250df89990b2c 203-207,209-211,214-215,217-227
+  s_782aa603d2bdb2::t_d74495d7458996 67-69
+  s_782aa603d2bdb2::t_3fbcb0fb96eb2e 24-30
+  s_782aa603d2bdb2::t_df2e95b7f919ac 135-140,147-149,152-157
+  s_782aa603d2bdb2::t_c4a7d0830b8eab 166,168-171,173-176,178,180-183
+src/editor/shell/src/viewport_binding.cpp
+  s_782aa603d2bdb2::t_e0ab183b4dcf22 5-6,10
+  s_782aa603d2bdb2::t_e6ecd5f8ce9f2d 175-177
+  s_782aa603d2bdb2::t_091e1e6f8ef093 515-518,520,522-526,528-533
+  s_782aa603d2bdb2::t_3895075c4eec51 542-545
+  s_782aa603d2bdb2::t_789a3803f998d3 562,567-571
+  s_782aa603d2bdb2::t_4b8c2eb2a16e29 19-32,35-37,41,47-48,56-58,61-67
+  s_782aa603d2bdb2::t_10ced0f5ea0c0e 237-238,245-257,259-261,263
+  s_782aa603d2bdb2::t_ac2f404b6c0a0b 194
+  s_782aa603d2bdb2::t_289bfebcf7741b 131-134
+  s_782aa603d2bdb2::t_dea52e520c967f 272-284,293
+src/editor/webui/core/src/chrome.ts
+  s_782aa603d2bdb2::t_3f1527fe4a421a 721-723,725,727
+src/editor/webui/core/src/editorstate.ts
+  s_782aa603d2bdb2::t_b504afb2ed3c51 145-163
+src/editor/shell/include/context/editor/shell/input.h
+  s_782aa603d2bdb2::t_d42eb5a0460158 89-92
+src/editor/shell/panels/src/viewport_feed.cpp
+  s_782aa603d2bdb2::t_74f3c8805f22f9 45-51
+  s_782aa603d2bdb2::t_7f216d11fa92e1 13-17,19-21
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "793e82e24b9cd33065da3dd00f84c5da35335bd6",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

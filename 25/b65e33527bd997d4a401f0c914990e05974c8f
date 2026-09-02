@@ -1,0 +1,21 @@
+src/editor/shell/panels/src/viewport_feed.cpp
+  s_782aa603d2bdb2::t_b4a8e3fbbdd0d9 5
+src/editor/shell/src/viewport_binding.cpp
+  s_782aa603d2bdb2::t_b0070f19e178d5 223,226-228,236,239-241
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "25b65e33527bd997d4a401f0c914990e05974c8f",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "claude-opus-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}

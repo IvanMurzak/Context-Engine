@@ -1,0 +1,21 @@
+docs/editor-session-state.md
+  s_782aa603d2bdb2::t_057d349efa75f4 29
+src/editor/webui/core/src/panelhost.ts
+  s_782aa603d2bdb2::t_0572f6bd33d037 1612
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.0",
+  "base_commit_sha": "08ab4d84b95f5a2371c189d38d83acaf34886ce2",
+  "prompts": {},
+  "sessions": {
+    "s_782aa603d2bdb2": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "497a0170-4cef-49b3-a531-69b09435a69f",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
