@@ -64,6 +64,7 @@
 #include "context/editor/shell/window_registry.h"
 
 #include <chrono>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -639,8 +640,22 @@ int main(int argc, char** argv)
         // only the handshake, which PRECEDES the strips in boot.ts — so give the primary's initial
         // publish the same bounded pump the seed got before reading its map.
         pump_until([&] { return primary->input().regions().generation() != 0; });
+        // COUNTED BY KIND, not by total size (editor-UX e3). The claim is about the CHROME channel —
+        // window 0 still holds its own four strip rects and did not take the secondary's publish —
+        // and window 0's dock also publishes a `viewport`-kind rect for its Scene view, which has
+        // nothing to do with that claim and whose count is the dock's business. A bare `size() == 4`
+        // conflated the two, and was satisfied for the whole life of the window by a dock that
+        // published nothing at all.
+        std::size_t primary_chrome_regions = 0;
+        for (const shell::ShellRegion& region : primary->input().regions().regions())
+        {
+            if (region.kind != shell::RegionKind::viewport)
+            {
+                ++primary_chrome_regions;
+            }
+        }
         SMOKE_CHECK(primary->input().regions().find("chrome.caption") != nullptr &&
-                        primary->input().regions().size() == 4,
+                        primary_chrome_regions == 4,
                     "window 0 keeps its own four chrome regions — per-window channels never crossed");
     }
 
