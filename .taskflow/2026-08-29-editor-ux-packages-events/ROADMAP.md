@@ -6,7 +6,7 @@
 else tracks status.
 
 Set: `.taskflow/2026-08-29-editor-ux-packages-events/` · Repo: `Context-Engine` · Base: `main` ·
-**Status: TASKED 2026-08-29** — specs written, ready for `taskflow-execute`.
+**Status: ✅ COMPLETE 2026-09-02** — all 17 tasks merged (PRs #499–#515). Executed by `taskflow-execute` with `--parallel=4 --scope=all`, engine `implement-task`. See the closeout at the bottom for what is DONE versus what this set deliberately leaves open.
 
 Scales in the board: `imp/cx` are importance/complexity 1–10; `model` is the tier from complexity
 (1–4 `fast`, 5–7 `mid`, 8–10 `top`, +1 tier when `security_critical`).
@@ -62,7 +62,7 @@ is a hard dependency"). `a3` and `a4` are renderer-only and block nothing.
 | `e1` files-panel-read (`tasks/e1-files-panel-read.md`) | `c1` `c3` | Context-Engine/main | 7/6 | mid | Merged | [#509](https://github.com/IvanMurzak/Context-Engine/pull/509) `7c47977` | 2026-09-01 |
 | `e2` files-panel-write (`tasks/e2-files-panel-write.md`) | `e1` | Context-Engine/main | 7/8 ⚿ | top | Merged ⚿ owner-approved | [#511](https://github.com/IvanMurzak/Context-Engine/pull/511) `c59e0eb` | 2026-09-02 |
 | `e3` viewport-render-camera (`tasks/e3-viewport-render-camera.md`) | `a2` `c3` | Context-Engine/main | 8/9 | top | Merged | [#514](https://github.com/IvanMurzak/Context-Engine/pull/514) `ac1534a` | 2026-09-02 |
-| `e4` viewport-picking (`tasks/e4-viewport-picking.md`) | `c1` `e3` | Context-Engine/main | 7/6 | mid | In progress | run `01a060b2-7796` | 2026-09-02 |
+| `e4` viewport-picking (`tasks/e4-viewport-picking.md`) | `c1` `e3` | Context-Engine/main | 7/6 | mid | Merged | [#515](https://github.com/IvanMurzak/Context-Engine/pull/515) `5318db2` | 2026-09-02 |
 | `f1` uibus-boundary-denylist (`tasks/f1-uibus-boundary-denylist.md`) | `d2` | Context-Engine/main | 8/7 ⚿ | top | Merged | [#512](https://github.com/IvanMurzak/Context-Engine/pull/512) `a33ceb5` | 2026-09-02 |
 | `f2` verification-tables (`tasks/f2-verification-tables.md`) | `a0` `b1` | Context-Engine/main | 5/5 | mid | Merged | [#513](https://github.com/IvanMurzak/Context-Engine/pull/513) `c14a664` | 2026-09-02 |
 
@@ -122,6 +122,7 @@ Gates specific to this set — each is a way a task could ship green and wrong:
 | 2026-08-29 | D12 added mid-planning after the owner questioned whether the framework itself was the problem. Answer recorded in `README.md`: CEF OSR's contract is adopted at 5 of 17 `CefRenderHandler` members; the defect is an incomplete adoption, not a wrong framework, and every alternative framework costs more or loses the single-window scene compositing already built. `a0` is the task that response earned |
 | 2026-08-29 | Verified during planning that `assetdb` has **no delete operation** and the registry carries only `asset move` / `asset rename` — so `e2`'s delete is a new engine operation, not wiring |
 | 2026-08-29 | **`taskflow-review` complete.** Every `file:line` in the set re-read against the tree; the OSR claims re-derived from the pinned SDK headers; the dockview DnD counts re-measured against the SHA-pinned bundle (12/1/3/5/11/3 — exact, and the artifact's SHA matches `tools/dockview-toolchain.json`). Nine findings confirmed and corrected; one product fork returned to the owner. **P0:** `selection-get`'s reply was specified as a replacement while `08 §4` claimed additivity → owner took the additive form, `D1` **REVISED**. **P1 ×5:** the compositor holds no `DpiScale` (`a2`/`e3` guidance inverted); `inspector_feed` does not consume `selection-changed` (`c1` seam wrong); the write-notice kinds are `drop`/`refusal`/`abandoned`, not `bad`/`wait` (`e2`); an un-migrated v1 session file is silently accepted, not quarantined (`c1`'s stated test was vacuous); `GetRootScreenRect` is DIP on every platform while `GetScreenPoint` splits per platform (`a1`). **P1 dependency:** `b1` now needs `a0` `a1` `a2`. **P2 ×3:** README root-cause arithmetic; `a1`'s test home is `editor-shell-test_dpi` and its sizing understated the placement plumbing; Tilemap Painter's heading is label-only. Execution isolation recorded above |
+| 2026-09-02 | **✅ `e4` merged — THE SET IS COMPLETE. 17/17, PRs #499–#515, every one at 42/42.** `e4` landed as PR #515 (`5318db2`), clean on the first pass: no halts, no retries, no flakes, local gate 478/478 at every step. It took the warning about `e3`'s camera defect seriously and made the choice explicit — `ViewportFeed::pick()` reads **the copy's own live camera**, not the persisted one, with a test named `the_pick_honours_the_copys_own_camera_not_a_fixed_transform`. Its `code-review` caught a real defect: a **singular-matrix guard**, where `inverse()` silently teleports a degenerate item to the origin — a wrong ANSWER rather than a crash, which is the kind that ships. ⚠ **One loss:** `e4`'s improver edits are GONE. The capture was written inside the worktree's own `.feedback/` folder and was reaped with it — the 20th patch that should have been, and a sharper instance of the same finalize-hook gap: even the mitigation fails when it lands inside the thing being destroyed |
 | 2026-09-02 | **`e3` merged after the regression was fixed — PR #514 (`ac1534a`), 42/42 with all THREE `editor-cef-smoke` legs green; `e4` dispatched, the set's last task.** The proof chain is complete: 3/3 legs failed → same-SHA rerun failed 3/3 → zone-aware reference panel applied → 3/3 pass. The fix is `#referenceFor(zone)` (`panelhost.ts:1289-1327`), which walks `mounted` backwards for the last copy declaring the SAME zone and falls back to the old behaviour when that zone has no occupant — moving exactly one panel. **Non-vacuity proved in THREE directions**: fix present (502/502 webui TS), fix reverted (a NAMED failure on the exact assertion), and the rejected `inactive: true` shortcut planted, which produced a **different** failure — proving the second test genuinely rejects the shortcut rather than restating the first. The old `viewport.test.ts:570` control assertion was **kept**, not deleted: removing it would have made the `always`-renderer claim vacuous, the same trap mirrored. New tests run against a **real-roster fixture** carrying a **mounted-set drift detector** that fails loudly if the C++ roster moves. **DoD verified by the scheduler against the diff** — geometry at `DpiScale{144}` beside the 1.0 cases, the `frame-scene`→`camera-set`→`cameras-get` round trip, two copies with independent models and cameras, and `viewport.adapter_absent` WITH its negative half |
 | 2026-09-02 | **`e3` halted CI-red — a REAL regression, proven, not the flake it was reported as.** PR #514 open; `editor-cef-smoke-shell-inspector-fanout` **times out (~420 s) on all THREE OS legs**. The run's manager argued flake from `git diff --stat -- src/editor/shell/cef/` being EMPTY. **That reasoning is invalid and it was worth checking: a test does not have to live in the files you changed to be broken by them.** A same-SHA `gh run rerun --failed` — the decisive control — **failed identically, 3/3 legs**. MECHANISM (static derivation, then confirmed): `e3` flips `builtin.viewport` `hosted:false→true`, ONE BIT at `builtin_panels.cpp:690`. Zone `center` maps to Dockview direction `“within”` (join a group), but `panelhost.ts:1264` picks the reference panel as `this.mounted[length-1]` — **whatever mounted last, with NO regard for zone** — and in roster order the viewport follows the Inspector. So it joins the **Inspector's** group as the active tab, and Dockview's default `onlyWhenVisible` renderer **DETACHES the inactive panel's element from the DOM** (`dockview.ts:88-97`). The smoke's `querySelector` for the Inspector fov widget returns `null`, its injected script silently returns, nothing ever stages — hence a TIMEOUT, not an assertion. **The decisive artifact was already in the saved logs**: the smoke's own `[fanout-probe]` dump of 33 `data-node-id`s is **byte-identical on Windows and macOS**, carrying `viewport.*` and **no `inspector.*` at all** — identical output across two windowing backends is a determinism signature. Fix in flight: make the reference panel **zone-aware**, which moves exactly one panel (the viewport docks into the `placeholder` center group, where a scene view belongs). **That is a real UX bug independent of CI**, so it is worth fixing regardless |
 | 2026-09-02 | **`f2` merged — WAVE F COMPLETE. 14 of 17; only `e3` (running) and `e4` remain.** PR #513 (`c14a664`), **42/42 green**. **Scheduler re-verified the citation reconciliation independently: all 20 `cef_shell.cpp:<line>` references in § 16 land exactly on the declaration or call they name** — the count grew 16→20 as `b1` added the drag rows, and the drift `a1` introduced and `b1` re-introduced is now closed. **Another spec defect caught by an executor preferring the tree over its instructions:** the task input asserted the context-menu live half “rides the Windows/Linux CEF smokes”, which contradicts `docs/shell.md` § 8/§ 10 — **only the Linux smoke opens a real window**; Windows and macOS stay on the offscreen backend. The executor followed the doc. One recovery was needed: the first `simplify` executor **stalled after fanning out to four background helper agents without collecting them** — no record file, no report, no durable change; a fresh executor reviewed the four lenses inline instead. That stall is the exact defect the Tier-1 improver then fixed in `steps/simplify.md` |
@@ -395,5 +396,104 @@ independently by both round-1 runs; refused 4× for being frozen.
   which exits 128 under concurrent runs and contradicts worktree isolation. Best-effort and not in the
   step's Success Criteria, so it can simply be dropped. The scheduler now tells every manager to skip it.
 - There is **no `worktree-finalize` hook**, so every run's self-improver edits die with its slot. Four
-  captures are held at `.agent-scratch/taskflow-scheduler-ce/improver-edits/`; they overlap on the same
-  three files and must be **grafted, not replayed**.
+  captures are held at `software/.agent-scratch/taskflow-scheduler-ce/improver-edits/`; they overlap on
+  the same three files and must be **grafted, not replayed**. Final count: **19 held, 1 lost**.
+
+---
+
+## Closeout (2026-09-02)
+
+**17/17 merged, PRs #499–#515, every one at 42/42 checks.** Two land-halts and one owner gate were
+resolved; nothing was abandoned. Six of the seven owner-reported defects that motivated the set are
+addressed in `main`; the seventh (cross-application drag) is honestly recorded as out of reach without
+an architecture change, in `docs/shell.md` § 11.
+
+### What the runs found that no one asked them to look for
+
+Counted because it is the argument for the review/simplify steps existing at all:
+
+| Found by | Defect |
+|---|---|
+| `a2` review | `GetScreenInfo` reported a device-scaled rect where CEF wants DIP — a **second** cause of the dropdown bug, beside the one `a2` was assigned |
+| `d1` review | Arrow keys in the Window-menu search bubbled to the menubar and **closed the menu, discarding the query** |
+| `e1` review | Unwired `SessionFeed::bind_files` **silently dropped foreign `subject:"file"` selection** across clients |
+| `d2` review | **HIGH** — the `subscribe` reply **bypassed the consent gate** via snapshot + catchup |
+| `e4` review | A singular matrix made `inverse()` **silently teleport a degenerate item to the origin** — a wrong answer, not a crash |
+| `a2` | Eight `docs/shell.md` § 16 citations were two lines short of the call they name |
+| `e2` | Two of its own fixtures **passing for the wrong reason** on a destructive-delete feature |
+| `f1` review | **Disproved its own commit's subject line** and shipped the narrowed, true claim |
+
+### Three specs were wrong, and the runs preferred the tree
+
+Each would have shipped a false claim had the executor complied:
+
+- **`b1`** — the spec prescribed `DoDragDrop` / XDND / `NSDraggingSession`, all three **modal OS loops
+  this Shell forbids entering from `StartDragging`**, and told the run to "port rather than research"
+  from `cefclient` sources **absent from the pinned distribution**.
+- **`a3`** — required five states on all 12 roles with no carve-out, but hover-painting the four
+  structural container roles flickers whole panels, and `kit.test.ts:89` already marked them "layout
+  only, by design".
+- **`f2`** — asserted the context-menu live half "rides the Windows/Linux CEF smokes"; per
+  `docs/shell.md` § 8/§ 10 **only the Linux smoke opens a real window**.
+
+### The one regression this set caused, and caught
+
+`e3` flipped a single `hosted` bit and, through Dockview's zone-blind reference-panel choice, tabbed
+the viewport over the Inspector — whose element Dockview then **detached from the DOM**. Three CI legs
+timed out. It was reported as a flake on the grounds that the diff did not touch the test's files;
+**a same-SHA rerun failed identically 3/3**, and the mechanism was a static derivation that predicted
+the exact 33-id probe dump. **`e3`'s own test asserted the broken behaviour was correct**, because its
+synthetic roster let the author choose the victim. Fixed by `#referenceFor(zone)`; the regression test
+now runs against the REAL roster with a drift detector.
+
+### Delivered but incomplete — do not read these rows as done
+
+- **A camera move never re-renders the viewport** (`e3` D1). The DoD asked for a DATA round trip and
+  got one; the pixels keep the old pose.
+- **Two windows collide on one camera record** (`e3` D2) — the ordinal is per `PanelHost`.
+- **The viewport's transparent hole is not end-to-end** — three global layers paint over it and
+  `CefBrowserSettings.background_color` is unset (`cef_shell.cpp:2002`).
+- **`d2`'s five items**, listed by `f1` as closed by nothing: unbounded topic grammar vs the bus's 128
+  plus a discarded all-or-nothing `events.declare`; both daemon verbs on the read/query baseline;
+  `describe` enumerating every package's topics; `create_instance` not checking that an `instanceId`
+  decomposes back to its `panelId`; `panelhost.ts` `#create` bypassing `admits` on `restoreLayout`.
+- **`ingest_external(CrawlMode::force)` deletion leaves all 475 tests green** — cross-client, needs a
+  T2 drill.
+
+### Owner-facing, none of it fixed by finishing the set
+
+1. **Nineteen improver patches** are held at
+   `software/.agent-scratch/taskflow-scheduler-ce/improver-edits/`. A twentieth (`e4`'s) was **lost** —
+   its capture was written inside the worktree that was then reaped. `f1` reported the **twelfth**
+   re-landing of one `code-review.md` fix. Root cause: **no `worktree-finalize` hook**. The patches
+   overlap; they need grafting, not replay.
+2. **`_shared/worktree-preamble.md` § 1 is FALSE** — the Bash cwd and env do not persist between calls
+   here; `git push -u origin "$WORKTREE_BRANCH"` failed `invalid refspec ''` in several runs. Frozen.
+3. **`land.md`'s § 4 omits the webui force-build and `CONTEXT_WEBUI_TEST_BROWSER`**, and `land` is the
+   step MOST exposed to the webui false-GREEN because it re-runs the gate after the rebase. Frozen,
+   and nothing runs after `land`, so no unfrozen step can compensate.
+4. **`code-review.md` step 3 says to "revert it outside" the worktree** — "outside" is the shared
+   checkout, which can hold uncommitted operator work.
+5. **Nothing in CI checks a `file.cpp:<line>` citation.** § 16 drifted twice; a `ci-config-gate`
+   checker is the durable fix. Verified correct at `c14a664` (20/20).
+6. **`emdawnwebgpu` is an unmitigated single-sourced configure-time fetch** (#359's shape), and
+   Emscripten's port system owns it, so `context_download_from_pin` cannot reach it.
+7. **`04-panel-instances-and-menu.md` § 4's worked search example is wrong** — `dbg tile` breaks if
+   `path`/`title` join with `/`, because `fuzzyMatch` matches the space literally.
+
+**Fixed during closeout (not deferred):** `worktree-create.py` now **fails closed** when its base
+fetch fails or times out, instead of logging "continuing with local refs" and cutting the run's branch
+from a possibly-stale `refs/remotes/origin/<base>` (`655d61f`). Verified in a throwaway fixture in all
+three directions: a stale consumer provisions from the fetched tip, a broken origin exits 1 with no
+slot created, and a crash-resume with a broken origin still recovers.
+
+### Verification notes worth keeping
+
+- **`webui-ts-unit` has a false-GREEN channel**: `context_editor_webui_test` is not an `ALL` target, so
+  a plain build scores the PREVIOUS bundle. But do not over-narrow either — `webui-client-typings-drift`
+  then fails for unrelated reasons.
+- **A backgrounded `ctest` with a trailing `&`** reports "exit 0" for the outer shell after ~41 of 478
+  tests. **Appending anything after a command destroys its exit status just as a pipe does** — the
+  scheduler hit this itself and misread a red gate as green.
+- **`render (web, emscripten)` has TWO failure causes sharing one job name** — read WHICH STEP failed.
+- **"The diff does not touch that test's files" is NOT evidence of a flake** — `e3` proved it.
