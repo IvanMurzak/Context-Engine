@@ -537,10 +537,10 @@ int main()
 
                 Json del = Json::object();
                 del.set("path", Json(std::string("textures/brick.tex.json")));
-                const std::optional<std::string> d =
+                const std::optional<std::string> delete_raw =
                     rw.request(rpc(22, "editor.file-delete", std::move(del)));
-                CHECK(d.has_value());
-                const Json d_resp = Json::parse(*d);
+                CHECK(delete_raw.has_value());
+                const Json d_resp = Json::parse(*delete_raw);
                 CHECK(d_resp.contains("result"));
                 const Json& d_data = d_resp.at("result").at("data");
                 CHECK(d_data.at("removedAsset").as_bool());
