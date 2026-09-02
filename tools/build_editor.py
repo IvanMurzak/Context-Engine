@@ -3,8 +3,8 @@
 
 One command on every platform, from ANY shell:
 
-    python tools/build_editor.py            # configure + build into src/build/editor
-    python tools/build_editor.py --gpu      # additionally enable the wgpu GPU present path
+    python tools/build_editor.py            # configure + build into src/build/editor, GPU present
+    python tools/build_editor.py --no-gpu   # fall back to the CPU present path (no wgpu prebuilt)
 
 WHY THIS SCRIPT EXISTS. The editor's CEF prebuilt is MSVC-ABI on Windows and cannot link under
 GCC/MinGW — and MSVC's cl.exe itself works only inside a "Developer" environment (INCLUDE / LIB /
@@ -75,8 +75,10 @@ def configure_command(cmake: str, build_dir: Path, generator: str | None, gpu: b
     if generator is not None:
         cmd += ["-G", generator]
     cmd += ["-DCMAKE_BUILD_TYPE=Release", "-DCONTEXT_BUILD_GUI_CEF=ON"]
-    if gpu:
-        cmd.append("-DCONTEXT_BUILD_RENDER_WGPU=ON")
+    # Stated in BOTH directions, deliberately. CMake caches this variable, so merely OMITTING the
+    # -D on a --no-gpu run would leave a previously-configured ON in place and the flag would do
+    # nothing on the second build. An explicit OFF is what makes the opt-out actually opt out.
+    cmd.append(f"-DCONTEXT_BUILD_RENDER_WGPU={'ON' if gpu else 'OFF'}")
     return cmd
 
 
@@ -142,13 +144,19 @@ def _windows_dev_env() -> dict[str, str] | int:
     return env
 
 
-def main(argv: list[str] | None = None) -> int:
+def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description="Build the Context editor (CLI + shell + web UI).")
     parser.add_argument("--build-dir", type=Path, default=DEFAULT_BUILD_DIR,
                         help=f"build tree (default: {DEFAULT_BUILD_DIR})")
-    parser.add_argument("--gpu", action="store_true",
-                        help="enable the wgpu GPU present path (default: the CPU present fallback)")
-    args = parser.parse_args(argv)
+    parser.add_argument("--gpu", action=argparse.BooleanOptionalAction, default=True,
+                        help="build the wgpu GPU present path (default: on). --no-gpu falls back to "
+                             "the CPU present path, which needs no wgpu prebuilt but renders no "
+                             "viewport scene (the Scene panel then reports viewport.adapter_absent)")
+    return parser
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = build_parser().parse_args(argv)
     build_dir: Path = args.build_dir
 
     windows = platform.system() == "Windows"

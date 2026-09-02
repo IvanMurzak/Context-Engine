@@ -68,7 +68,7 @@ def test_cache_compiler_absent_is_none() -> None:
 
 # ------------------------------------------------------------------------------- command shapes
 
-def test_configure_command_carries_the_cef_toggle_and_optional_gpu() -> None:
+def test_configure_command_carries_the_cef_toggle_and_the_gpu_toggle() -> None:
     cmd = be.configure_command("cmake", Path("bd"), "Ninja", gpu=False)
     assert cmd[0] == "cmake"
     assert "-G" in cmd and cmd[cmd.index("-G") + 1] == "Ninja"
@@ -78,6 +78,26 @@ def test_configure_command_carries_the_cef_toggle_and_optional_gpu() -> None:
 
     gpu = be.configure_command("cmake", Path("bd"), "Ninja", gpu=True)
     assert "-DCONTEXT_BUILD_RENDER_WGPU=ON" in gpu
+
+
+def test_the_gpu_toggle_is_stated_in_both_directions() -> None:
+    # CMake CACHES this variable, so an omitted -D leaves whatever the previous configure wrote.
+    # Emitting the OFF explicitly is the whole reason --no-gpu can undo an earlier GPU build; a
+    # version that only ever appends the ON passes the assertions above and still cannot opt out.
+    assert "-DCONTEXT_BUILD_RENDER_WGPU=OFF" in be.configure_command("cmake", Path("bd"), None,
+                                                                     gpu=False)
+    assert "-DCONTEXT_BUILD_RENDER_WGPU=OFF" not in be.configure_command("cmake", Path("bd"), None,
+                                                                         gpu=True)
+
+
+def test_gpu_defaults_on_and_no_gpu_opts_out() -> None:
+    # The default is the thing a bare `python tools/build_editor.py` gets. It is ON because this
+    # script already forces the CEF prebuilt unconditionally, so it is not a build that can run on
+    # a toolchain too plain for wgpu anyway -- and a viewport with no adapter renders no scene.
+    parser = be.build_parser()
+    assert parser.parse_args([]).gpu is True
+    assert parser.parse_args(["--gpu"]).gpu is True       # still accepted, so old commands survive
+    assert parser.parse_args(["--no-gpu"]).gpu is False
 
 
 def test_configure_command_without_a_generator_omits_the_flag() -> None:

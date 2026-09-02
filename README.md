@@ -47,8 +47,10 @@ src/build/editor/editor/shell/Release/context_editor --project samples/platforme
 ```
 
 `--devtools` enables Chromium DevTools, `--headless` runs the shell without an OS window,
-`--help` lists everything. `python tools/build_editor.py --gpu` builds with GPU presentation
-(without it the editor presents through the CPU fallback).
+`--help` lists everything. The build above includes the GPU present path;
+`python tools/build_editor.py --no-gpu` opts out and presents through the CPU fallback, which
+needs no wgpu prebuilt but renders no viewport scene (the Scene panel reports
+`viewport.adapter_absent`).
 
 <picture><source media="(prefers-color-scheme: dark)" srcset="docs/img/readme/determinism-dark.svg"><img src="docs/img/readme/determinism-light.svg" width="100%" alt="Same inputs, same state-hash — on every machine, every run"/></picture>
 
