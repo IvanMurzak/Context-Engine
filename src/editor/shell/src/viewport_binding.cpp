@@ -2,9 +2,12 @@
 
 #include "context/editor/shell/viewport_binding.h"
 
+#include "json_number_read.h"
+
 #include "context/render/viewport_pass.h"
 
 #include <algorithm>
+#include <optional>
 #include <utility>
 
 namespace context::editor::shell
@@ -13,41 +16,55 @@ namespace context::editor::shell
 namespace
 {
 
-// Read one float member, leaving `out` alone when the member is absent or not a number. Every read
-// in this file is total for the reason the header states: a camera blob from an older build must
-// cost the human a FIELD at worst, never their viewport.
+// The float range as doubles, for the guard below. A camera blob is UNTRUSTED — it round-trips
+// through a hand-editable `.editor/session.json` and `Json::parse` accepts `1e300` happily — and
+// `static_cast<float>` of a double outside float's range is UNDEFINED BEHAVIOUR, which the blocking
+// `sanitize (ASan+UBSan, ubuntu)` leg reports as `float-cast-overflow`. So the range is checked on
+// the DOUBLE, before the narrowing cast; guarding after would be guarding after the UB happened.
+constexpr double kFloatMin = -3.4e38;
+constexpr double kFloatMax = 3.4e38;
+
+// Read one float member, leaving `out` alone when the member is absent, not a number, or outside
+// float's range. Every read in this file is total for the reason the header states: a camera blob
+// from an older build must cost the human a FIELD at worst, never their viewport.
+//
+// Delegated to the Shell's ONE range-guarded numeric reader (json_number_read.h) rather than
+// re-derived, which is the mistake that header exists to stop repeating.
 bool read_float(const contract::Json& object, const char* key, float& out)
 {
-    if (!object.is_object())
+    const std::optional<double> value =
+        detail::number_in_range(object, key, kFloatMin, kFloatMax);
+    if (!value.has_value())
     {
         return false;
     }
-    const contract::Json& value = object.at(key);
-    if (!value.is_number())
-    {
-        return false;
-    }
-    out = static_cast<float>(value.as_number());
+    out = static_cast<float>(*value);
     return true;
 }
 
 // Read a fixed-length float array (`[x, y, z]`). Partial arrays are REFUSED wholesale rather than
 // applied element-wise: half a position is a camera somewhere nobody asked for, which is worse than
-// the one it already had.
+// the one it already had. `Json::at` is total (it answers the shared null for a non-object), so no
+// `is_object()` guard is needed ahead of it.
 bool read_float_array(const contract::Json& object, const char* key, float* out, std::size_t count)
 {
-    if (!object.is_object())
-    {
-        return false;
-    }
     const contract::Json& value = object.at(key);
     if (!value.is_array() || value.size() != count)
     {
         return false;
     }
+    // The same guard `number_in_range` applies, per ELEMENT — it reads members by key and these
+    // arrive by index, so the check is spelled here rather than skipped. A NaN fails both
+    // comparisons and is refused with everything else out of range.
     for (std::size_t i = 0; i < count; ++i)
     {
-        if (!value.at(i).is_number())
+        const contract::Json& element = value.at(i);
+        if (!element.is_number())
+        {
+            return false;
+        }
+        const double raw = element.as_number();
+        if (!(raw >= kFloatMin && raw <= kFloatMax))
         {
             return false;
         }
@@ -111,15 +128,10 @@ constexpr const char* kTypeGame = "game";
 // FilesFeed::apply_result's tolerance: the envelope, the bare data, or the bare object.
 [[nodiscard]] const contract::Json& cameras_array(const contract::Json& reply)
 {
-    if (reply.at("cameras").is_array())
-    {
-        return reply.at("cameras");
-    }
-    if (reply.at("data").at("cameras").is_array())
-    {
-        return reply.at("data").at("cameras");
-    }
-    return reply.at("cameras"); // the shared null — is_array() is false, so the caller stops
+    // `Json::at` is total, so the nested probe is safe on any shape and the fall-through answers the
+    // shared null — `is_array()` is false there and the caller stops.
+    const contract::Json& direct = reply.at("cameras");
+    return direct.is_array() ? direct : reply.at("data").at("cameras");
 }
 
 } // namespace
@@ -160,7 +172,9 @@ bool apply_camera_transform(render::View& view, const contract::Json& transform)
 bool apply_camera_projection(render::View& view, const contract::Json& projection)
 {
     bool read = false;
-    if (projection.is_object() && projection.at("mode").is_string())
+    // No `is_object()` guard: `Json::at` answers the shared null for a non-object, so `is_string()`
+    // alone already decides it (the same totality `cameras_array` above relies on).
+    if (projection.at("mode").is_string())
     {
         const std::string& mode = projection.at("mode").as_string();
         // An UNRECOGNIZED token keeps the current mode rather than defaulting to 3D: a 2D viewport
@@ -177,7 +191,7 @@ bool apply_camera_projection(render::View& view, const contract::Json& projectio
             read = true;
         }
     }
-    if (projection.is_object() && projection.at("type").is_string())
+    if (projection.at("type").is_string())
     {
         const std::string& type = projection.at("type").as_string();
         if (type == kTypeScene)
@@ -220,39 +234,52 @@ void ViewportBinding::attach_device(render::IDevice& device)
     // registry is what drops them; the entries keep their cameras and are re-acquired on the next
     // publish (their slots are re-minted there too — a slot is registry-local).
     targets_ = std::make_unique<render::ViewportTargetRegistry>(device);
-    // …and every layer ALREADY published names a view the line above just destroyed. Arm the
-    // unconditional republish so the compositor cannot keep one (see `needs_publish`).
-    force_publish_ = true;
-    for (auto& [id, live] : entries_)
-    {
-        (void)id;
-        // NOT named `entry`: that is a member function of this class, and a local hiding a class
-        // member is MSVC C4458 — an ERROR under /W4 /WX, and invisible to the local GCC gate.
-        live.slot = 0;
-    }
+    // …and every layer ALREADY published names a view the line above just destroyed.
+    invalidate_targets();
 }
 
 void ViewportBinding::detach_device()
 {
     device_ = nullptr;
     targets_.reset();
-    // The compositor still holds the layers this binding published, and their `content` views were
-    // owned by the registry just destroyed. Without this the next publish would compare an
-    // unchanged rect set, take the `mark_viewport_content()` branch and leave those dangling
-    // pointers in place for `render_gpu_frame` to dereference.
+    invalidate_targets();
+}
+
+void ViewportBinding::invalidate_targets()
+{
+    // The registry was replaced or destroyed, so every slot is void AND the compositor still holds
+    // layers whose `content` views it owned. Arm the unconditional republish so none of those
+    // dangling pointers survives to `render_gpu_frame` (see `needs_publish`) — without it the next
+    // publish would compare an unchanged rect set and take the `mark_viewport_content()` branch,
+    // leaving them in place.
+    //
+    // ONE spelling for both device transitions: the invariant is the same on each, and a third
+    // caller (a device-loss path) inherits it rather than copying it a third time.
     force_publish_ = true;
-    for (auto& [id, live] : entries_)
+    // NOT a structured binding named `entry`: that is a member function of this class, and a local
+    // hiding a class member is MSVC C4458 — an ERROR under /W4 /WX, invisible to the local GCC gate.
+    for (auto& live : entries_)
     {
-        (void)id;
-        // NOT named `entry`: that is a member function of this class, and a local hiding a class
-        // member is MSVC C4458 — an ERROR under /W4 /WX, and invisible to the local GCC gate.
-        live.slot = 0;
+        live.second.slot = 0;
     }
 }
 
 const char* ViewportBinding::degraded_code() const noexcept
 {
     return device_ == nullptr ? kViewportAdapterAbsentCode : "";
+}
+
+render::View default_scene_view()
+{
+    render::View view{};
+    // Pulled back and up, looking down the -Z axis the grid lies under (header note). The ONE
+    // spelling: `framed_scene_view` reads its position from here rather than repeating it.
+    view.transform.position[0] = 0.0f;
+    view.transform.position[1] = 3.0f;
+    view.transform.position[2] = 8.0f;
+    view.mode = render::ViewMode::three_d;
+    view.type = render::ViewType::scene;
+    return view;
 }
 
 ViewportBinding::Entry& ViewportBinding::entry(const std::string& viewport_id)
@@ -263,13 +290,7 @@ ViewportBinding::Entry& ViewportBinding::entry(const std::string& viewport_id)
         return it->second;
     }
     Entry fresh;
-    // The default Scene camera: pulled back and up, looking down the -Z axis the grid lies under, so
-    // a viewport whose camera the daemon has never heard of still frames something (header note).
-    fresh.view.transform.position[0] = 0.0f;
-    fresh.view.transform.position[1] = 3.0f;
-    fresh.view.transform.position[2] = 8.0f;
-    fresh.view.mode = render::ViewMode::three_d;
-    fresh.view.type = render::ViewType::scene;
+    fresh.view = default_scene_view();
     return entries_.emplace(viewport_id, fresh).first->second;
 }
 
@@ -491,29 +512,37 @@ ViewportPublishStats ViewportBinding::publish(const std::vector<ShellRegion>& re
         stats.changed = true;
     }
 
-    if (layers.size() != layers_.size())
+    // Only when the answer is not already known: a rect that moved, a viewport that appeared or one
+    // that closed has already decided this, and the id-string compare below cannot change it. Those
+    // are exactly the publishes a drag produces, which is when this runs at all.
+    if (!stats.changed)
     {
-        stats.changed = true;
-    }
-    else
-    {
-        for (std::size_t i = 0; i < layers.size(); ++i)
+        if (layers.size() != layers_.size())
         {
-            if (layers[i].id != layers_[i].id || !same_rect(layers[i].content_rect, layers_[i].content_rect))
+            stats.changed = true;
+        }
+        else
+        {
+            for (std::size_t i = 0; i < layers.size(); ++i)
             {
-                stats.changed = true;
-                break;
+                if (layers[i].id != layers_[i].id ||
+                    !same_rect(layers[i].content_rect, layers_[i].content_rect))
+                {
+                    stats.changed = true;
+                    break;
+                }
             }
         }
     }
 
-    layers_ = layers;
     if (stats.changed || forced)
     {
         ++layout_changes_;
         // A moved / added / removed rect IS a layout change, and `publish_viewports` sets exactly
-        // that damage flag itself (compositor.h § Damage).
-        compositor.publish_viewports(std::move(layers));
+        // that damage flag itself (compositor.h § Damage). Passed by lvalue: the parameter is
+        // by-value, so this makes the ONE deep copy that is genuinely needed, and `layers` is then
+        // MOVED into `layers_` below instead of being copied there as well.
+        compositor.publish_viewports(layers);
     }
     else
     {
@@ -530,11 +559,16 @@ ViewportPublishStats ViewportBinding::publish(const std::vector<ShellRegion>& re
         // Only when there IS a viewport: with no viewport layers at all nothing was redrawn, and
         // damaging the frame anyway would make every chrome-only region republish present a frame
         // for a viewport that does not exist.
-        if (!layers_.empty())
+        if (!layers.empty())
         {
             compositor.mark_viewport_content();
         }
     }
+    // Adopted LAST, and by move: on the republish path the compositor already took its own copy
+    // above, and on the redraw path nothing needs a copy at all. (Reading `layers` rather than
+    // `layers_` in the branch above is the same question either way — `stats.changed` is false
+    // there, which is exactly the case where the two stacks have equal size.)
+    layers_ = std::move(layers);
     return stats;
 }
 

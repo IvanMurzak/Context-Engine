@@ -718,13 +718,13 @@ export async function startChromeStrips(
     // and a viewport wired into only one of them would have its rect go stale on exactly the other
     // trigger. VIEWPORTS FIRST, chrome LAST: the Shell hit-tests back-to-front, last match wins
     // (input.h), so a caption control must be able to win over dock content beneath it.
+    // Captured once: inside the ternary's second arm `extraRegions` is known to be defined, so the
+    // optional call and its `?? []` fallback there were unreachable by construction.
+    const extraRegions = options.extraRegions;
     const provider: RegionProvider =
-        options.extraRegions === undefined
+        extraRegions === undefined
             ? mount.regions
-            : (): readonly ShellRegion[] => {
-                  const extra = options.extraRegions?.() ?? [];
-                  return [...extra, ...mount.regions()];
-              };
+            : (): readonly ShellRegion[] => [...extraRegions(), ...mount.regions()];
     const doc = elements.titlebar.ownerDocument;
     // Everything but the two counters is fixed at mount (the cluster never gains or loses buttons
     // afterwards), so the prefix is computed ONCE instead of re-queried on every republish. The

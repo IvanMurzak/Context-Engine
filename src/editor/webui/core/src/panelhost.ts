@@ -64,6 +64,7 @@ import {
 } from "./panels.js";
 import type { PanelClient, PanelManifest, PanelRoster } from "./panels.js";
 import {
+    PANEL_INSTANCE_ATTRIBUTE,
     VIEWPORT_SURFACE_ATTRIBUTE,
     isNativeSurfacePanel,
     isNativeSurfacePanelId,
@@ -218,7 +219,10 @@ export type LocalPanelFactory = (container: HTMLElement) => (() => void) | void;
  */
 function markPanelSlot(element: HTMLElement, panelId: string, instanceId: string): void {
     element.setAttribute("data-panel-id", panelId);
-    element.setAttribute("data-panel-instance", instanceId);
+    // Through the constant the READER uses (`viewportRegions`), not a second spelling of the same
+    // string: a rename that reached only one of the two would silently stop every viewport
+    // publishing, which is precisely the drift `VIEWPORT_SURFACE_ATTRIBUTE` below is keyed once for.
+    element.setAttribute(PANEL_INSTANCE_ATTRIBUTE, instanceId);
     // editor-UX e3: a THIRD attribute, and only for a native-surface panel. It is what `app.css`
     // makes transparent (the hole the Shell's composited viewport shows through) and what
     // `viewportRegions` measures. Stamped HERE, in the one function every renderer's slot goes
@@ -1189,6 +1193,9 @@ export class PanelHost {
         // editor-UX e3: mark the groups whose active panel is a native surface, now and on every
         // layout change. Subscribed AFTER the mount loop so the first sync sees the whole
         // arrangement, and undebounced (see `#layoutSub`).
+        // Disposed first: `start()` has no re-entry guard and replaces `#api`, so a second call
+        // would otherwise strand a live subscription on the discarded api that keeps firing forever.
+        this.#layoutSub?.dispose();
         this.#layoutSub = this.#api.onDidLayoutChange((): void => this.#syncNativeSurfaces());
         this.#syncNativeSurfaces();
 

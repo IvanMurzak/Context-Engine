@@ -86,8 +86,12 @@ namespace context::editor::shell
 
 // The reserved code the viewport reports when this build has no rendering adapter (R-HEAD-002:
 // absence is REPORTED, never silently degraded). Byte-identical to
-// `gui::viewport::kViewportAdapterAbsentCode` and to the contract error catalog's entry; asserted
-// equal by `editor-shell-test_viewport_binding` so the two spellings cannot drift.
+// `gui::viewport::kViewportAdapterAbsentCode` and to the contract error catalog's entry.
+//
+// Copied rather than shared because `context_editor_shell` does not link `context_gui_viewport`
+// (that would widen the `-fno-rtti` CEF-smoke closure). The check that stops the two spellings
+// drifting is the `static_assert` in `panels/viewport_feed.h` — the one header that sees BOTH —
+// NOT `editor-shell-test_viewport_binding`, which only compares this constant to a string literal.
 inline constexpr const char* kViewportAdapterAbsentCode = "viewport.adapter_absent";
 
 // --------------------------------------------------------------- the camera payload codec (D7)
@@ -107,6 +111,19 @@ bool apply_camera_projection(render::View& view, const contract::Json& projectio
 // The full `editor.camera-set` params for one viewport: `{viewportId, transform, projection}`.
 [[nodiscard]] contract::Json camera_set_params(const std::string& viewport_id,
                                                const render::View& view);
+
+// ------------------------------------------------------------------------ the default framing
+//
+// The Scene camera a viewport starts at: pulled back and up, looking down the -Z axis the grid lies
+// under, so a viewport whose camera the daemon has never heard of still frames something.
+//
+// EXPORTED because it has TWO consumers that must agree — this binding's first-sight camera
+// (`camera()` on an unknown id) and the panel layer's `framed_scene_view` ("frame scene" returns
+// here). They were two independent spellings of the same literals, under a comment asserting they
+// were one; a change to either would have made "frame scene" jump somewhere a freshly opened
+// viewport does not look. The direction is the linkable one: `context_editor_panels` links
+// `context_editor_shell` PUBLIC, never the reverse.
+[[nodiscard]] render::View default_scene_view();
 
 // ------------------------------------------------------------------------------ publish stats
 
@@ -245,6 +262,10 @@ private:
     };
 
     [[nodiscard]] Entry& entry(const std::string& viewport_id);
+
+    // Void every render slot and arm the unconditional republish — the shared tail of
+    // `attach_device` and `detach_device`, which face the same invariant for the same reason.
+    void invalidate_targets();
 
     render::IDevice* device_ = nullptr;
     // Rebuilt on every `attach_device`; null while no device is attached, which is what makes the

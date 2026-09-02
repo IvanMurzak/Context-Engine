@@ -21,14 +21,18 @@
 //
 // ⚠ THE RECT IS PHYSICAL. `ShellRegion::rect`, `ViewportLayer::content_rect` and the OS pointer
 // stream are all physical client pixels; `getBoundingClientRect` is CSS pixels. The conversion is
-// `editorstate.ts`'s `physicalRegion` — the ONE seam editor-window-chrome a2 established for the
-// titlebar and that this module reuses rather than copying. At device scale 1.0 the two units
-// coincide, which is why `viewport.test.ts` proves the arithmetic at 1.5 / 2 / 3 and not at 1.
+// `editorstate.ts`'s `physicalRegionFromRect` — the arithmetic half of the ONE seam
+// editor-window-chrome a2 established for the titlebar (`physicalRegion` is that same seam plus the
+// measurement), reused here rather than copied. This module takes the `…FromRect` entry point only
+// because it must already have the element's box in hand to clip against the dock, and measuring it
+// twice would be a second layout read per viewport — NOT because it does its own conversion. At
+// device scale 1.0 the two units coincide, which is why `viewport.test.ts` proves the arithmetic at
+// 1.5 / 2 / 3 and not at 1.
 
 import {
     REGION_KIND_VIEWPORT,
     defaultDevicePixelRatio,
-    physicalRegion,
+    physicalRegionFromRect,
     type ShellRegion,
 } from "./editorstate.js";
 import type { DockviewPanelHandle } from "./dockview.js";
@@ -59,6 +63,9 @@ export const VIEWPORT_SURFACE_ATTRIBUTE = "data-panel-native-surface";
 
 /** The instance-id attribute `markPanelSlot` already stamps — the region id a viewport publishes. */
 export const PANEL_INSTANCE_ATTRIBUTE = "data-panel-instance";
+
+/** The live-copy selector, built once rather than re-concatenated on every publish. */
+const VIEWPORT_SURFACE_SELECTOR = `[${VIEWPORT_SURFACE_ATTRIBUTE}]`;
 
 /**
  * The attribute stamped on a Dockview GROUP whose currently-shown panel is a native surface.
@@ -125,17 +132,29 @@ export function viewportRegions(
         return [];
     }
     const regions: ShellRegion[] = [];
-    for (const element of root.querySelectorAll(`[${VIEWPORT_SURFACE_ATTRIBUTE}]`)) {
+    // The dock's own box, measured ONCE: it is invariant across the loop, and reading it per element
+    // was a layout read per viewport for a value that cannot change. `null` for a root that is not an
+    // Element (a Document, a fragment, a documentless harness) — no box to clip against, so nothing
+    // is withdrawn (see `intersectsDock`).
+    const dock = root instanceof Element ? root.getBoundingClientRect() : null;
+    for (const element of root.querySelectorAll(VIEWPORT_SURFACE_SELECTOR)) {
         const instanceId = element.getAttribute(PANEL_INSTANCE_ATTRIBUTE) ?? "";
         if (instanceId === "") {
             // An unkeyed surface would name a target and a camera by nothing. Skipped rather than
             // published under the KIND, which would make two copies collide on one region id.
             continue;
         }
-        if (!intersectsHost(element, root)) {
+        // Measured once and used twice — for the off-dock test and for the physical conversion.
+        const box = element.getBoundingClientRect();
+        if (dock !== null && !intersectsDock(box, dock)) {
             continue; // parked off-dock (see the header) — withdraw rather than publish
         }
-        const region = physicalRegion(element, instanceId, REGION_KIND_VIEWPORT, devicePixelRatio);
+        const region = physicalRegionFromRect(
+            box,
+            instanceId,
+            REGION_KIND_VIEWPORT,
+            devicePixelRatio,
+        );
         if (region !== null) {
             regions.push(region);
         }
@@ -144,28 +163,24 @@ export function viewportRegions(
 }
 
 /**
- * Does `element` overlap the DOCK's own box at all?
+ * Do the two measured boxes overlap at all?
  *
- * Measured against `root` (the dock element) rather than the browser's client area, because THAT is
- * where Dockview parks a hidden `always`-rendered panel: exactly one dock-height below the dock,
- * which on any window taller than the dock is still perfectly inside the client area. Clipping
- * against the window would therefore have missed the case this exists for.
+ * Clipped against the DOCK's box rather than the browser's client area, because THAT is where
+ * Dockview parks a hidden `always`-rendered panel: exactly one dock-height below the dock, which on
+ * any window taller than the dock is still perfectly inside the client area. Clipping against the
+ * window would therefore have missed the case this exists for.
  *
- * INTERSECTION, not containment (see the caller). A `root` that is not an Element — a Document, a
- * fragment, a documentless harness — has no box to clip against and answers TRUE: refusing every
- * region there would silently disable the whole mechanism rather than degrade it.
+ * INTERSECTION, not containment (see the caller). A root that is not an Element — a Document, a
+ * fragment, a documentless harness — has no box to clip against; the caller passes `null` there and
+ * withdraws nothing, because refusing every region would silently disable the whole mechanism
+ * rather than degrade it.
  */
-function intersectsHost(element: Element, root: ParentNode): boolean {
-    if (!(root instanceof Element)) {
-        return true;
-    }
-    const rect = element.getBoundingClientRect();
-    const host = root.getBoundingClientRect();
+function intersectsDock(box: DOMRectReadOnly, dock: DOMRectReadOnly): boolean {
     return (
-        rect.right > host.left &&
-        rect.bottom > host.top &&
-        rect.left < host.right &&
-        rect.top < host.bottom
+        box.right > dock.left &&
+        box.bottom > dock.top &&
+        box.left < dock.right &&
+        box.top < dock.bottom
     );
 }
 
@@ -185,21 +200,31 @@ export function syncNativeSurfaceGroups(
     panels: readonly DockviewPanelHandle[],
     panelIdOf: (instanceId: string) => string,
 ): void {
-    const marked = new Set<HTMLElement>();
-    const seen = new Set<HTMLElement>();
+    // ONE collection, group element -> wanted state. Two sets (a "seen" and a "marked" subset) had
+    // to be kept in agreement by hand, and a group that reached only the second would silently never
+    // be written. `activePanel` is a property of the GROUP, so every panel sharing a group computes
+    // the same value and last-write-wins is the same answer as a union.
+    const wanted = new Map<HTMLElement, boolean>();
     for (const panel of panels) {
-        const element = panel.group?.element;
-        if (element === undefined) {
+        const group = panel.group;
+        const element = group?.element;
+        if (group === undefined || element === undefined) {
             continue; // a harness handle, or a panel Dockview has not grouped yet
         }
-        seen.add(element);
-        const activeId = panel.group?.activePanel?.id;
-        if (activeId !== undefined && isNativeSurfacePanelId(panelIdOf(activeId))) {
-            marked.add(element);
-        }
+        const activeId = group.activePanel?.id;
+        wanted.set(element, activeId !== undefined && isNativeSurfacePanelId(panelIdOf(activeId)));
     }
-    for (const element of seen) {
-        if (marked.has(element)) {
+    for (const [element, native] of wanted) {
+        // WRITE ONLY ON A CHANGE. This runs from PanelHost's deliberately UNDEBOUNCED
+        // `onDidLayoutChange` subscription, which bursts at mousemove rate for the whole of a sash
+        // or tab drag; `[data-group-native-surface]` is a live selector in `app.css`, so a
+        // same-value `setAttribute` still invalidates style for that element. Guarding makes a
+        // steady-state drag cost zero DOM mutations while keeping the wholesale recompute the
+        // header argues for — a group that stopped showing a viewport still loses the mark.
+        if (native === element.hasAttribute(VIEWPORT_GROUP_ATTRIBUTE)) {
+            continue;
+        }
+        if (native) {
             element.setAttribute(VIEWPORT_GROUP_ATTRIBUTE, "");
         } else {
             element.removeAttribute(VIEWPORT_GROUP_ATTRIBUTE);

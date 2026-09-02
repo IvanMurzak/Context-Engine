@@ -8,23 +8,17 @@
 namespace context::editor::shell::panels
 {
 
-namespace
-{
-
-// The default framing pose, shared by `framed_scene_view` and the binding's own first-sight camera
-// (viewport_binding.h). Spelled once here so "frame scene" and "a viewport nobody has ever moved"
-// cannot end up looking at two different places.
-constexpr float kDefaultEyeY = 3.0f;
-constexpr float kDefaultEyeZ = 8.0f;
-
-} // namespace
-
 render::View framed_scene_view(const render::View& current)
 {
+    // The default framing pose comes from the PRODUCER (`default_scene_view`, viewport_binding.h),
+    // not from a second set of literals here. That is what actually makes "frame scene" and "a
+    // viewport nobody has ever moved" look at the same place — this file previously asserted the
+    // property in a comment while spelling the pose independently, so the two were free to drift.
+    const render::View defaults = default_scene_view();
     render::View framed = current;
-    framed.transform.position[0] = 0.0f;
-    framed.transform.position[1] = kDefaultEyeY;
-    framed.transform.position[2] = kDefaultEyeZ;
+    framed.transform.position[0] = defaults.transform.position[0];
+    framed.transform.position[1] = defaults.transform.position[1];
+    framed.transform.position[2] = defaults.transform.position[2];
     framed.transform.rotation[0] = 0.0f;
     framed.transform.rotation[1] = 0.0f;
     framed.transform.rotation[2] = 0.0f;
@@ -48,8 +42,13 @@ void ViewportFeed::bind_binding(ViewportBinding* binding)
     if (binding_ == binding)
     {
         // Called every frame (see the header): an unchanged producer must not touch the kind, or the
-        // renderer would re-fetch every viewport's tree once per loop iteration forever.
-        set_adapter_available(binding == nullptr ? adapter_available_ : binding->adapter_available());
+        // renderer would re-fetch every viewport's tree once per loop iteration forever. A null
+        // producer has no verdict to re-read, so the current one simply stands — spelled as a guard
+        // rather than by handing the field back to its own setter.
+        if (binding != nullptr)
+        {
+            set_adapter_available(binding->adapter_available());
+        }
         return;
     }
     binding_ = binding;

@@ -142,7 +142,25 @@ export function physicalRegion(
     kind: ShellRegion["kind"],
     dpr: number,
 ): ShellRegion | null {
-    const rect = element.getBoundingClientRect();
+    return physicalRegionFromRect(element.getBoundingClientRect(), id, kind, dpr);
+}
+
+/**
+ * The same conversion over an ALREADY-MEASURED box.
+ *
+ * The arithmetic seam is still exactly one implementation — `physicalRegion` above is a measure plus
+ * a call to this — so the "never open a second source" rule the header states is preserved. It is
+ * split out only so a caller that must inspect an element's box for its OWN reason (viewport.ts
+ * clips against the dock before publishing) can do so without measuring the same element twice:
+ * `getBoundingClientRect` is a layout read, and the naive form costs three per viewport per publish
+ * where two suffice.
+ */
+export function physicalRegionFromRect(
+    rect: DOMRectReadOnly,
+    id: string,
+    kind: ShellRegion["kind"],
+    dpr: number,
+): ShellRegion | null {
     const x0 = Math.round(rect.left * dpr);
     const y0 = Math.round(rect.top * dpr);
     const width = Math.round(rect.right * dpr) - x0;

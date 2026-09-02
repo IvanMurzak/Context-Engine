@@ -49,6 +49,7 @@
 #include <cstddef>
 #include <map>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace context::editor::shell::panels
@@ -60,6 +61,17 @@ namespace viewport = gui::viewport;
 // `shell::compositor` namespace, and `shell::Compositor*` types are in scope), so the alias is what
 // keeps this file reading like `viewport_panel.h`, whose own namespace makes `compositor::` work.
 namespace gui_compositor = gui::compositor;
+
+// THE REAL DRIFT GATE for the adapter-absent code, and it lives HERE because this is the only header
+// that sees BOTH spellings: `context_editor_shell` cannot link `context_gui_viewport` (it would
+// widen the `-fno-rtti` CEF-smoke closure — the same reason `builtin_panels.h` forward-declares
+// `ViewportBinding`), so the shell keeps its own copy. `viewport_binding.h` used to claim this check
+// was performed by `editor-shell-test_viewport_binding`; that test compares the shell constant to a
+// STRING LITERAL and never references the GUI one, so the two could in fact drift. A compile-time
+// assertion in the one translation-unit set that can see both makes the claim true at zero cost.
+static_assert(std::string_view(kViewportAdapterAbsentCode) ==
+                  std::string_view(viewport::kViewportAdapterAbsentCode),
+              "the shell's adapter-absent code must stay byte-identical to the GUI viewport's");
 
 // ------------------------------------------------------------------------------- pure helpers
 
