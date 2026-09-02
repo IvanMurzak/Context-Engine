@@ -220,8 +220,15 @@ public:
     // DELETE the row's file and its sidecar. Reversible: a landed delete's `restore_token` reaches
     // the write listeners, which is how the session journal makes it undoable.
     bool remove(const std::string& identity);
-    // Restore a previously deleted file by its token — the seam session-undo replays through, kept
-    // on the panel so undo and the human's own action travel the identical path.
+    // Restore a previously deleted file by its token.
+    //
+    // NO PRODUCTION CALLER TODAY, stated plainly because the opposite is easy to assume: session
+    // undo replays a delete by calling `FileWriteGateway::restore_file` on the gateway DIRECTLY
+    // (undo_journal.cpp § replay_file_edit), exactly as the Inspector's replays bypass its panel —
+    // so a replay does NOT get this panel's fan-out (status line, notice sink, refetch). This
+    // remains here as the panel-side half of the seam, for the eventual human-facing "undo the
+    // delete I just did" affordance; until something exposes it, it is exercised only by the write
+    // suites. Do not reason about replay behaviour from this method.
     bool restore(const std::string& restore_token);
 
     // The most recent write outcome, rendered in the status line and readable by a test.

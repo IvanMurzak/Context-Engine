@@ -108,7 +108,6 @@ FilesFeed::FilesFeed(PanelHost& host, std::string panel_id, files::SelectionGate
 void FilesFeed::bind_write_gateway(files::FileWriteGateway* gateway)
 {
     panel_.set_write_gateway(gateway);
-    write_gateway_bound_ = gateway != nullptr;
     // The authoring commands appear/disappear with the gateway, so the rendered surface CHANGED.
     host_.touch(panel_id_);
 }
@@ -182,9 +181,11 @@ void FilesFeed::on_panel_write(files::FileWriteVerb verb, const files::FileWrite
             journal = !edit.restore_token.empty();
             break;
         case files::FileWriteVerb::restore:
-            // A RESTORE is never journaled, and that is deliberate rather than an omission: the only
-            // caller that issues one is the journal's own undo replay, and recording the inverse of
-            // a replay as a NEW step would make Ctrl+Z followed by Ctrl+Z undo itself forever.
+            // A RESTORE is never journaled, and that is deliberate rather than an omission:
+            // recording the inverse of an undo as a NEW step would make Ctrl+Z followed by Ctrl+Z
+            // undo itself forever. Note the journal's own replay does NOT arrive here at all — it
+            // calls the gateway directly (files_panel.h § restore) — so this arm covers a
+            // panel-issued restore, which nothing exposes yet.
             journal = false;
             break;
         }

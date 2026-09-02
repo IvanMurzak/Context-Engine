@@ -32,6 +32,7 @@
 #pragma once
 
 #include "context/editor/gui/panels/files/files_panel.h"
+#include "context/editor/shell/panels/wire_override_gateway.h" // kNoDaemonCode (shared, see below)
 
 #include <cstddef>
 #include <string>
@@ -64,9 +65,11 @@ public:
     // The LOCAL refusal code an unbound gateway answers with — the same host-minted, uncatalogued
     // code `WireOverrideWriteGateway` uses, and for the same reason: nothing failed internally,
     // there was simply no daemon to ask, which is an ordinary editor state (booting, reconnecting,
-    // exiting). Spelled identically so a renderer that groups notices by code sees ONE
-    // "no daemon" class rather than two.
-    static constexpr const char* kNoDaemonCode = "shell.no_daemon";
+    // exiting). It must be spelled identically so a renderer that groups notices by code sees ONE
+    // "no daemon" class rather than two — so it is ALIASED to that one rather than re-spelled here,
+    // because a second literal is an invariant maintained by eye whose failure is a silently split
+    // notice class.
+    static constexpr const char* kNoDaemonCode = WireOverrideWriteGateway::kNoDaemonCode;
 
     // The wire method ids. Named constants rather than string literals at the call sites because
     // the T2 drill asserts them against a LIVE daemon: a drift on either side reddens a ctest rather

@@ -337,6 +337,15 @@ Registry::Registry()
     // src/editor/assetdb/; the grammar is contract now and the CLI/daemon serving wire lands with
     // the M2 integration task (the `set` pattern). Referencing files are never rewritten by these
     // verbs — path hints heal lazily on tool save (L-34).
+    //
+    // ⚠ THE DAEMON ALREADY SERVES THIS OPERATION, under a different name. M9 e2 registered
+    // `editor file-move` (below) with the identical `{from, to}` params, driving the identical
+    // `AssetDatabase::move_asset` — the editor's write half needed a served verb before the stable
+    // asset grammar's CLI projection existed. So what remains outstanding here is the CLI/daemon
+    // wire for THESE names, not the operation: whoever picks that up should route them onto the
+    // same handler rather than implementing move/rename a second time. Both entries are pinned by
+    // contract_freeze.cpp (`asset.move` / `asset/move` / `context_asset_move`), so neither name can
+    // simply be dropped.
     verbs_.push_back(make_verb(
         "", "asset", "move",
         "Move an asset (its <asset>.meta.json sidecar travels with it) to a new path, preserving "

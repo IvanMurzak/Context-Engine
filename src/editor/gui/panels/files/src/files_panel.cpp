@@ -21,6 +21,18 @@ namespace context::editor::gui::panels::files
 namespace
 {
 
+// The precondition BOTH destructive verbs share: this panel can actually name that identity, and it
+// names a FILE (a directory row has no row identity to act on). Stated once, with its refusal
+// message, because two hand-kept copies is how the two verbs start answering the same bad request
+// with different words.
+[[nodiscard]] bool is_live_file_row(const FilesModel& model, const std::string& identity)
+{
+    const FileNode* node = find_node(model, identity);
+    return node != nullptr && node->kind == FileNodeKind::file;
+}
+
+constexpr const char* kNoFileRowMessage = "no file row with that identity is loaded in this panel";
+
 // The accessible name + visible text base for one row: the display name plus a visible kind
 // annotation for a directory, so the hierarchy is legible to sighted AND assistive-tech users.
 [[nodiscard]] std::string row_label(const FileNode& node)
@@ -200,13 +212,11 @@ bool FilesPanel::rename(const std::string& identity, const std::string& new_name
 
 bool FilesPanel::move(const std::string& identity, const std::string& destination)
 {
-    if (const FileNode* node = find_node(model_, identity);
-        node == nullptr || node->kind != FileNodeKind::file)
+    if (!is_live_file_row(model_, identity))
     {
         // The dead-click refusal `select()` already makes, for the same reason: asking the write
         // path to move a row this panel cannot even name is a request nobody can answer usefully.
-        return refuse_locally(FileWriteVerb::move, kInvalidRequestCode,
-                              "no file row with that identity is loaded in this panel", identity);
+        return refuse_locally(FileWriteVerb::move, kInvalidRequestCode, kNoFileRowMessage, identity);
     }
     if (destination.empty())
     {
@@ -223,11 +233,10 @@ bool FilesPanel::move(const std::string& identity, const std::string& destinatio
 
 bool FilesPanel::remove(const std::string& identity)
 {
-    if (const FileNode* node = find_node(model_, identity);
-        node == nullptr || node->kind != FileNodeKind::file)
+    if (!is_live_file_row(model_, identity))
     {
-        return refuse_locally(FileWriteVerb::remove, kInvalidRequestCode,
-                              "no file row with that identity is loaded in this panel", identity);
+        return refuse_locally(FileWriteVerb::remove, kInvalidRequestCode, kNoFileRowMessage,
+                              identity);
     }
     if (writes_ == nullptr)
     {

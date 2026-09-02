@@ -7,6 +7,7 @@
 #include "context/editor/client/client.h" // the wire writes (complete type HERE only)
 #include "wire_read.h"                    // read_string / read_bool / envelope_data
 
+#include <cstddef>
 #include <optional>
 #include <string>
 #include <utility>
@@ -32,6 +33,47 @@ namespace
     return out;
 }
 
+// The wire round-trip EVERY file verb makes, in ONE place: the unbound-gateway refusal, the two
+// counters that bracket a request, and the daemon's failure code passed through verbatim. Returns
+// the reply on success; on a refusal it fills `refusal` and returns nullopt, so a caller that
+// forgets to check gets no reply to read rather than a silently unrecorded write.
+//
+// WHY IT IS FACTORED: the counters are the whole point of this class — `refusals()` is what makes
+// "the human was told" checkable rather than assumed, and `writes_issued()` is what a landed write
+// is measured against. Each verb asserts its own totals, so three hand-maintained copies of the
+// increments would let a fourth verb drop one with every existing test still green. It is a
+// file-local free function rather than a private member deliberately: the header (like its sibling
+// `wire_override_gateway.h`) keeps `contract::Json` OFF the panel-facing surface, and one shared
+// tail is not worth widening that.
+[[nodiscard]] std::optional<contract::Json> issue(client::Client* client, const char* method,
+                                                 contract::Json params,
+                                                 const char* no_daemon_message,
+                                                 const std::string& subject,
+                                                 std::size_t& writes_issued, std::size_t& refusals,
+                                                 files::FileWriteResult& refusal)
+{
+    if (client == nullptr)
+    {
+        ++refusals;
+        refusal = refused(WireFileWriteGateway::kNoDaemonCode, no_daemon_message, subject);
+        return std::nullopt;
+    }
+
+    ++writes_issued;
+    std::string error;
+    std::optional<contract::Json> reply = client->call(method, std::move(params), error);
+    if (!reply.has_value())
+    {
+        ++refusals;
+        // The daemon's own code, VERBATIM (asset.move_destination_exists, path.jail_violation,
+        // scope.denied, …) — each is a different fact with a different remedy, and the R-CLI-008
+        // rule `Client::failure_code` states in one place is to pass it through, never to flatten it.
+        refusal = refused(client->failure_code("internal.error"), error, subject);
+        return std::nullopt;
+    }
+    return reply;
+}
+
 } // namespace
 
 void WireFileWriteGateway::bind_client(client::Client* client) noexcept
@@ -42,31 +84,17 @@ void WireFileWriteGateway::bind_client(client::Client* client) noexcept
 files::FileWriteResult WireFileWriteGateway::move_file(const std::string& from,
                                                        const std::string& to)
 {
-    if (client_ == nullptr)
-    {
-        ++refusals_;
-        return refused(kNoDaemonCode,
-                       "no daemon connection is bound; the move was not delivered and nothing was "
-                       "written",
-                       from);
-    }
-
     contract::Json params = contract::Json::object();
     params.set("from", contract::Json(from));
     params.set("to", contract::Json(to));
 
-    ++writes_issued_;
-    std::string error;
+    files::FileWriteResult refusal;
     const std::optional<contract::Json> reply =
-        client_->call(kMoveMethod, std::move(params), error);
+        issue(client_, kMoveMethod, std::move(params),
+              "no daemon connection is bound; the move was not delivered and nothing was written",
+              from, writes_issued_, refusals_, refusal);
     if (!reply.has_value())
-    {
-        ++refusals_;
-        // The daemon's own code, VERBATIM (asset.move_destination_exists, path.jail_violation,
-        // scope.denied, …) — each is a different fact with a different remedy, and the R-CLI-008
-        // rule `Client::failure_code` states in one place is to pass it through, never to flatten it.
-        return refused(client_->failure_code("internal.error"), error, from);
-    }
+        return refusal;
 
     const contract::Json& data = envelope_data(*reply);
     files::FileWriteResult out;
@@ -86,25 +114,16 @@ files::FileWriteResult WireFileWriteGateway::move_file(const std::string& from,
 
 files::FileWriteResult WireFileWriteGateway::delete_file(const std::string& path)
 {
-    if (client_ == nullptr)
-    {
-        ++refusals_;
-        return refused(kNoDaemonCode,
-                       "no daemon connection is bound; NOTHING was deleted", path);
-    }
-
     contract::Json params = contract::Json::object();
     params.set("path", contract::Json(path));
 
-    ++writes_issued_;
-    std::string error;
+    files::FileWriteResult refusal;
     const std::optional<contract::Json> reply =
-        client_->call(kDeleteMethod, std::move(params), error);
+        issue(client_, kDeleteMethod, std::move(params),
+              "no daemon connection is bound; NOTHING was deleted", path, writes_issued_, refusals_,
+              refusal);
     if (!reply.has_value())
-    {
-        ++refusals_;
-        return refused(client_->failure_code("internal.error"), error, path);
-    }
+        return refusal;
 
     const contract::Json& data = envelope_data(*reply);
     files::FileWriteResult out;
@@ -130,24 +149,16 @@ files::FileWriteResult WireFileWriteGateway::delete_file(const std::string& path
 
 files::FileWriteResult WireFileWriteGateway::restore_file(const std::string& restore_token)
 {
-    if (client_ == nullptr)
-    {
-        ++refusals_;
-        return refused(kNoDaemonCode, "no daemon connection is bound; nothing was restored", "");
-    }
-
     contract::Json params = contract::Json::object();
     params.set("restoreToken", contract::Json(restore_token));
 
-    ++writes_issued_;
-    std::string error;
+    files::FileWriteResult refusal;
     const std::optional<contract::Json> reply =
-        client_->call(kRestoreMethod, std::move(params), error);
+        issue(client_, kRestoreMethod, std::move(params),
+              "no daemon connection is bound; nothing was restored", "", writes_issued_, refusals_,
+              refusal);
     if (!reply.has_value())
-    {
-        ++refusals_;
-        return refused(client_->failure_code("internal.error"), error, "");
-    }
+        return refusal;
 
     const contract::Json& data = envelope_data(*reply);
     files::FileWriteResult out;

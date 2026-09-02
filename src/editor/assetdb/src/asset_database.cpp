@@ -846,12 +846,19 @@ RestoreResult AssetDatabase::restore_asset(filesync::FileStore& fs, std::string_
     // (native_file_store.h: only write-side ops carry the R-SEC-008 physical jail), so an escaping
     // token would read an `entry.json` from outside the project root. Refused here rather than only
     // at the daemon boundary, so every caller of the engine operation gets the same guarantee.
-    if (token.front() == '.' || token.find('/') != std::string::npos ||
-        token.find('\\') != std::string::npos)
+    //
+    // The check is `is_guid` rather than a hand-rolled separator scan because a restore token IS a
+    // GUID by construction: delete_asset mints it from `meta_parsed->guid` (which parse_meta already
+    // validated with is_guid) or from mint_unique_guid(), i.e. 32 lowercase hex characters either
+    // way. Asking the domain question the library already exports is both stricter than a
+    // separator/dot-segment scan -- `C:`, `x`, `a b` and `CON` are names that scan clean and have no
+    // business being interpolated into a path -- and impossible to drift from how tokens are minted.
+    if (!is_guid(token))
     {
-        result.diagnostics.push_back(
-            make_diag("asset.restore_invalid",
-                      "a restore token names ONE quarantine directory; this one is a path", token));
+        result.diagnostics.push_back(make_diag(
+            "asset.restore_invalid",
+            "a restore token is the 32-hex quarantine handle a delete returned; this is not one",
+            token));
         return result;
     }
 
@@ -903,7 +910,10 @@ RestoreResult AssetDatabase::restore_asset(filesync::FileStore& fs, std::string_
     // CAS-honesty, the occupied-destination rule move_asset states: something else may have taken
     // this path since the delete. Identical bytes are our own interrupted restore (fall through and
     // re-run the order); anything else refuses rather than overwrites.
-    if (fs.exists(dest) && fs.read(dest) != asset_bytes)
+    // One read, not an `exists` + a `read`: `read` already answers existence with nullopt, and the
+    // bare comparison alone would wrongly refuse when the destination is simply absent.
+    const std::optional<std::string> occupying_asset = fs.read(dest);
+    if (occupying_asset.has_value() && occupying_asset != asset_bytes)
     {
         result.diagnostics.push_back(make_diag(
             "asset.restore_destination_exists",

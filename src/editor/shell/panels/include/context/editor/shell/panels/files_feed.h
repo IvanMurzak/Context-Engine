@@ -105,7 +105,11 @@ public:
     // `nullptr` detaches; an unbound panel exposes NO authoring command at all, so a human is never
     // offered a delete that would quietly do nothing (files_panel.h § set_write_gateway).
     void bind_write_gateway(files::FileWriteGateway* gateway);
-    [[nodiscard]] bool has_write_gateway() const noexcept { return write_gateway_bound_; }
+    // DERIVED, never mirrored: the panel already IS the authority (`can_write()` is
+    // `writes_ != nullptr`), and `panel()` below hands out a non-const reference — so a cached copy
+    // here would start lying the moment anyone bound through the panel directly. (`UndoFeed`'s
+    // equivalent flag exists only because UndoJournal exposes no such accessor.)
+    [[nodiscard]] bool has_write_gateway() const noexcept { return panel_.can_write(); }
 
     // Where a LANDED file operation becomes an undo step. Erased through a std::function for the
     // reason `InspectorFeed::bind_checkpoint_sink` states: this feed must not name the UndoFeed that
@@ -147,7 +151,6 @@ private:
     std::string panel_id_;
     files::FilesPanel panel_;
     bool fetch_due_ = true; // born due: the first pump performs the initial hydration
-    bool write_gateway_bound_ = false;
     CheckpointSink checkpoints_;
     NoticeSink notices_;
     std::size_t results_applied_ = 0;

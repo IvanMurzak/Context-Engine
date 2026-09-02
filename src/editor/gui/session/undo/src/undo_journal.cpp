@@ -360,7 +360,11 @@ void UndoJournal::record(Checkpoint checkpoint)
 void UndoJournal::begin_gesture(std::string label)
 {
     end_gesture(); // flush any already-open batch first
-    open_gesture_ = Checkpoint{std::move(label), {}, {}};
+    // Named, not positional: e2 had to widen this brace list only because `Checkpoint` grew a third
+    // member, and the next member of a type that happens to match would be adopted SILENTLY here
+    // rather than failing to compile. The collections default-construct empty.
+    open_gesture_ = Checkpoint{};
+    open_gesture_->label = std::move(label);
 }
 
 void UndoJournal::capture(FieldEdit edit)

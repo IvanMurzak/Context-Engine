@@ -208,6 +208,23 @@ std::optional<std::uint64_t> parse_hash_u64(const std::string& text)
         .with_error_data(std::move(data));
 }
 
+// The shared tail of EVERY successful editor file-write verb (move / delete / restore).
+//
+// WHY HERE and not in each verb arm -- the same argument `finish_edit` makes one screen down for
+// the two `edit` shapes: these operations write through filesync directly, OUTSIDE the kernel's
+// `edit_file` path, so without the ingest + settle the design 05 §8 propagate chain does not fire
+// and every other client's Files panel keeps rendering a file that is gone. That omission is
+// invisible to a single-client unit test, which is exactly why it must be stated once and reused
+// rather than pasted per arm where the next verb can silently drop it. Refusals never come here --
+// there is no change to announce.
+[[nodiscard]] Envelope settle_and_reply(EditorKernel& kernel, Json data)
+{
+    (void)kernel.ingest_external(CrawlMode::force);
+    const std::uint64_t generation = kernel.settle();
+    data.set("generation", Json(generation));
+    return Envelope::success(std::move(data), generation);
+}
+
 // R-SEC-008 on a file-write endpoint: the same lexical pre-check `context set` and the composed
 // `edit` run. `is_inside_jail` is LEXICAL, so it is the legible early refusal rather than the only
 // guard -- the assetdb operations themselves only ever touch paths through the project-rooted
@@ -1028,17 +1045,17 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
     // operation (src/editor/assetdb/). The Shell links none of it (D10): it sends a request and
     // renders the answer.
     //
-    // WHY THE SCAN COMES FIRST on a WRITE: move/delete both consult the live GUID index to decide
-    // identity and to keep it correct afterwards, and an index built from a stale request would move
-    // the wrong record. It is also what makes each verb self-contained -- no ordering dependency on
-    // whether some earlier read happened to populate anything.
+    // WHY THE SCAN IS PER-BRANCH: move and delete consult the live GUID index to decide identity
+    // and to keep it correct afterwards, and an index built from a stale request would move the
+    // wrong record -- so each of them scans, from current on-disk truth, inside its own arm. It is
+    // still what makes those verbs self-contained: no ordering dependency on whether some earlier
+    // read happened to populate anything. RESTORE deliberately does NOT scan: it reads its subject
+    // out of the quarantine entry and only ever WRITES the index (`index_record`), which is
+    // discarded with this request-local database -- so a scan there is pure cost on the undo path.
+    // Each scan also runs AFTER that arm's argument and jail checks, so a request that is about to
+    // be refused never pays for a full project walk.
     //
-    // AFTER a successful write, the raw change is folded back through the kernel's own ingest seam
-    // (`ingest_external(force)` -> `files.changed`) and then settled (`derivation.settled{gen}`):
-    // these operations write through filesync directly, outside the kernel's `edit_file` path, so
-    // WITHOUT this the design 05 §8 propagate chain would simply not fire and every other client's
-    // Files panel would keep rendering a file that is gone. Refusals publish NOTHING -- there is no
-    // change to announce.
+    // The publish tail after a successful write lives in `settle_and_reply` above.
     //
     // The dispatcher already enforced `file_write` (scope.cpp) before we are reached.
     if (method == "editor.file-move" || method == "editor.file-delete" ||
@@ -1049,7 +1066,6 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
         filesync::NativeFileStore store(kernel_.config().project_root);
         assetdb::RandomGuidGenerator guids;
         assetdb::AssetDatabase db(guids);
-        (void)db.scan(store, "");
 
         if (method == "editor.file-move")
         {
@@ -1064,19 +1080,17 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
             if (std::optional<Envelope> refusal = reject_escaping_path(*to, "the destination path"))
                 return std::move(*refusal);
 
+            (void)db.scan(store, "");
             assetdb::MoveResult moved = db.move_asset(store, *from, *to);
             if (!moved.ok)
                 return refuse_asset_op(moved.diagnostics, "asset.move_invalid",
                                        "the move was refused");
 
-            (void)kernel_.ingest_external(CrawlMode::force);
-            const std::uint64_t generation = kernel_.settle();
             Json data = Json::object();
             data.set("from", Json(*from));
             data.set("to", Json(*to));
             data.set("guid", Json(moved.guid));
-            data.set("generation", Json(generation));
-            return Envelope::success(std::move(data), generation);
+            return settle_and_reply(kernel_, std::move(data));
         }
 
         if (method == "editor.file-delete")
@@ -1089,44 +1103,52 @@ std::optional<Envelope> KernelServer::invoke(const std::string& method, const Js
             if (std::optional<Envelope> refusal = reject_escaping_path(*path, "the asset path"))
                 return std::move(*refusal);
 
+            (void)db.scan(store, "");
             assetdb::DeleteResult deleted =
                 db.delete_asset(store, "", *path, schema::engine_schemas());
             if (!deleted.ok)
                 return refuse_asset_op(deleted.diagnostics, "asset.delete_invalid",
                                        "the delete was refused");
 
-            (void)kernel_.ingest_external(CrawlMode::force);
-            const std::uint64_t generation = kernel_.settle();
             Json data = Json::object();
             data.set("path", Json(*path));
             data.set("guid", Json(deleted.guid));
             data.set("restoreToken", Json(deleted.restore_token));
             data.set("removedAsset", Json(deleted.removed_asset));
             data.set("removedMeta", Json(deleted.removed_meta));
-            data.set("generation", Json(generation));
-            return Envelope::success(std::move(data), generation);
+            return settle_and_reply(kernel_, std::move(data));
         }
 
-        const std::optional<std::string> token = string_param(params, "restoreToken");
-        if (!token.has_value() || token->empty())
-            return Envelope::failure("usage.missing_argument",
-                                     "editor file-restore requires the string 'restoreToken' an "
-                                     "editor file-delete returned");
+        // EXPLICIT, not the implicit `else`: the arms above are selected by name out of the
+        // three-way disjunction that opens this block, so an unguarded tail would quietly serve a
+        // FOURTH verb added to that disjunction (a future `file-copy`) as a restore. Naming the
+        // method here, and failing loudly below, makes that mistake a legible refusal instead.
+        if (method == "editor.file-restore")
+        {
+            const std::optional<std::string> token = string_param(params, "restoreToken");
+            if (!token.has_value() || token->empty())
+                return Envelope::failure("usage.missing_argument",
+                                         "editor file-restore requires the string 'restoreToken' an "
+                                         "editor file-delete returned");
 
-        assetdb::RestoreResult restored = db.restore_asset(store, *token);
-        if (!restored.ok)
-            return refuse_asset_op(restored.diagnostics, "asset.restore_missing",
-                                   "the restore was refused");
+            assetdb::RestoreResult restored = db.restore_asset(store, *token);
+            if (!restored.ok)
+                return refuse_asset_op(restored.diagnostics, "asset.restore_missing",
+                                       "the restore was refused");
 
-        (void)kernel_.ingest_external(CrawlMode::force);
-        const std::uint64_t generation = kernel_.settle();
-        Json data = Json::object();
-        data.set("path", Json(restored.path));
-        data.set("guid", Json(restored.guid));
-        data.set("restoredAsset", Json(restored.restored_asset));
-        data.set("restoredMeta", Json(restored.restored_meta));
-        data.set("generation", Json(generation));
-        return Envelope::success(std::move(data), generation);
+            Json data = Json::object();
+            data.set("path", Json(restored.path));
+            data.set("guid", Json(restored.guid));
+            data.set("restoredAsset", Json(restored.restored_asset));
+            data.set("restoredMeta", Json(restored.restored_meta));
+            return settle_and_reply(kernel_, std::move(data));
+        }
+
+        // Unreachable while the disjunction above and the arms here name the same three verbs --
+        // which is the point: whoever breaks that gets this, not a silent misroute.
+        return Envelope::failure("contract.unimplemented",
+                                 "`" + method + "` is routed to the editor file-write block but "
+                                                "has no handler there");
     }
 
     // --- M9 e08a: the DAEMON SESSION-STATE verbs (D7 tier 1, design 05 §4) ----------------------
