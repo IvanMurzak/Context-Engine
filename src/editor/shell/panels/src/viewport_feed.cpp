@@ -2,6 +2,7 @@
 
 #include "context/editor/shell/panels/viewport_feed.h"
 
+#include <cstdint>
 #include <utility>
 
 namespace context::editor::shell::panels

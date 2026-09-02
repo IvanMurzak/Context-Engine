@@ -220,10 +220,12 @@ void ViewportBinding::attach_device(render::IDevice& device)
     // registry is what drops them; the entries keep their cameras and are re-acquired on the next
     // publish (their slots are re-minted there too — a slot is registry-local).
     targets_ = std::make_unique<render::ViewportTargetRegistry>(device);
-    for (auto& [id, entry] : entries_)
+    for (auto& [id, live] : entries_)
     {
         (void)id;
-        entry.slot = 0;
+        // NOT named `entry`: that is a member function of this class, and a local hiding a class
+        // member is MSVC C4458 — an ERROR under /W4 /WX, and invisible to the local GCC gate.
+        live.slot = 0;
     }
 }
 
@@ -231,10 +233,12 @@ void ViewportBinding::detach_device()
 {
     device_ = nullptr;
     targets_.reset();
-    for (auto& [id, entry] : entries_)
+    for (auto& [id, live] : entries_)
     {
         (void)id;
-        entry.slot = 0;
+        // NOT named `entry`: that is a member function of this class, and a local hiding a class
+        // member is MSVC C4458 — an ERROR under /W4 /WX, and invisible to the local GCC gate.
+        live.slot = 0;
     }
 }
 
