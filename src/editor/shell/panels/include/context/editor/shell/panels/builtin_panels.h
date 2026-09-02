@@ -88,6 +88,19 @@ class WriteNoticeRelay;
 class ViewportBinding;
 } // namespace context::editor::shell
 
+namespace context::render
+{
+// Forward-declared for the SAME reason as `ViewportBinding` above (M9 editor-UX e4): `viewport_pick`
+// below takes a region point/size by VALUE and a `RenderSnapshot` by const reference, and only
+// builtin_panels.cpp needs the complete types (a function DECLARATION — as opposed to a call or a
+// definition — needs no more than the name). Including `view.h`/`render_world.h` here would put
+// render/rhi.h on the include path of every TU that hosts a panel, the `-fno-rtti` CEF smokes
+// included, for one signature.
+struct RegionPoint;
+struct Extent2D;
+struct RenderSnapshot;
+} // namespace context::render
+
 namespace context::editor::shell::panels
 {
 
@@ -514,10 +527,17 @@ struct BuiltinPanels
     // declaration order (destruction is reverse order) gives by placing it AFTER `session` here.
     std::unique_ptr<FilesFeed> files;
 
-    // The M9 editor-UX e3 Scene-viewport feed. Declaration position is NOT load-bearing here (it
-    // holds no gateway anybody else points at, and points at nothing declared in this bag): it holds
-    // its own per-instance `ViewportPanel` models and a NON-owning pointer to the window's
-    // `ViewportBinding`, which lives in `EditorWindow` and outlives every bag by construction.
+    // The M9 editor-UX e3 Scene-viewport feed. It holds a NON-owning pointer to the window's
+    // `ViewportBinding`, which lives in `EditorWindow` and outlives every bag by construction — that
+    // half of its state needs no ordering here.
+    //
+    // ⚠ DECLARATION POSITION IS NOW LOAD-BEARING (M9 editor-UX e4, D8): `install_builtin_panels`
+    // calls `bind_scene_tree(&scenetree->panel())` on this feed, handing it a raw, non-owning
+    // `SceneTreePanel*` into the `scenetree` member declared ABOVE. `viewport` MUST stay declared
+    // AFTER `scenetree` so it is destroyed FIRST (members destroy in reverse declaration order) —
+    // the same "a raw pointer's target must outlive it" rule every other member in this struct is
+    // ordered by. Moving `viewport` earlier would leave a pick mid-teardown dereferencing a
+    // dangling `SceneTreePanel*`.
     std::unique_ptr<ViewportFeed> viewport;
 
     // How many providers actually bound. Checked by the caller: a silently dropped binding presents
@@ -595,5 +615,16 @@ void bind_viewport_producer(BuiltinPanels& panels, ViewportBinding* viewports);
 //
 // Returns how many `editor.camera-set` calls were attempted. Safe with no viewport feed bound.
 std::size_t pump_viewport_cameras(BuiltinPanels& panels, client::Client& client);
+
+// --- the M9 editor-UX e4 picking write (D8) -------------------------------------------------------
+//
+// A thin wrapper over `ViewportFeed::pick`, for the SAME forward-declaration reason as every other
+// seam here: `editor_main.cpp` holds only the forward-declared `ViewportFeed` above, so a caller
+// that queued a `shell::ViewportPressEvent` (shell.h) off `EditorWindow::take_viewport_presses()`
+// drives the pick through this free function instead of a member call. See `ViewportFeed::pick`
+// (viewport_feed.h) for the raycast + write it performs; `false` here is the SAME honest no-op —
+// no viewport feed bound, or nothing bound for it to write through.
+bool viewport_pick(BuiltinPanels& panels, const std::string& instance_id, render::RegionPoint point,
+                   render::Extent2D region_size, const render::RenderSnapshot& snapshot);
 
 } // namespace context::editor::shell::panels

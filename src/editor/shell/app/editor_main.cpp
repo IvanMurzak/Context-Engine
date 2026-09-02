@@ -1551,6 +1551,17 @@ int main(int argc, char** argv)
         if (shell::EditorWindow* primary = manager.window(0))
         {
             shell::panels::bind_viewport_producer(builtin, &primary->viewports());
+            // editor-UX e4 (D8): resolve every viewport PRESS this window queued this pump
+            // (take_viewport_presses()) into a pick, over window 0's OWN scene — the Shell's
+            // `viewport_scene()`, EMPTY until a daemon scene-data read exists (viewport_binding.h §
+            // SCENE DATA, HONESTLY), so a live pick always misses today; that is the honest state
+            // this run's own architecture is in, not a bug here. AFTER the producer (re-)bind above,
+            // so `pick()` reads the SAME binding the copy just rendered through.
+            for (const shell::ViewportPressEvent& press : primary->take_viewport_presses())
+            {
+                (void)shell::panels::viewport_pick(builtin, press.region_id, press.point,
+                                                   press.region_size, primary->viewport_scene());
+            }
         }
         else
         {
@@ -1570,6 +1581,17 @@ int main(int argc, char** argv)
             shell::EditorWindow* secondary = manager.window(entry.id);
             shell::panels::bind_viewport_producer(
                 surfaces->builtin, secondary == nullptr ? nullptr : &secondary->viewports());
+            // e4, the SAME per-window pick drain as the primary above — its own window, its own
+            // scene, its own bag.
+            if (secondary != nullptr)
+            {
+                for (const shell::ViewportPressEvent& press : secondary->take_viewport_presses())
+                {
+                    (void)shell::panels::viewport_pick(surfaces->builtin, press.region_id,
+                                                       press.point, press.region_size,
+                                                       secondary->viewport_scene());
+                }
+            }
         }
         if (client::Client* live_client = lifecycle.client())
         {

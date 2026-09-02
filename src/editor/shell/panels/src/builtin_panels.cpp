@@ -940,6 +940,13 @@ BuiltinPanels install_builtin_panels(PanelHost& host, ViewportBinding* viewports
             ++out.bound;
             out.viewport = std::move(viewport_feed);
         }
+        // M9 editor-UX e4 (D8): point the viewport's pick write at the Scene tree — "no new channel",
+        // the same panel a tree-row click already writes through. Only when BOTH bound; a refused
+        // Scene tree leaves picking with nothing to drive (ViewportFeed::pick's own honest no-op).
+        if (out.viewport != nullptr && out.scenetree != nullptr)
+        {
+            out.viewport->bind_scene_tree(&out.scenetree->panel());
+        }
     }
 
     return out;
@@ -992,6 +999,16 @@ std::size_t pump_viewport_cameras(BuiltinPanels& panels, client::Client& client)
         }
     }
     return attempted;
+}
+
+bool viewport_pick(BuiltinPanels& panels, const std::string& instance_id, render::RegionPoint point,
+                   render::Extent2D region_size, const render::RenderSnapshot& snapshot)
+{
+    if (panels.viewport == nullptr)
+    {
+        return false;
+    }
+    return panels.viewport->pick(instance_id, point, region_size, snapshot);
 }
 
 } // namespace context::editor::shell::panels

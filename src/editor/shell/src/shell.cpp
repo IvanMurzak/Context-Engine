@@ -355,6 +355,13 @@ void EditorWindow::end_drag(OsrDragEndReason reason, bool inject)
     push_drag_cursor(DragCursor::none);
 }
 
+std::vector<ViewportPressEvent> EditorWindow::take_viewport_presses()
+{
+    std::vector<ViewportPressEvent> out;
+    out.swap(viewport_presses_);
+    return out;
+}
+
 void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
 {
     switch (event.kind)
@@ -429,26 +436,40 @@ void EditorWindow::handle_event(const ShellEvent& event, std::uint64_t now_us)
             browser_->send_pointer(dispatch, event.pointer);
             break;
         case InputTarget::viewport:
+            // editor-UX e4 (D8): a PRIMARY-BUTTON PRESS inside a live viewport region is queued for
+            // the composition root to resolve into a pick — the window has no daemon client and no
+            // selection panel to write through (D10: `context_editor_shell` is core Shell, which the
+            // panel composition root LINKS, never the reverse), so this only reports WHERE the press
+            // landed (`take_viewport_presses()`); `ViewportFeed::pick()` does the raycast + the
+            // `editor.select` write. Every OTHER pointer sample (moves, releases, non-primary
+            // buttons) is deliberately dropped here: picking fires once per press (replace mode,
+            // D8's own default), not once per sample a drag would generate, and orbit/pan/zoom
+            // gesture math stays later work.
+            if (event.pointer.action == PointerAction::down &&
+                event.pointer.button == MouseButton::left)
+            {
+                if (const ShellRegion* region = input_.regions().find(dispatch.region_id);
+                    region != nullptr)
+                {
+                    viewport_presses_.push_back(ViewportPressEvent{
+                        dispatch.region_id,
+                        render::RegionPoint{dispatch.region_position.x, dispatch.region_position.y},
+                        region->rect.size});
+                }
+            }
+            break;
         case InputTarget::native:
-            // The native path (03 §6.3): camera controls / picking / gizmo gestures, and the
-            // CAPTION drag surface (editor-window-chrome b1/c1, 02 §6): both OS consumers sit
-            // UPSTREAM of this arm. On Windows the NC hit-test consumes caption points BEFORE
-            // client routing (they arrive as NC messages the pump never forwards); on macOS c1's
-            // pump consumes a caption PRESS at NSEvent time (cocoa_window.mm's caption consult —
-            // only there does performWindowDragWithEvent: still have the event), so what reaches
-            // here is the press's aftermath (its release, hovers over the strip) — and on a backend
-            // with no native consumer at all (the headless smokes) the caption samples themselves.
-            // Dropping them here IS the suppression: a caption press must never half-reach the
-            // browser (ROADMAP risk 3). The caption CONTROLS are deliberately NOT this arm's —
-            // they are web-drawn browser content and route InputTarget::browser (input.cpp).
-            //
-            // ⚠ THE VIEWPORT ARM IS STILL EMPTY, and that is a scope statement rather than an
-            // oversight. editor-UX e3 landed the viewport's PRODUCER and its camera TRANSPORT (the
-            // opaque `editor.camera-set` payload, hydrated from `editor.cameras-get`), and the one
-            // thing that MOVES a camera today is the panel's keyboard-reachable `viewport.frame-scene`
-            // command — which arrives over `panel.invoke`, not here. Orbit/pan/zoom gesture math and
-            // picking are e4 and its successors; a half-written gesture here would be a second,
-            // untested camera writer beside the one the feed already owns.
+            // The native path (03 §6.3), minus the viewport's own arm above: the CAPTION drag
+            // surface (editor-window-chrome b1/c1, 02 §6). Both OS consumers sit UPSTREAM of this
+            // arm. On Windows the NC hit-test consumes caption points BEFORE client routing (they
+            // arrive as NC messages the pump never forwards); on macOS c1's pump consumes a caption
+            // PRESS at NSEvent time (cocoa_window.mm's caption consult — only there does
+            // performWindowDragWithEvent: still have the event), so what reaches here is the press's
+            // aftermath (its release, hovers over the strip) — and on a backend with no native
+            // consumer at all (the headless smokes) the caption samples themselves. Dropping them
+            // here IS the suppression: a caption press must never half-reach the browser (ROADMAP
+            // risk 3). The caption CONTROLS are deliberately NOT this arm's — they are web-drawn
+            // browser content and route InputTarget::browser (input.cpp).
             break;
         case InputTarget::keymap:
         case InputTarget::swallowed:

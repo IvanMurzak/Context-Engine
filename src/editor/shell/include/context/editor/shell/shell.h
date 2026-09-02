@@ -86,6 +86,24 @@ struct EditorWindowConfig
     std::uint64_t placement_poll_us = 250'000;
 };
 
+// One pointer PRESS routed to a live viewport region this pump (M9 editor-UX e4, D8) — queued for
+// the composition root to resolve into a pick. The window itself has no daemon client and no
+// selection panel (D10: `EditorWindow` is core Shell, which the panel composition root LINKS, never
+// the reverse — the same reason `viewport_scene()` below hands out a snapshot rather than owning the
+// selection write), so this only reports WHERE a primary press landed; `context_editor_panels`'
+// `ViewportFeed::pick()` (viewport_feed.h) does the raycast and the write, off `take_viewport_presses()`.
+struct ViewportPressEvent
+{
+    // The SAME string `ViewportBinding`/`editor.camera-set` key viewports by (viewport_binding.h §
+    // THREE IDS) — the copy the press landed in.
+    std::string region_id;
+    // PHYSICAL, region-relative — `render::pick_ray`'s own convention (view.h).
+    render::RegionPoint point;
+    // The region's published rect size (physical pixels) at press time — `pick_ray` needs it to
+    // build the same ray the copy renders through.
+    render::Extent2D region_size;
+};
+
 // One window: native handle + swapchain + one browser + compositor + input binding (03 §1).
 class EditorWindow
 {
@@ -123,6 +141,11 @@ public:
     // the honest state rather than a stub. Handed out by reference so the day that read lands, the
     // feed fills THIS snapshot and the producer needs no new argument.
     [[nodiscard]] render::RenderSnapshot& viewport_scene() { return viewport_scene_; }
+    // Every primary-button PRESS routed to a live viewport region since the last call (M9 editor-UX
+    // e4, D8) — drained exactly like `ViewportBinding::take_dirty()`/`take_camera_writes()` above: a
+    // queue the composition root walks per frame, not a callback, because a press is already
+    // discovered inside the SAME per-frame pump the composition root already drives.
+    [[nodiscard]] std::vector<ViewportPressEvent> take_viewport_presses();
     [[nodiscard]] std::size_t state_index() const { return config_.state_index; }
     [[nodiscard]] bool alive() const { return alive_; }
     // Whether the OS last reported this window focused (a1: `chrome.state.focused`). False until the
@@ -248,6 +271,8 @@ private:
     // device is still alive. (The same ordering argument `drag_` above makes about the browser.)
     ViewportBinding viewports_;
     render::RenderSnapshot viewport_scene_;
+    // e4: presses queued this pump for the composition root — see take_viewport_presses().
+    std::vector<ViewportPressEvent> viewport_presses_;
     WindowPlacement last_placement_;
     // Reused across pumps rather than constructed per frame: this is drained every loop iteration,
     // so a local would malloc/free once per frame with input. The Win32 backend keeps its own
