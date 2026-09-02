@@ -393,10 +393,14 @@ add_test(NAME webui-no-raw-key-handlers
 # to the daemon" is a hard boundary the task required to be PROVEN, not stated — and a runtime test
 # can only observe the paths it drives. This is the static half, and it is the one that catches a
 # forwarding path nothing happens to exercise: it refuses any mention of editor-core's ONE exit
-# (`ShellBridge`, bridge.ts) inside `uibus.ts`, and any `editor.ui.*` subscription ANYWHERE in
-# editor-core whose callback reaches that exit. The runtime half lives in the `webui-ts-unit` tier
+# (`ShellBridge`, bridge.ts) inside `uibus.ts`, any `editor.ui.*` subscription ANYWHERE in
+# editor-core whose callback reaches that exit, and — since editor-UX f1 — any mention of a
+# DAEMON-reaching router method (`panel.daemon.call`, `panel.facts.publish`) inside a MIRROR-BEARING
+# module, which is the rule that closes the cross-window mirror seam rules 1 and 2 deliberately
+# leave alone. The runtime half lives in the `webui-ts-unit` tier
 # (`core/src/test/uibus.test.ts`, which records the injected query function and requires zero
-# traffic); each catches what the other cannot, and both were verified by planting a violation.
+# traffic, then drives the REAL mirror sink and requires its wire methods to be Shell-local); each
+# catches what the other cannot, and every rule was verified by planting a violation.
 #
 # A SOURCE scan, so — like the raw-key-handler lint above — it rides the `webui-*` family on all
 # three default `build` legs with no browser and no `ci.yml` `--target` bookkeeping.

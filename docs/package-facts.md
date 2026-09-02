@@ -164,11 +164,15 @@ rebuild `context_editor_webui` before reading the result.
 
 ## Known gaps, named rather than papered over
 
-- **`tools/check_ui_bus_boundary.py` owes a deny-list entry for `panel.facts.publish`.** It already
-  owed one for `panel.daemon.call`; this task adds the second daemon-reaching method and therefore
-  widens exactly that hole. Closing it is `f1`, deliberately sequenced after this task, and it must be
-  verified the way that checker was verified originally — by planting a forwarding path and watching
-  the gate go red.
+- ~~**`tools/check_ui_bus_boundary.py` owes a deny-list entry for `panel.facts.publish`.**~~
+  **CLOSED by `f1`.** That checker's rule 3 now denies `panel.facts.publish` *and* `panel.daemon.call`
+  — by wire literal and by the editor-core constant that mirrors each — to any **mirror-bearing**
+  module (one implementing `UiMirrorSink` or calling `attachMirror(`), so a mirror sink can no longer
+  be pointed at this verb to put a window's chrome facts on the daemon wire. A *compliant* caller like
+  `makePackageFactPublish` bears no sink and is untouched. Verified by planting a forwarding path in
+  the real sink and watching the gate go red, then reverting it. See
+  [`editor-ui-bus.md`](editor-ui-bus.md) § the D7 boundary for the rule and for what it deliberately
+  does not cover.
 - **The fact bus is primary-window-only**, inheriting `PackageSessionHost`'s existing gap:
   `SecondaryWindowSurfaces` does not install the package session host, so a package panel torn out
   into a second window cannot publish. Fail-closed, and recorded in `package_sessions.h` control 4.

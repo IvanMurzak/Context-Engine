@@ -22,6 +22,14 @@
 // what `tools/check_ui_bus_boundary.py` (ctest `webui-uibus-boundary`) sweeps, statically, over every
 // editor-core source. The two are complementary by construction, and BOTH were verified by planting a
 // forwarding path and watching them go red.
+//
+// ⚠ AND ON ITS SIBLING, THE DENY-LIST CASE (editor-UX f1). Test 3 proves nothing leaves the renderer
+// when no mirror transport is wired — a true and, on its own, cheap claim: an idle channel satisfies
+// it. The case immediately after it wires the REAL `ShellUiMirrorSink` and asserts what the seam puts
+// on the wire IS the Shell-local `ui.mirror` verb and is never `panel.daemon.call` /
+// `panel.facts.publish` — the two methods that reach the daemon. The pair is the point: one shows the
+// channel silent when nothing should cross it, the other shows it CARRYING, so neither absence can be
+// explained by a mechanism that never ran.
 
 import { assert, assertEqual, type TestCase } from "./harness.js";
 import {
@@ -41,7 +49,12 @@ import {
     type EditorUiEvent,
     type UiMirrorSink,
 } from "../uibus.js";
-import { BRIDGE_QUERY_FUNCTION, type BridgeQuery } from "../bridge.js";
+import { BRIDGE_QUERY_FUNCTION, type BridgeQuery, type ShellBridge } from "../bridge.js";
+import { UI_MIRROR_METHOD, UI_MIRROR_POLL_METHOD, wireUiMirror } from "../uimirror.js";
+// The two DENY-LISTED methods, imported from the modules that DEFINE them rather than restated as
+// strings here: a copy would keep asserting the old name the day either is renamed.
+import { PANEL_DAEMON_CALL_METHOD } from "../boot.js";
+import { PANEL_FACTS_PUBLISH_METHOD } from "../packagefacts.js";
 import { BUILTIN_DARK, BUILTIN_LIGHT, ThemeEngine, type ThemeRoot } from "../theme.js";
 
 /** A ThemeRoot that records instead of touching the harness page's own document. */
@@ -364,6 +377,55 @@ export const uibusTests: readonly TestCase[] = [
                     delete scope[BRIDGE_QUERY_FUNCTION];
                 }
             }
+        },
+    },
+    {
+        name: "uibus: D7 deny-list — the REAL mirror sink's wire methods are Shell-local, never a daemon verb",
+        run: async () => {
+            // THE RUNTIME HALF OF THE DENY-LIST (editor-UX f1). `check_ui_bus_boundary.py` rule 3 is
+            // the static half: no mirror-bearing module may NAME `panel.daemon.call` or
+            // `panel.facts.publish`. This is the same claim observed where it actually matters — on
+            // the wire — by driving the REAL `ShellUiMirrorSink` + `UiMirrorPoller` and recording
+            // every method they put on the bridge. The case above proves NOTHING leaves the renderer
+            // when no transport is wired; this one proves that when the seam IS wired, what leaves is
+            // the Shell-local mirror verb and nothing else.
+            const methods: string[] = [];
+            const bridge = {
+                call: (method: string): Promise<unknown> => {
+                    methods.push(method);
+                    return Promise.resolve(method === UI_MIRROR_POLL_METHOD ? { events: [] } : null);
+                },
+            } as unknown as ShellBridge;
+
+            const bus = new EditorUiBus({ origin: "window-1" });
+            bus.declareTopics({ packageId: PKG, topics: [PKG_TOPIC] });
+            const { poller } = wireUiMirror(bridge, bus);
+            for (const topic of BUILTIN_UI_TOPICS) {
+                bus.publish(topic, { probe: true });
+            }
+            bus.publish(PKG_TOPIC, { probe: true });
+            await poller.poll();
+
+            // THE POSITIVE HALF, ASSERTED FIRST AND ON PURPOSE. "No daemon verb was called" is
+            // satisfied for free by a seam that called nothing at all — which is exactly the vacuity
+            // the whole D7 tier is written against. So the channel must be shown to have CARRIED
+            // something before its contents are allowed to prove anything.
+            assert(methods.length > 0, "the mirror transport really did reach the Shell");
+            assert(
+                methods.indexOf(UI_MIRROR_METHOD) !== -1,
+                "and the chrome facts left over the SHELL-LOCAL mirror method — the seam ran",
+            );
+            for (const method of methods) {
+                assert(
+                    method !== PANEL_DAEMON_CALL_METHOD && method !== PANEL_FACTS_PUBLISH_METHOD,
+                    `the mirror seam put a DAEMON-reaching method on the wire: ${method}`,
+                );
+            }
+            assertEqual(
+                methods.filter((method) => method.indexOf("ui.mirror") !== 0),
+                [],
+                "and every method it used at all is a Shell-local ui.mirror* verb",
+            );
         },
     },
 
