@@ -94,8 +94,11 @@ Note `^cli-` does NOT match `client-`.
 
 - Two deterministic ~10 s gates front everything via `needs:`: `license-gate`
   (`tools/check_licenses.py` + SBOM) and `ci-config-gate` (`tools/check_fleet_manifest.py` +
-  `tools/check_ci_gating.py`). Only checks with no network, subprocess, timing or ports may sit in
-  a gate job.
+  `tools/check_ci_gating.py` + `tools/check_ci_python.py`). Only checks with no network,
+  subprocess, timing or ports may sit in a gate job.
+- **Every job installs its own Python** right after checkout (`uses: ./.github/actions/python`,
+  uv-managed, no registry writes) — never the runner's, never `actions/setup-python`;
+  `check_ci_python.py` enforces it (`docs/self-hosted-runners.md` § 6).
 - `python-tests` is a blocking check that **gates nothing** (issue #459): it has timing flake
   surface, and a `needs:` edge would skip every dependent job. `check_ci_gating.py` enforces this.
 - Counts: 24 job definitions (3 unfronted + 21 fronted, expanding to 39 of the rollup's 42 checks).
