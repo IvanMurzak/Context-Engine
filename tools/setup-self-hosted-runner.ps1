@@ -17,8 +17,8 @@
         complement to the workflow-side env-injection in `.github/workflows/ci.yml`.
 
       * LocalSystem cannot run WSL, so workflow steps must use `pwsh`/`cmd`, never
-        `shell: bash`. And Python is exposed as `py`, not `python`. (Documented; not
-        enforced here — this script only provisions the runner.)
+        `shell: bash`. Python is never taken from the machine: every CI job installs its
+        own (.github/actions/python). (Documented; not enforced here.)
 
     Run it once per runner, giving each a distinct -RunnerName (and thus a distinct
     -RunnerRoot). Re-running with the same name re-registers cleanly (--replace).

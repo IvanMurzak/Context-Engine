@@ -902,6 +902,16 @@
       "description": "tools/check_ci_gating.py pins WHICH jobs may front the rollup via needs: (issue #459). Reds in both directions - if a timing-dependent job such as python-tests re-enters a needs: list, and if the retained deterministic fail-fast is deleted from a heavy job."
     },
     {
+      "id": "ci-self-installed-python",
+      "requirement": "R-QA-012",
+      "runner_class": "gh-ubuntu-shared",
+      "build_flavor": "n/a",
+      "tier": "per-PR",
+      "red_x_policy": "blocking",
+      "ci_job_id": "ci-config-gate",
+      "description": "tools/check_ci_python.py: every job in every workflow installs its own Python via .github/actions/python (uv-managed, no registry writes) before any run: step or other local action, and nothing uses actions/setup-python (which rewrites HKLM PythonCore on a LocalSystem Windows runner). Keeps CI independent of whatever Python the runner machine has (docs/self-hosted-runners.md section 6)."
+    },
+    {
       "id": "perf-filesync-attach-100k",
       "requirement": "R-FILE-011",
       "runner_class": "perf-linux-bare-metal",

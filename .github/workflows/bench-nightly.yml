@@ -30,6 +30,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -138,6 +143,11 @@ jobs:
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain

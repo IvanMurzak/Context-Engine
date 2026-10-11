@@ -1,0 +1,89 @@
+# Installs THIS workflow's own Python on every OS leg — it never probes the machine for one.
+#
+# Owner rule: a workflow is self-sufficient. The old Windows step (`windows-python`) only SEARCHED
+# the box (directory scans + PATH) and went red the day the self-hosted machine's Python install
+# broke (2026-10: Python312 dir without a python.exe, registry still pointing at it). What a job
+# needs, the job now installs.
+#
+# WHY uv AND NOT actions/setup-python (docs/self-hosted-runners.md § 6). On a Windows runner that
+# runs as LocalSystem, setup-python runs the official CPython installer as an administrator, which
+# registers the install machine-wide in HKLM\SOFTWARE\Python\PythonCore — the exact write by which
+# another tenant's setup-python pointed that key at an ephemeral tool cache and then deleted it,
+# taking this repo's Windows legs down twice (2026-08-27, 2026-08-29). The Windows Installer state it
+# leaves behind is machine-wide too, so concurrent runners and other repos on the same box collide.
+# `uv python install` only UNPACKS a relocatable python-build-standalone archive into a directory:
+#   * --no-registry — no PEP 514 registration (HKCU), so this job writes no registry state at all;
+#   * --no-bin      — no python3.x shim in the service profile's shared ~/.local/bin;
+#   * the install dir lives under this runner's tool cache in a repo-named folder, so it is KEPT for
+#     reuse (a warm runner re-installs nothing) and never shared with another repo's Python; uv locks
+#     the directory, so two jobs racing on one install dir are safe as well;
+#   * uv's download cache goes to runner.temp, which the runner wipes after every job — no junk left.
+#
+# Outputs (for every later step): CONTEXT_PYTHON3_EXECUTABLE (read by cmake/ContextPython.cmake,
+# which pins it as Python3_EXECUTABLE and turns FindPython3's registry lookup OFF), Python3_ROOT_DIR,
+# and the interpreter's directory at the front of PATH (`python3` on Linux/macOS, `python` on Windows).
+# Requires the repo to be checked out first.
+
+name: Python (installed by the workflow)
+description: Install a uv-managed CPython for this job (no registry, no machine-global state) and hand it to CMake and every later step
+
+inputs:
+  python-version:
+    description: >
+      The `uv python install` request. 3.12 is the tree's floor (tools/fetch_cef.py's tarfile
+      filter contract); uv resolves it to the newest 3.12.x it knows on first install and reuses
+      that install afterwards.
+    required: false
+    default: "3.12"
+
+runs:
+  using: composite
+  steps:
+    - name: Install uv
+      uses: astral-sh/setup-uv@v10.3.0
+      env:
+        # setup-uv exports this (GITHUB_ENV) for the steps below: the one place the install dir is set.
+        UV_PYTHON_INSTALL_DIR: ${{ runner.tool_cache }}/context-engine-python
+      with:
+        # Pinned (not `latest`): this setup-uv release embeds the checksum of this uv version, so the
+        # binary is verified, and a warm self-hosted runner finds it in its tool cache offline.
+        version: "0.13.0"
+        # No GitHub Actions cache: the Python install is cached on disk (self-hosted) and the
+        # interpreter is the only thing this action installs. UV_CACHE_DIR still goes to runner.temp.
+        enable-cache: false
+        cache-local-path: ${{ runner.temp }}/context-engine-uv-cache
+
+    - name: Install Python (Windows)
+      if: runner.os == 'Windows'
+      shell: pwsh
+      env:
+        PYTHON_REQUEST: ${{ inputs.python-version }}
+      run: |
+        $ErrorActionPreference = 'Stop'
+        uv python install $env:PYTHON_REQUEST --no-registry --no-bin
+        if ($LASTEXITCODE -ne 0) { Write-Host "::error::uv python install $env:PYTHON_REQUEST failed"; exit 1 }
+        $exe = (uv python find --managed-python --no-project $env:PYTHON_REQUEST | Select-Object -Last 1)
+        if ($LASTEXITCODE -ne 0 -or -not $exe) { Write-Host "::error::uv could not find the Python it just installed"; exit 1 }
+        $exe = $exe.Trim()
+        # Prove it RUNS and carries the stdlib modules the tooling relies on.
+        & $exe -c "import sys, tarfile, urllib.request, json; assert sys.version_info >= (3, 12), sys.version; print(sys.version)"
+        if ($LASTEXITCODE -ne 0) { Write-Host "::error::$exe does not run as Python >= 3.12"; exit 1 }
+        $dir = Split-Path -Parent $exe
+        "CONTEXT_PYTHON3_EXECUTABLE=$exe", "Python3_ROOT_DIR=$dir" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+        $dir, (Join-Path $dir 'Scripts') | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+        Write-Host "::notice title=Python::$exe (installed by uv, no registry)"
+
+    - name: Install Python (Linux/macOS)
+      if: runner.os != 'Windows'
+      shell: bash
+      env:
+        PYTHON_REQUEST: ${{ inputs.python-version }}
+      run: |
+        set -euo pipefail
+        uv python install "$PYTHON_REQUEST" --no-bin
+        exe="$(uv python find --managed-python --no-project "$PYTHON_REQUEST")"
+        "$exe" -c "import sys, tarfile, urllib.request, json; assert sys.version_info >= (3, 12), sys.version; print(sys.version)"
+        dir="$(dirname "$exe")"
+        { echo "CONTEXT_PYTHON3_EXECUTABLE=$exe"; echo "Python3_ROOT_DIR=$(dirname "$dir")"; } >> "$GITHUB_ENV"
+        echo "$dir" >> "$GITHUB_PATH"
+        echo "::notice title=Python::$exe (installed by uv)"

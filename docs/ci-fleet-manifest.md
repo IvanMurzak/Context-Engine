@@ -89,6 +89,7 @@ Every gate carries exactly one written red-X policy:
 | `shader-crosscompile` | R-REND-005 | gh-ubuntu-shared | per-PR | blocking | `shader-crosscompile` |
 | `fleet-manifest-validation` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `ci-config-gate` |
 | `ci-gating-topology` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `ci-config-gate` |
+| `ci-self-installed-python` | R-QA-012 | gh-ubuntu-shared | per-PR | blocking | `ci-config-gate` |
 | `perf-filesync-attach-100k` | R-FILE-011 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-query-p99` | R-BRIDGE-008 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
 | `bench-sustained-backpressure` | R-FILE-013 | perf-linux-bare-metal | nightly | **advisory** ⏳ | `bench-100k-nightly` |
@@ -193,10 +194,12 @@ rollup, while `python-tests` gates nothing):
 ```bash
 python3 tools/check_fleet_manifest.py --repo-root .
 python3 tools/check_ci_gating.py --repo-root .      # the ci-gating-topology row (issue #459)
+python3 tools/check_ci_python.py --repo-root .      # the ci-self-installed-python row
 ```
 
-Both R-QA-012 rows in the table above live in that one job: `fleet-manifest-validation` is the first
-command, `ci-gating-topology` the second (which jobs may front the rollup via `needs:`).
+All three R-QA-012 rows in the table above live in that one job: `fleet-manifest-validation` is the
+first command, `ci-gating-topology` the second (which jobs may front the rollup via `needs:`), and
+`ci-self-installed-python` the third (every job installs its own Python — `.github/actions/python`).
 
 That is the whole invocation: the gate resolves the manifest and BOTH workflow files from
 `--repo-root` itself (per-PR gates live in `ci.yml`, the nightly benchmark gates in
