@@ -7,10 +7,10 @@
 # the IDE products and the leg had no compiler. VsDevCmd also puts the VS-bundled CMake + Ninja on
 # PATH, so a runner needs no separate CMake/Ninja install.
 #
-# TEMP — the tree has ~75 `temp_directory_path()` call sites (tests, CEF smokes); under a LocalSystem
-# service they write to the machine-wide C:\Windows\Temp, where a crashed test leaves its directory
-# forever. Pointing TEMP/TMP at runner.temp makes every such file job-private: the runner wipes that
-# directory after the job, so a persistent runner slot accumulates no temp junk.
+# TEMP — TEMP/TMP point at runner.temp, which the runner wipes after the job, so tools that honour
+# them (Python's tempfile, CMake, MSBuild, node) leave nothing behind. NOT the tree's C++ tests:
+# under a LocalSystem service std::filesystem::temp_directory_path() goes through GetTempPath2,
+# which returns C:\Windows\SystemTemp for SYSTEM and ignores TEMP/TMP — `job-cleanup` sweeps that.
 #
 # Requires the repo to be checked out first; the caller guards it with
 # `if: runner.os == 'Windows' && runner.environment == 'self-hosted'`.

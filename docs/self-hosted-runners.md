@@ -182,16 +182,23 @@ A runner — above all a **persistent** runner-manager slot (below) — must kee
 except what is kept on purpose for reuse (the workspace's `.git`, the tool cache with uv's Python).
 Two self-hosted-Windows-only actions in `ci.yml` enforce that:
 
-* **`TEMP`/`TMP` → `runner.temp`** (`.github/actions/windows-msvc`). The tree has ~75
-  `temp_directory_path()` call sites; under a LocalSystem service they would write to the
-  machine-wide `C:\Windows\Temp`, where a crashed test leaves its directory forever. The runner
-  wipes `runner.temp` after every job.
-* **`.github/actions/reap-job-processes`**, the LAST step of every self-hosted Windows job
-  (`if: always()`): stops every process whose executable lives under this job's
-  `GITHUB_WORKSPACE` or `RUNNER_TEMP` — e.g. the CEF helpers a smoke leaves behind when
-  `CefShutdown()` crashes after its assertions pass, which otherwise hold `locales\*.pak` open and
-  break the next job's build. Each leftover is reported as a `::warning::`; the step never fails the
-  job and never touches a process outside the job's own directories.
+* **`TEMP`/`TMP` → `runner.temp`** (`.github/actions/windows-msvc`): tools that honour them
+  (Python `tempfile`, CMake, MSBuild, node) write job-private files the runner wipes after the job.
+* **`.github/actions/job-cleanup`**, the LAST step of every self-hosted Windows job
+  (`if: always()`):
+  * stops every process whose executable lives under this job's `GITHUB_WORKSPACE` or
+    `RUNNER_TEMP` — e.g. the CEF helpers a smoke leaves behind when `CefShutdown()` crashes after
+    its assertions pass, which otherwise hold `locales\*.pak` open and break the next job's build.
+    Each leftover is a `::warning::`; nothing outside the job's own directories is touched;
+  * sweeps `ctx-*` / `context-*` entries older than 3 h from `C:\Windows\SystemTemp` (and
+    `C:\Windows\Temp`). Under LocalSystem, `std::filesystem::temp_directory_path()` uses
+    `GetTempPath2`, which returns `C:\Windows\SystemTemp` for SYSTEM and **ignores TEMP/TMP**, and
+    several C++ tests never delete their scratch dirs (measured on ANASTASIIA, 2026-10-11: ~20
+    entries per `build` job from `test_set_command`, `test_verify_signature`,
+    `test_worktree_merge`, `test_e3_viewport_camera`, …). The age floor (3 h > the longest job
+    timeout, 75 min) is what keeps the sweep from deleting a sibling runner's in-flight files; the
+    repo-specific prefixes keep it off other tenants' files. The real fix — those tests deleting
+    their own scratch — is issue #521.
 
 (IvanPC's static runners additionally carry a `JOB_STARTED` hook, `runner-cleanup-orphans.ps1`
 in each runner root via `.env`, that reaps the same family at the start of the next job — a
@@ -216,8 +223,12 @@ case-insensitively); GitHub hands each Windows job to whichever matching runner 
 
 What the host needs — and what it deliberately does NOT need:
 
-* **VS 2022 Build Tools** with the x64 MSVC toolset, a Windows SDK and the C++ CMake tools
-  (VS-bundled CMake 3.31 + Ninja; § 4). **Git** with `core.longpaths=true`, and
+* **VS 2026 (v18) Build Tools** — workload `Microsoft.VisualStudio.Workload.VCTools`
+  `--includeRecommended` (x64 MSVC 14.5x, Windows SDK, C++ CMake tools: the VS-bundled CMake +
+  Ninja, § 4). Same MSVC generation as IvanPC: VS 2022's MSVC 14.44 rejects the tree under
+  `/W4 /WX` (C4127 "conditional expression is constant" in the contract tests), and
+  `vswhere -latest` picks v18 when both are installed. Installed on ANASTASIIA 2026-10-11 from
+  `https://aka.ms/vs/18/stable/vs_buildtools.exe` (`--quiet --wait --norestart`). **Git** with `core.longpaths=true`, and
   `LongPathsEnabled=1` (`runner-manager host doctor` checks both). PowerShell 7 (`pwsh`).
 * **No Python, CMake, Ninja, vcpkg or CEF install.** Python comes from the job (§ 6); CMake/Ninja
   from VsDevCmd; CEF, V8, wasmtime, esbuild etc. are fetched SHA-pinned by the build (CEF via
