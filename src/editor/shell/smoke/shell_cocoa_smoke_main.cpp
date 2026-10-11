@@ -908,11 +908,7 @@ int main(int argc, char** argv)
     COCOA_CHECK(zoom_observed,
                 "the pinned Maximize preference really zoomed - placement().maximized flipped true");
     smoke::diag_cocoa_window(*backend, "zoom observed");
-    for (int i = 0; i < 12; ++i) // TEMP DIAGNOSTIC: does the window server lag AppKit's frame?
-    {
-        (void)pump_until(manager, clock_us, [] { return false; }, std::chrono::milliseconds(100));
-        smoke::diag_cocoa_window(*backend, "zoomed +100ms");
-    }
+
 
     // Restore the frame before the drag drill, so its caption rect is published against a settled
     // geometry (a posted location is resolved against the frame at DEQUEUE time — claim 2).
@@ -960,6 +956,11 @@ int main(int argc, char** argv)
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
     smoke::diag_cocoa_window(*backend, "after drag drill");
+    for (int i = 0; i < 10; ++i) // TEMP DIAGNOSTIC: does the window server converge later?
+    {
+        (void)pump_until(manager, clock_us, [] { return false; }, std::chrono::milliseconds(100));
+        smoke::diag_cocoa_window(*backend, "after drag +100ms");
+    }
     {
         // TEMP DIAGNOSTIC (macOS 26.6 investigation).
         shell::CocoaCaptionStats s;
