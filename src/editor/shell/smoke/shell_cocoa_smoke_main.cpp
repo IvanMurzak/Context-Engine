@@ -87,14 +87,6 @@ namespace
 
 int g_failures = 0;
 
-} // namespace
-namespace context::editor::shell::smoke
-{
-void diag_cocoa_window(const IWindowBackend& backend, const char* tag); // TEMP DIAGNOSTIC
-}
-namespace
-{
-
 void check(bool condition, const char* what, int line)
 {
     if (condition)
@@ -890,24 +882,10 @@ int main(int argc, char** argv)
                stats.double_clicks >= caption_before.double_clicks + 1;
     });
     COCOA_CHECK(zoom_consumed, "the double-click reached the pump's caption consult");
-    {
-        // TEMP DIAGNOSTIC (macOS 26.6 investigation).
-        shell::CocoaCaptionStats s;
-        (void)shell::cocoa_caption_stats(*backend, s);
-        const shell::WindowPlacement p = backend->placement();
-        std::fprintf(stderr,
-                     "[diag] zoom drill: client=%ux%u press=(%d,%d) stats d=%zu dc=%zu y=%zu "
-                     "placement=(%d,%d %ux%u max=%d) browser_samples_since=%zu\n",
-                     chrome_client.width, chrome_client.height, zoom_press.pointer.position.x,
-                     zoom_press.pointer.position.y, s.drags, s.double_clicks, s.yields, p.x, p.y,
-                     p.width, p.height, p.maximized ? 1 : 0,
-                     browser->pointers().size() - chrome_samples_baseline);
-    }
     const bool zoom_observed =
         pump_until(manager, clock_us, [&] { return backend->placement().maximized; });
     COCOA_CHECK(zoom_observed,
                 "the pinned Maximize preference really zoomed - placement().maximized flipped true");
-
 
     // Restore the frame before the drag drill, so its caption rect is published against a settled
     // geometry (a posted location is resolved against the frame at DEQUEUE time — claim 2).
@@ -918,16 +896,6 @@ int main(int argc, char** argv)
     const bool settled_after_zoom =
         pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
     COCOA_CHECK(settled_after_zoom, "the geometry came to rest after the zoom round trip");
-    {
-        // TEMP DIAGNOSTIC (macOS 26.6 investigation).
-        const shell::WindowPlacement p = backend->placement();
-        std::fprintf(stderr,
-                     "[diag] after unzoom: placement=(%d,%d %ux%u max=%d) client=%ux%u "
-                     "capture=%d browser_samples_since=%zu\n",
-                     p.x, p.y, p.width, p.height, p.maximized ? 1 : 0, backend->client_size().width,
-                     backend->client_size().height, editor->input().has_pointer_capture() ? 1 : 0,
-                     browser->pointers().size() - chrome_samples_baseline);
-    }
 
     // --- a single caption press hands the drag to the OS, consumed WHOLE -------------------------
     const render::Extent2D drag_client = backend->client_size();
@@ -941,6 +909,78 @@ int main(int argc, char** argv)
     drag_press.pointer.position =
         shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u),
                       static_cast<std::int32_t>(drag_client.height / 4u)};
+
+    // ⚠ THE ZOOM ROUND TRIP NEEDS A DELIVERY SETTLE, NOT JUST A GEOMETRY SETTLE (Cocoa limit 3,
+    // smoke_window.h). `settled_after_zoom` proves `[window frame]` is at rest, but that is
+    // AppKit's answer, and a posted location is resolved against the frame state AppKit holds at
+    // DEQUEUE time. MEASURED on the hosted macos-26-arm64 image (macOS 26.6.2): right after the
+    // zoom:/un-zoom pair, `placement()` already read the settled 400x250 frame yet the press
+    // below was delivered 424 physical px LOW — exactly the zoomed-minus-restored height
+    // (674 - 250) — so it landed outside the window, missed the caption, and reached the browser.
+    // Intermittent (3 consecutive red runs, then green on the same image), so it is a race with
+    // the window server, not a decoder or consult defect: the pre-zoom drills and the same press
+    // re-posted a few seconds later (the yield drill) were delivered exactly where addressed.
+    //
+    // So the predicate is THE PROPERTY THE DRILL DEPENDS ON, measured rather than assumed: a
+    // marked MOVE posted into the free bottom half must come back through the same
+    // post -> AppKit queue -> pump -> decoder path at the y it was addressed to. Never a sleep —
+    // a probe that lands proves the conversion is current; one that does not is re-posted until
+    // the budget runs out, and then the drill fails HERE, on the honest reason, with the
+    // delivered y in the log. The probe is a move, so it cannot touch the press-count claims below.
+    const std::int32_t probe_y = static_cast<std::int32_t>(drag_client.height * 3u / 4u);
+    // Region membership with margin, per smoke_window.h's limit 1 (a ~2% scale about the centre is
+    // the normal round trip; the stale-frame displacement is the size of a whole window).
+    const std::int32_t probe_tolerance = static_cast<std::int32_t>(drag_client.height / 8u);
+    std::optional<std::int32_t> probe_delivered_y;
+    bool delivery_settled = false;
+    const auto probe_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!delivery_settled && std::chrono::steady_clock::now() < probe_deadline)
+    {
+        shell::ShellEvent probe;
+        probe.kind = shell::ShellEventKind::pointer;
+        probe.pointer.action = shell::PointerAction::move;
+        probe.pointer.position = shell::PointI{drag_press.pointer.position.x, probe_y};
+        smoke::apply_marker(probe.pointer.modifiers);
+        const std::size_t probe_baseline = browser->pointers().size();
+        if (!smoke::inject_event(*backend, smoke::WindowMode::real, probe))
+        {
+            break;
+        }
+        const bool probe_arrived = pump_until(
+            manager, clock_us,
+            [&] {
+                return smoke::count_marked(browser->pointers(), probe_baseline,
+                                           shell::PointerAction::move) > 0;
+            },
+            std::chrono::seconds(1));
+        if (!probe_arrived)
+        {
+            continue;
+        }
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        for (std::size_t i = probe_baseline; i < samples.size(); ++i)
+        {
+            if (samples[i].action == shell::PointerAction::move &&
+                smoke::has_marker(samples[i].modifiers))
+            {
+                probe_delivered_y = samples[i].position.y;
+            }
+        }
+        delivery_settled = probe_delivered_y.has_value() &&
+                           *probe_delivered_y >= probe_y - probe_tolerance &&
+                           *probe_delivered_y <= probe_y + probe_tolerance;
+    }
+    COCOA_CHECK(delivery_settled,
+                "after the zoom round trip a posted location came back where it was addressed "
+                "before the caption press was posted");
+    if (!delivery_settled)
+    {
+        std::fprintf(stderr,
+                     "[editor-shell-cocoa]   delivery probe addressed y=%d, last delivered y=%s%d\n",
+                     probe_y, probe_delivered_y ? "" : "<none> ",
+                     probe_delivered_y.value_or(0));
+    }
+
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
                 "a single caption press was accepted for injection");
     // `caption_before` is still the drag baseline: the only drill since that read was the zoom
@@ -952,63 +992,23 @@ int main(int argc, char** argv)
     });
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
+    if (!drag_consumed)
     {
-        // TEMP DIAGNOSTIC: how long do posted locations stay displaced after the zoom round trip?
-        const auto t0 = std::chrono::steady_clock::now();
-        const std::int32_t want_y = static_cast<std::int32_t>(drag_client.height * 3u / 4u);
-        for (int i = 0; i < 150; ++i)
+        // Say WHERE the press went: a marked press in the browser's log names its delivered
+        // position, which separates a displaced delivery from a consult that misjudged its rect.
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        for (std::size_t i = chrome_samples_baseline; i < samples.size(); ++i)
         {
-            shell::ShellEvent probe = zoom_press;
-            probe.pointer.action = shell::PointerAction::move;
-            probe.pointer.button = shell::MouseButton::none;
-            probe.pointer.position = shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u), want_y};
-            const std::size_t before = browser->pointers().size();
-            (void)smoke::inject_event(*backend, smoke::WindowMode::real, probe);
-            (void)pump_until(manager, clock_us, [&] {
-                return smoke::count_marked(browser->pointers(), before, shell::PointerAction::move) > 0;
-            }, std::chrono::milliseconds(200));
-            std::int32_t got = -99999;
-            const auto& all = browser->pointers();
-            for (std::size_t k = before; k < all.size(); ++k)
+            if (samples[i].action == shell::PointerAction::down &&
+                smoke::has_marker(samples[i].modifiers))
             {
-                if (smoke::has_marker(all[k].modifiers) && all[k].action == shell::PointerAction::move)
-                {
-                    got = all[k].position.y;
-                }
+                std::fprintf(stderr,
+                             "[editor-shell-cocoa]   caption press addressed (%d,%d) reached the "
+                             "browser at (%d,%d); caption rect height %u\n",
+                             drag_press.pointer.position.x, drag_press.pointer.position.y,
+                             samples[i].position.x, samples[i].position.y,
+                             drag_client.height / 2u);
             }
-            const long long ms = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
-                std::chrono::steady_clock::now() - t0).count());
-            std::fprintf(stderr, "[diag4] +%lldms probe want_y=%d got_y=%d\n", ms, want_y, got);
-            if (got >= want_y - 10 && got <= want_y + 10)
-            {
-                break;
-            }
-            (void)pump_until(manager, clock_us, [] { return false; }, std::chrono::milliseconds(20));
-        }
-    }
-    {
-        // TEMP DIAGNOSTIC (macOS 26.6 investigation).
-        shell::CocoaCaptionStats s;
-        (void)shell::cocoa_caption_stats(*backend, s);
-        const shell::WindowPlacement p = backend->placement();
-        std::fprintf(stderr,
-                     "[diag] drag drill: client=%ux%u dpi=%.3f press=(%d,%d) caption_h=%u "
-                     "stats before d=%zu dc=%zu y=%zu now d=%zu dc=%zu y=%zu capture=%d "
-                     "placement=(%d,%d %ux%u max=%d)\n",
-                     drag_client.width, drag_client.height,
-                     static_cast<double>(backend->dpi().factor()), drag_press.pointer.position.x,
-                     drag_press.pointer.position.y, drag_client.height / 2u, caption_before.drags,
-                     caption_before.double_clicks, caption_before.yields, s.drags,
-                     s.double_clicks, s.yields, editor->input().has_pointer_capture() ? 1 : 0,
-                     p.x, p.y, p.width, p.height, p.maximized ? 1 : 0);
-        const std::vector<shell::PointerEvent>& all = browser->pointers();
-        for (std::size_t i = chrome_samples_baseline; i < all.size(); ++i)
-        {
-            std::fprintf(stderr, "[diag]   browser sample %zu: action=%d button=%d pos=(%d,%d) "
-                                 "clicks=%d marked=%d\n",
-                         i, static_cast<int>(all[i].action), static_cast<int>(all[i].button),
-                         all[i].position.x, all[i].position.y, all[i].click_count,
-                         smoke::has_marker(all[i].modifiers) ? 1 : 0);
         }
     }
     // The matching release is NOT consumed: it flows through ordinary arbitration (the caption
