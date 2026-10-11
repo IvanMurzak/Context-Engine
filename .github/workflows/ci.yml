@@ -2146,7 +2146,7 @@ jobs:
           cmake --build --preset dev --target context_editor_shell_cocoa_smoke
           smoke_exe="$(find build/dev -type f -name context_editor_shell_cocoa_smoke | head -n1)"
           test -n "$smoke_exe" || { echo "context_editor_shell_cocoa_smoke was not built"; exit 1; }
-          for m in none cg probe none all; do echo "=== CE_DIAG_MODE=$m"; rc=0; CE_DIAG_MODE=$m "$smoke_exe" --require-cocoa --require-display || rc=$?; echo "=== CE_DIAG_MODE=$m rc=$rc"; done
+          for m in none none none none; do echo "=== CE_DIAG_MODE=$m"; rc=0; CE_DIAG_MODE=$m "$smoke_exe" --require-cocoa --require-display || rc=$?; echo "=== CE_DIAG_MODE=$m rc=$rc"; done
         working-directory: src
 
       - name: Editor-host boot smoke ctest (macOS / Windows)

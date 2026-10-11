@@ -907,7 +907,6 @@ int main(int argc, char** argv)
         pump_until(manager, clock_us, [&] { return backend->placement().maximized; });
     COCOA_CHECK(zoom_observed,
                 "the pinned Maximize preference really zoomed - placement().maximized flipped true");
-    smoke::diag_cocoa_window(*backend, "zoom observed");
 
 
     // Restore the frame before the drag drill, so its caption rect is published against a settled
@@ -919,7 +918,6 @@ int main(int argc, char** argv)
     const bool settled_after_zoom =
         pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
     COCOA_CHECK(settled_after_zoom, "the geometry came to rest after the zoom round trip");
-    smoke::diag_cocoa_window(*backend, "unzoom settled");
     {
         // TEMP DIAGNOSTIC (macOS 26.6 investigation).
         const shell::WindowPlacement p = backend->placement();
@@ -943,7 +941,6 @@ int main(int argc, char** argv)
     drag_press.pointer.position =
         shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u),
                       static_cast<std::int32_t>(drag_client.height / 4u)};
-    smoke::diag_cocoa_window(*backend, "before drag press");
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
                 "a single caption press was accepted for injection");
     // `caption_before` is still the drag baseline: the only drill since that read was the zoom
@@ -955,11 +952,39 @@ int main(int argc, char** argv)
     });
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
-    smoke::diag_cocoa_window(*backend, "after drag drill");
-    for (int i = 0; i < 10; ++i) // TEMP DIAGNOSTIC: does the window server converge later?
     {
-        (void)pump_until(manager, clock_us, [] { return false; }, std::chrono::milliseconds(100));
-        smoke::diag_cocoa_window(*backend, "after drag +100ms");
+        // TEMP DIAGNOSTIC: how long do posted locations stay displaced after the zoom round trip?
+        const auto t0 = std::chrono::steady_clock::now();
+        const std::int32_t want_y = static_cast<std::int32_t>(drag_client.height * 3u / 4u);
+        for (int i = 0; i < 150; ++i)
+        {
+            shell::ShellEvent probe = zoom_press;
+            probe.pointer.action = shell::PointerAction::move;
+            probe.pointer.button = shell::MouseButton::none;
+            probe.pointer.position = shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u), want_y};
+            const std::size_t before = browser->pointers().size();
+            (void)smoke::inject_event(*backend, smoke::WindowMode::real, probe);
+            (void)pump_until(manager, clock_us, [&] {
+                return smoke::count_marked(browser->pointers(), before, shell::PointerAction::move) > 0;
+            }, std::chrono::milliseconds(200));
+            std::int32_t got = -99999;
+            const auto& all = browser->pointers();
+            for (std::size_t k = before; k < all.size(); ++k)
+            {
+                if (smoke::has_marker(all[k].modifiers) && all[k].action == shell::PointerAction::move)
+                {
+                    got = all[k].position.y;
+                }
+            }
+            const long long ms = static_cast<long long>(std::chrono::duration_cast<std::chrono::milliseconds>(
+                std::chrono::steady_clock::now() - t0).count());
+            std::fprintf(stderr, "[diag4] +%lldms probe want_y=%d got_y=%d\n", ms, want_y, got);
+            if (got >= want_y - 10 && got <= want_y + 10)
+            {
+                break;
+            }
+            (void)pump_until(manager, clock_us, [] { return false; }, std::chrono::milliseconds(20));
+        }
     }
     {
         // TEMP DIAGNOSTIC (macOS 26.6 investigation).
