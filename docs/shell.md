@@ -1420,7 +1420,7 @@ distribution (`include/cef_render_handler.h`, `include/cef_browser.h`,
 `context_acquire_cef()` (`cmake/ContextCef.cmake`) runs at configure time into
 `<CMAKE_BINARY_DIR>/_cef/<triple>/include/` (e.g. `src/build/dev/_cef/x86_64-pc-windows-msvc/include/`
 with the `dev` preset). Reading the headers needs no MSVC and no link step, so this audit runs on the
-box whose GCC dev gate cannot build the CEF-linking targets (see this repo's `CLAUDE.md`).
+box whose GCC dev gate cannot build the CEF-linking targets (see this repo's `AGENTS.md`).
 
 `ShellCefClient` (`src/editor/shell/cef/src/cef_shell.cpp:704-709`) derives `CefClient`,
 `CefRenderHandler`, `CefLifeSpanHandler`, `CefLoadHandler`, `CefDisplayHandler` and

@@ -278,7 +278,7 @@ set(CONTEXT_WEBUI_ASSET_DIR "${_ctx_webui_assets}" CACHE INTERNAL
 # --- tests (R-QA-013: behavior ships WITH its tests in the same PR) ------------------------------
 # The `webui-*` family is a plain package test family: it is NOT in the build job's gate-exclusion
 # regex, so it auto-runs in the general ctest step on all three OS legs with no ci.yml edit
-# (CLAUDE.md § Test taxonomy & CI wiring rules).
+# (AGENTS.md § Tests and CI wiring).
 
 # 1) The built asset set is real, Node-free, and every staged dockview file still matches its pin.
 add_test(NAME webui-assets
