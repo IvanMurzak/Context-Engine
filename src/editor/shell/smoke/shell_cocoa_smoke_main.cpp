@@ -909,6 +909,78 @@ int main(int argc, char** argv)
     drag_press.pointer.position =
         shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u),
                       static_cast<std::int32_t>(drag_client.height / 4u)};
+
+    // ⚠ THE ZOOM ROUND TRIP NEEDS A DELIVERY SETTLE, NOT JUST A GEOMETRY SETTLE (Cocoa limit 3,
+    // smoke_window.h). `settled_after_zoom` proves `[window frame]` is at rest, but that is
+    // AppKit's answer, and a posted location is resolved against the frame state AppKit holds at
+    // DEQUEUE time. MEASURED on the hosted macos-26-arm64 image (macOS 26.6.2): right after the
+    // zoom:/un-zoom pair, `placement()` already read the settled 400x250 frame yet the press
+    // below was delivered 424 physical px LOW — exactly the zoomed-minus-restored height
+    // (674 - 250) — so it landed outside the window, missed the caption, and reached the browser.
+    // Intermittent (3 consecutive red runs, then green on the same image), so it is a race with
+    // the window server, not a decoder or consult defect: the pre-zoom drills and the same press
+    // re-posted a few seconds later (the yield drill) were delivered exactly where addressed.
+    //
+    // So the predicate is THE PROPERTY THE DRILL DEPENDS ON, measured rather than assumed: a
+    // marked MOVE posted into the free bottom half must come back through the same
+    // post -> AppKit queue -> pump -> decoder path at the y it was addressed to. Never a sleep —
+    // a probe that lands proves the conversion is current; one that does not is re-posted until
+    // the budget runs out, and then the drill fails HERE, on the honest reason, with the
+    // delivered y in the log. The probe is a move, so it cannot touch the press-count claims below.
+    const std::int32_t probe_y = static_cast<std::int32_t>(drag_client.height * 3u / 4u);
+    // Region membership with margin, per smoke_window.h's limit 1 (a ~2% scale about the centre is
+    // the normal round trip; the stale-frame displacement is the size of a whole window).
+    const std::int32_t probe_tolerance = static_cast<std::int32_t>(drag_client.height / 8u);
+    std::optional<std::int32_t> probe_delivered_y;
+    bool delivery_settled = false;
+    const auto probe_deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!delivery_settled && std::chrono::steady_clock::now() < probe_deadline)
+    {
+        shell::ShellEvent probe;
+        probe.kind = shell::ShellEventKind::pointer;
+        probe.pointer.action = shell::PointerAction::move;
+        probe.pointer.position = shell::PointI{drag_press.pointer.position.x, probe_y};
+        smoke::apply_marker(probe.pointer.modifiers);
+        const std::size_t probe_baseline = browser->pointers().size();
+        if (!smoke::inject_event(*backend, smoke::WindowMode::real, probe))
+        {
+            break;
+        }
+        const bool probe_arrived = pump_until(
+            manager, clock_us,
+            [&] {
+                return smoke::count_marked(browser->pointers(), probe_baseline,
+                                           shell::PointerAction::move) > 0;
+            },
+            std::chrono::seconds(1));
+        if (!probe_arrived)
+        {
+            continue;
+        }
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        for (std::size_t i = probe_baseline; i < samples.size(); ++i)
+        {
+            if (samples[i].action == shell::PointerAction::move &&
+                smoke::has_marker(samples[i].modifiers))
+            {
+                probe_delivered_y = samples[i].position.y;
+            }
+        }
+        delivery_settled = probe_delivered_y.has_value() &&
+                           *probe_delivered_y >= probe_y - probe_tolerance &&
+                           *probe_delivered_y <= probe_y + probe_tolerance;
+    }
+    COCOA_CHECK(delivery_settled,
+                "after the zoom round trip a posted location came back where it was addressed "
+                "before the caption press was posted");
+    if (!delivery_settled)
+    {
+        std::fprintf(stderr,
+                     "[editor-shell-cocoa]   delivery probe addressed y=%d, last delivered y=%s%d\n",
+                     probe_y, probe_delivered_y ? "" : "<none> ",
+                     probe_delivered_y.value_or(0));
+    }
+
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
                 "a single caption press was accepted for injection");
     // `caption_before` is still the drag baseline: the only drill since that read was the zoom
@@ -920,6 +992,25 @@ int main(int argc, char** argv)
     });
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
+    if (!drag_consumed)
+    {
+        // Say WHERE the press went: a marked press in the browser's log names its delivered
+        // position, which separates a displaced delivery from a consult that misjudged its rect.
+        const std::vector<shell::PointerEvent>& samples = browser->pointers();
+        for (std::size_t i = chrome_samples_baseline; i < samples.size(); ++i)
+        {
+            if (samples[i].action == shell::PointerAction::down &&
+                smoke::has_marker(samples[i].modifiers))
+            {
+                std::fprintf(stderr,
+                             "[editor-shell-cocoa]   caption press addressed (%d,%d) reached the "
+                             "browser at (%d,%d); caption rect height %u\n",
+                             drag_press.pointer.position.x, drag_press.pointer.position.y,
+                             samples[i].position.x, samples[i].position.y,
+                             drag_client.height / 2u);
+            }
+        }
+    }
     // The matching release is NOT consumed: it flows through ordinary arbitration (the caption
     // region claims it, the native arm drops it) — the positive half of "for THAT press only".
     const int dispatches_before_release = editor->input().pointer_dispatches();
