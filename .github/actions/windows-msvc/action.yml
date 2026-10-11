@@ -1,0 +1,37 @@
+# Self-hosted Windows legs: MSVC (Ninja + cl via VsDevCmd) and a job-private TEMP.
+#
+# MSVC — cmake 3.29 cannot drive the VS-18 generator, and the wasm/webgpu spikes need MSVC-ABI
+# prebuilts, so these legs build with Ninja + `cl` from VsDevCmd's environment
+# (docs/self-hosted-runners.md § 4). `vswhere -products *` so a Build Tools-only machine (no full
+# Visual Studio — e.g. the runner-manager laptop host) is found as well; without it vswhere lists only
+# the IDE products and the leg had no compiler. VsDevCmd also puts the VS-bundled CMake + Ninja on
+# PATH, so a runner needs no separate CMake/Ninja install.
+#
+# TEMP — the tree has ~75 `temp_directory_path()` call sites (tests, CEF smokes); under a LocalSystem
+# service they write to the machine-wide C:\Windows\Temp, where a crashed test leaves its directory
+# forever. Pointing TEMP/TMP at runner.temp makes every such file job-private: the runner wipes that
+# directory after the job, so a persistent runner slot accumulates no temp junk.
+#
+# Requires the repo to be checked out first; the caller guards it with
+# `if: runner.os == 'Windows' && runner.environment == 'self-hosted'`.
+
+name: Windows self-hosted MSVC + job temp
+description: Export the VsDevCmd (x64) environment with Ninja + cl, and point TEMP/TMP at runner.temp
+
+runs:
+  using: composite
+  steps:
+    - name: Set up MSVC and job-private TEMP
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Stop'
+        $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+        $vs = & $vswhere -products * -latest -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath
+        if (-not $vs) { Write-Host "::error::vswhere found no Visual Studio / Build Tools with the x64 MSVC toolset (Microsoft.VisualStudio.Component.VC.Tools.x86.x64)"; exit 1 }
+        $out = cmd /c "`"$vs\Common7\Tools\VsDevCmd.bat`" -arch=x64 -host_arch=x64 -no_logo && set"
+        foreach ($name in 'PATH','INCLUDE','LIB','LIBPATH') {
+          $line = ($out | Where-Object { $_ -like "$name=*" } | Select-Object -First 1)
+          if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
+        }
+        "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl","TEMP=$env:RUNNER_TEMP","TMP=$env:RUNNER_TEMP" |
+          Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8

@@ -1,0 +1,36 @@
+# Self-hosted Windows legs: stop every process this job left running, at the END of the job.
+#
+# A crashed CEF smoke (`CefShutdown()` 0xC0000005 after its assertions pass) leaves CEF subprocesses
+# alive; they hold open handles on the build tree's `locales\*.pak`, so the NEXT job on the same
+# runner fails copying them ("being used by another process"), and on a persistent runner slot they
+# would otherwise live on indefinitely. The Actions runner's own orphan sweep has missed them.
+#
+# Scope is exactly this job's own files: a process is stopped only if its executable lives under
+# GITHUB_WORKSPACE or RUNNER_TEMP (built test binaries, CEF helpers, fetched prebuilts) — never a
+# sibling runner's job, never a system process. Best-effort: it never fails the job.
+#
+# The caller runs it LAST, guarded by
+# `if: always() && runner.os == 'Windows' && runner.environment == 'self-hosted'`.
+
+name: Reap this job's processes (Windows self-hosted)
+description: Stop processes whose executable lives under this job's workspace or temp directory
+
+runs:
+  using: composite
+  steps:
+    - name: Stop leftover processes from this job
+      shell: pwsh
+      run: |
+        $ErrorActionPreference = 'Continue'
+        $roots = @($env:GITHUB_WORKSPACE, $env:RUNNER_TEMP) | Where-Object { $_ } |
+          ForEach-Object { [System.IO.Path]::GetFullPath($_).TrimEnd('\') + '\' }
+        $left = @(Get-CimInstance Win32_Process | Where-Object {
+          $exe = $_.ExecutablePath
+          $exe -and $_.ProcessId -ne $PID -and ($roots | Where-Object { $exe.StartsWith($_, [StringComparison]::OrdinalIgnoreCase) })
+        })
+        foreach ($p in $left) {
+          Write-Host "::warning title=Leftover process::stopping $($p.Name) (pid $($p.ProcessId)) $($p.ExecutablePath)"
+          Stop-Process -Id $p.ProcessId -Force -ErrorAction SilentlyContinue
+        }
+        Write-Host "[reap-job-processes] $($left.Count) leftover process(es) under $($roots -join ', ')"
+        exit 0
