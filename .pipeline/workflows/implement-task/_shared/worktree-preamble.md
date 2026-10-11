@@ -31,7 +31,7 @@ Rules that bind EVERY step of this pipeline:
    end, over the final reviewed state — so intermediate commits never spend a
    GitHub Actions run.
 
-3. **Repo conventions are authoritative.** Read `CLAUDE.md` at the worktree root
+3. **Repo conventions are authoritative.** Read `AGENTS.md` at the worktree root
    before touching code: conventional commits (`feat:`/`fix:`/`test:`/…, cite
    `Closes #N` and implemented `R-*`/`L-*` ids in bodies), warnings-as-errors,
    every-feature-is-a-package, test taxonomy + CI wiring rules, authored-data
@@ -47,7 +47,7 @@ Rules that bind EVERY step of this pipeline:
 
    While iterating you may narrow with `ctest -R <regex>`; before a step
    declares success, the full dev-preset build and `ctest --preset dev` must be
-   green over the step's final state. Windows nuance (per `CLAUDE.md`): the dev
+   green over the step's final state. Windows nuance (per `AGENTS.md`): the dev
    preset resolves GCC on this box and the heavy prebuilt toggles
    (V8/wgpu/CEF/wasmtime) are default-OFF, so a local green is NOT proof of CI
    green — the `land` step's CI gate is the authoritative check; do not fight

@@ -115,7 +115,7 @@ def main():
             # refs/remotes/origin/<base> -- a remote-tracking ref only `git fetch` moves.
             # That failure is invisible from inside the run and lands as work rebased onto
             # an outdated base; a halted provision is merely recoverable. Same fail-closed
-            # convention CLAUDE.md states for pinned downloads (R-SEC-009).
+            # convention AGENTS.md states for pinned downloads (R-SEC-009).
             # Skipped when resuming an existing branch below, which never consults <base>.
             if run_git(["remote", "get-url", "origin"], cwd=repo).returncode != 0:
                 log("no 'origin' remote; provisioning from local refs")

@@ -35,7 +35,7 @@
 # Counts, recounted against this file's own `jobs:` list (2026-07-27): 24 job definitions — 3 that
 # gate nothing behind them (`license-gate`, `ci-config-gate`, `python-tests`) + 21 fronted heavyweight
 # definitions, which expand through the OS matrices to 39 of the rollup's 42 checks. Keep these two
-# figures in step with CLAUDE.md § CI structure and tools/check_ci_gating.py's docstring when a job
+# figures in step with AGENTS.md § CI structure and tools/check_ci_gating.py's docstring when a job
 # or a matrix leg is added.
 #
 # Only DETERMINISTIC checks — no network, no subprocess, no timing, no ports — may sit in a gate job.

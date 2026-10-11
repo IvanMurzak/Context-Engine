@@ -35,7 +35,7 @@
 //     forbidden call is unreachable rather than merely avoided.
 //
 // WHY THIS IS A CEF-FREE STATE MACHINE, and not `if`s inside the binding. `cef_shell.cpp` is the one
-// translation unit the local dev gate cannot build (CLAUDE.md § Windows local-dev nuance) and the
+// translation unit the local dev gate cannot build (AGENTS.md § Build & test, Windows local dev) and the
 // only one no headless CI job executes; the Shell's whole layering exists to keep judgement out of
 // it. So the binding does exactly two things for the drag — it TRANSLATES `StartDragging` /
 // `UpdateDragCursor` into this vocabulary, and it APPLIES the injections this session emits — while
