@@ -11,7 +11,7 @@ Every CMake/preset/lint file is here; run build and ctest presets from this fold
 - `cli/` — the `context` CLI, a pure projection of the one contract registry (CLI ≡ RPC ≡ MCP ≡ introspection)
 - `testing/` — fault-injection harness; `tests/integration/` — milestone exit gates, samples-corpus, game smokes, the editor-session drill; `tests/concurrency/` — co-edit/merge concurrency tests
 
-New engine features go in a package, not the kernel. Each module keeps the `include/` + `src/` +
+Each module keeps the `include/` + `src/` +
 `tests/` + `CMakeLists.txt` shape of its neighbours and is wired in by an `add_subdirectory` in
 `src/CMakeLists.txt` (`editor/`, `runtime/`, `packages/` have no intermediate CMake list; `render/` does).
 
@@ -20,7 +20,7 @@ New engine features go in a package, not the kernel. Each module keeps the `incl
 - **Warnings-as-errors** via the `context_warnings` INTERFACE target (`../cmake/ContextWarnings.cmake`:
   MSVC `/W4 /WX`, else `-Wall -Wextra -Wpedantic -Werror`). Every new target links it `PRIVATE`
   (exemption: CEF-linking targets, see `editor/AGENTS.md`).
-- Format: `.clang-format` (LLVM base, 100 columns, Allman braces, 4-space indent, `PointerAlignment: Left`).
+- Format: `.clang-format` (LLVM base, 100 columns, Allman braces, 4-space indent, `PointerAlignment: Left`); no CI format gate — match it anyway.
 - Recurring CI-only breaks the local GCC gate cannot see:
   - MSVC rejects raw C stdio (`fopen`, `sprintf`, …) as C4996 — use C++ streams.
   - Apple clang/libc++ is stricter on overloads (`std::to_string` on a `std::chrono` rep) — cast to a concrete integer first.

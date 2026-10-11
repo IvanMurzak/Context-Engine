@@ -137,7 +137,7 @@ heavyweight prebuilts and configure-time fetches follow the SHA-pinned, verify-b
 
 ## Conventions
 
-- **C++20**, extensions OFF; style per `src/.clang-format` (no CI format gate — match it anyway).
+- **C++20**, extensions OFF; C++ build/style/portability rules are in `src/AGENTS.md`.
 - **Every feature is a package; the microkernel stays minimal** (`src/packages/AGENTS.md`).
 - **No Apache/ASCII-art file headers** (proprietary EULA): a short one-line descriptive top
   comment, matching neighbours.
