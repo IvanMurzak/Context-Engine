@@ -1,8 +1,9 @@
 # Self-hosted CI runners (Windows) — setup & gotchas
 
-The Context Engine CI runs its three **Windows** legs — `build (windows-latest)`,
-`spike-wasm (windows-latest)`, `spike webgpu (windows-latest)` — on **self-hosted Windows
-runners** (the ubuntu/macOS legs stay on GitHub-hosted runners). This is a deliberate cost +
+The Context Engine CI runs its **Windows** legs (`build`, `deterministic`, `spike-wasm`,
+`wasm-runner`, `windows-export`, `spike-webgpu`, `cef-substrate`, `editor-cef-smoke`) on
+**self-hosted Windows runners** — IvanPC's three static services plus a runner-manager host (see
+"The runner-manager host" below); the ubuntu/macOS legs stay on GitHub-hosted runners. This is a deliberate cost +
 capability choice: the Windows MSVC-ABI build and the wasm/webgpu spikes need a real MSVC
 toolchain, and self-hosted minutes are free.
 
@@ -95,9 +96,14 @@ on `pwsh` regardless so steps are account-agnostic.)*
 ### 4. Windows MSVC build via VsDevCmd (Ninja + cl)
 
 cmake 3.29 cannot drive the VS-18 generator, and the wasm/webgpu spikes need MSVC-ABI prebuilts.
-The Windows legs therefore set up MSVC via **VsDevCmd** and build with **Ninja + `cl`** (see the
-"Set up MSVC" step in `ci.yml`). This is why the Windows legs skip sccache (the VS generator
+The Windows legs therefore set up MSVC via **VsDevCmd** and build with **Ninja + `cl`**
+(`.github/actions/windows-msvc`). This is why the Windows legs skip sccache (the VS generator
 ignores `CMAKE_<LANG>_COMPILER_LAUNCHER`).
+
+`vswhere` is called with **`-products *`**: without it vswhere lists only full Visual Studio
+products, so a machine with just the **Build Tools** had no compiler. VsDevCmd also puts the
+VS-bundled CMake and Ninja on `PATH` (the "C++ CMake tools for Windows" component), so a runner
+needs no separate CMake/Ninja install. The same action points `TEMP`/`TMP` at `runner.temp` (§ 7).
 
 ### 5. webgpu offscreen render self-check is NOT run on Windows CI (deterministic)
 
@@ -122,7 +128,7 @@ Windows-specific D3D12 render validation, if wanted at M4, belongs on a real **i
 GPU runner** — not this throwaway spike on a headless service. `context-spike-webgpu render` still
 works if you run it by hand on Windows for debugging.
 
-### 6. The Windows registry is NOT ours — Python is resolved without it
+### 6. The Windows registry is NOT ours — every job installs its own Python
 
 **What happened (2026-08-27, again 2026-08-29).** Seven Windows legs died at configure with
 `Could NOT find Python3` while a perfectly good Python 3.12 sat on disk. Another tenant of the same
@@ -169,6 +175,58 @@ a runner needs no Python installed at all.
 a CI job writing machine-global state is precisely the class of behaviour that caused the outage,
 and two tenants "repairing" the same key would race forever. The registry belongs to whoever
 administers the box; this repo simply stopped depending on it.
+
+### 7. Jobs clean up after themselves
+
+A runner — above all a **persistent** runner-manager slot (below) — must keep nothing between jobs
+except what is kept on purpose for reuse (the workspace's `.git`, the tool cache with uv's Python).
+Two self-hosted-Windows-only actions in `ci.yml` enforce that:
+
+* **`TEMP`/`TMP` → `runner.temp`** (`.github/actions/windows-msvc`). The tree has ~75
+  `temp_directory_path()` call sites; under a LocalSystem service they would write to the
+  machine-wide `C:\Windows\Temp`, where a crashed test leaves its directory forever. The runner
+  wipes `runner.temp` after every job.
+* **`.github/actions/reap-job-processes`**, the LAST step of every self-hosted Windows job
+  (`if: always()`): stops every process whose executable lives under this job's
+  `GITHUB_WORKSPACE` or `RUNNER_TEMP` — e.g. the CEF helpers a smoke leaves behind when
+  `CefShutdown()` crashes after its assertions pass, which otherwise hold `locales\*.pak` open and
+  break the next job's build. Each leftover is reported as a `::warning::`; the step never fails the
+  job and never touches a process outside the job's own directories.
+
+(IvanPC's static runners additionally carry a `JOB_STARTED` hook, `runner-cleanup-orphans.ps1`
+in each runner root via `.env`, that reaps the same family at the start of the next job — a
+machine-side safety net, not required by the workflow.)
+
+## The runner-manager host (ANASTASIIA laptop)
+
+Besides IvanPC's three static services (`context-engine-win*`), a second machine serves the same
+Windows legs through **runner-manager** (ephemeral JIT runners named `runner-manager-…`; runner-manager
+on IvanPC has NO Context-Engine policy — IvanPC stays static). Policy on that host (`host_label`
+`laptop`):
+
+```
+runner-manager repo add IvanMurzak/Context-Engine --host-label laptop --max-capacity 1 --label context-engine --enable
+runner-manager repo profile add-label IvanMurzak/Context-Engine --profile default --label self-hosted   # + windows, x64
+runner-manager repo profile set-workspace IvanMurzak/Context-Engine --profile default --mode persistent --path C:\actions-runner\Context-Engine
+```
+
+So it answers the same `["self-hosted","Windows","X64","context-engine"]` set (labels match
+case-insensitively); GitHub hands each Windows job to whichever matching runner is free. One slot
+(`max-capacity 1`): a CE Windows build is heavy for a laptop.
+
+What the host needs — and what it deliberately does NOT need:
+
+* **VS 2022 Build Tools** with the x64 MSVC toolset, a Windows SDK and the C++ CMake tools
+  (VS-bundled CMake 3.31 + Ninja; § 4). **Git** with `core.longpaths=true`, and
+  `LongPathsEnabled=1` (`runner-manager host doctor` checks both). PowerShell 7 (`pwsh`).
+* **No Python, CMake, Ninja, vcpkg or CEF install.** Python comes from the job (§ 6); CMake/Ninja
+  from VsDevCmd; CEF, V8, wasmtime, esbuild etc. are fetched SHA-pinned by the build (CEF via
+  `actions/cache`); the Windows legs do not use vcpkg.
+* git-config isolation (§ 1): the workflow-side env injection suffices; the slot has one runner.
+* The persistent slot keeps `_work` (so `.git` is reused — `actions/checkout` still cleans
+  ignored files, so build trees do NOT persist); runner-manager points `RUNNER_TOOL_CACHE` at
+  its per-repo cache namespace `C:\rman\_cache\ivanmurzak\context-engine`,
+  where the job's uv Python is kept for reuse.
 
 ## Service account: LocalSystem vs a dedicated user
 
