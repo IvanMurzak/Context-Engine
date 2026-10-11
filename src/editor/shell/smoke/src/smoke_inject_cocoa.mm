@@ -45,6 +45,8 @@
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
 #include <cstdio>
+#include <cstdlib>
+#include <string>
 
 namespace context::editor::shell::smoke
 {
@@ -257,6 +259,15 @@ namespace
 // TEMP DIAGNOSTIC (macOS 26.6 investigation): AppKit's frame vs the window server's bounds.
 void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
 {
+    const char* mode_env = std::getenv("CE_DIAG_MODE");
+    const std::string mode = mode_env == nullptr ? std::string("all") : std::string(mode_env);
+    const bool do_cg = mode == "all" || mode == "cg";
+    const bool do_probe = mode == "all" || mode == "probe";
+    if (!do_cg && !do_probe)
+    {
+        std::fprintf(stderr, "[diag2] %s: mode=%s (no window-server calls)\n", tag, mode.c_str());
+        return;
+    }
     @autoreleasepool
     {
         NSWindow* window = cocoa_window_of(backend);
@@ -268,7 +279,7 @@ void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
         const NSRect frame = [window frame];
         const NSRect bounds = [[window contentView] bounds];
         CGRect cg = CGRectZero;
-        CFArrayRef info = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,
+        CFArrayRef info = !do_cg ? nullptr : CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,
                                                      static_cast<CGWindowID>([window windowNumber]));
         if (info != nullptr && CFArrayGetCount(info) > 0)
         {
@@ -283,7 +294,7 @@ void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
         {
             CFRelease(info);
         }
-        NSEvent* probe = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+        NSEvent* probe = !do_probe ? nil : [NSEvent mouseEventWithType:NSEventTypeMouseMoved
                                             location:NSMakePoint(100, 100)
                                        modifierFlags:0
                                            timestamp:[[NSProcessInfo processInfo] systemUptime]
@@ -292,11 +303,11 @@ void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
                                          eventNumber:0
                                           clickCount:1
                                             pressure:0];
-        const NSPoint back = [probe locationInWindow];
+        const NSPoint back = probe == nil ? NSMakePoint(-1, -1) : [probe locationInWindow];
         std::fprintf(stderr,
-                     "[diag2] %.3f %s: frame=(%.1f,%.1f %.1fx%.1f) view=%.1fx%.1f "
+                     "[diag2] mode=%s %.3f %s: frame=(%.1f,%.1f %.1fx%.1f) view=%.1fx%.1f "
                      "cg=(%.1f,%.1f %.1fx%.1f) zoomed=%d liveResize=%d probe(100,100)->(%.1f,%.1f)\n",
-                     [[NSProcessInfo processInfo] systemUptime], tag, frame.origin.x,
+                     mode.c_str(), [[NSProcessInfo processInfo] systemUptime], tag, frame.origin.x,
                      frame.origin.y, frame.size.width, frame.size.height, bounds.size.width,
                      bounds.size.height, cg.origin.x, cg.origin.y, cg.size.width, cg.size.height,
                      [window isZoomed] ? 1 : 0, [window inLiveResize] ? 1 : 0, back.x, back.y);
