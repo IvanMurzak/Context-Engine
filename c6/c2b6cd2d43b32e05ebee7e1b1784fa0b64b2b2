@@ -1,0 +1,19 @@
+docs/self-hosted-runners.md
+  s_f593e7fa05bb4b::t_00946894de91c5 3-6,99-100,103-107,131,179-230
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "c6c2b6cd2d43b32e05ebee7e1b1784fa0b64b2b2",
+  "prompts": {},
+  "sessions": {
+    "s_f593e7fa05bb4b": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "ea515913-4e3a-4132-812b-63654f40f578",
+        "model": "unknown"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
