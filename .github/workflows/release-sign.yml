@@ -47,6 +47,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Sign a sample artifact and verify it against the pinned trust root (fail closed)
         env:
           # The production private key — ONLY from the protected environment secret. Never printed.
@@ -131,6 +136,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -155,13 +165,13 @@ jobs:
       # job green (the honest unsigned state — never a silent failure). Non-secret config is inline yaml.
       - name: Sign the Windows runtime .exe (Azure Trusted Signing)
         if: ${{ env.AZURE_CLIENT_ID != '' }}
-        uses: azure/trusted-signing-action@v0
+        uses: azure/artifact-signing-action@v2   # renamed from azure/trusted-signing-action (Artifact Signing GA)
         with:
           azure-tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           azure-client-id: ${{ secrets.AZURE_CLIENT_ID }}
           azure-client-secret: ${{ secrets.AZURE_CLIENT_SECRET }}
           endpoint: https://eus.codesigning.azure.net
-          trusted-signing-account-name: ivan-murzak
+          signing-account-name: ivan-murzak
           certificate-profile-name: ai-game-dev-cert
           files-folder: ${{ github.workspace }}/publish
           files-folder-filter: exe
@@ -240,6 +250,11 @@ jobs:
       APPLE_API_ISSUER: ${{ secrets.APPLE_API_ISSUER }}
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain

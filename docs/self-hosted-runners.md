@@ -86,9 +86,9 @@ on `pwsh` regardless so steps are account-agnostic.)*
 
 ### 3. `python` vs `py`; `git safe.directory`; dubious ownership
 
-* Python is exposed as **`py`** on the runners, not `python` — but `py` resolves through the
-  registry, and the registry is not ours (§ 6). The BUILD never uses it: every Windows leg resolves
-  its interpreter registry-free through `.github/actions/windows-python` and hands it to CMake.
+* CI never uses the machine's Python — not `py` (which resolves through the registry, § 6), not
+  `python` on PATH. Every job installs its own interpreter with `.github/actions/python` (§ 6) and
+  hands it to CMake and to every later step.
 * Any `git` command on the checked-out repo needs `safe.directory` set (handled in §1), or git
   aborts with *"detected dubious ownership in repository"*.
 
@@ -136,32 +136,34 @@ repository had changed either time; an elevated registry repair "fixed" it, and 
 provisioning run undid the repair.
 
 **What this repo does about it — immunity, not repair.** The build no longer trusts the machine's
-registry at all:
+registry, or the machine's Python at all:
 
-* **`.github/actions/windows-python`** runs on every Windows leg, right after the MSVC step. It
-  locates a Python **>= 3.12** through directory scans and PATH only — never the registry, never the
-  `py` launcher (which reads the registry) — and PROVES each candidate by running it. It then exports
-  `CONTEXT_PYTHON3_EXECUTABLE` and `Python3_ROOT_DIR` for later steps and prepends the interpreter's
-  directory to `PATH`. No usable interpreter is a legible `::error::` naming what was probed, not a
-  CMake stack trace.
+* **`.github/actions/python`** runs in EVERY job of every workflow, right after checkout. It INSTALLS
+  the job's own CPython (>= 3.12) with `astral-sh/setup-uv` + `uv python install` — the workflow is
+  self-sufficient and does not care what the runner has. (Until 2026-10 the Windows legs only PROBED
+  the box for an interpreter; when the box's Python 3.12 install broke — a `Python312` directory with
+  no `python.exe`, the registry still pointing at it — every Windows leg went red with
+  `No working Python >= 3.12 was found`.) It exports `CONTEXT_PYTHON3_EXECUTABLE` and
+  `Python3_ROOT_DIR` and puts the interpreter first on `PATH`.
+* **Why uv and not `actions/setup-python`.** On a LocalSystem Windows runner setup-python runs the
+  official CPython installer as administrator, which registers the install in
+  `HKLM\SOFTWARE\Python\PythonCore` — the very write that caused both outages above — and leaves
+  machine-wide Windows Installer state that collides between runners and repos sharing the box. `uv
+  python install` just unpacks a relocatable python-build-standalone archive: `--no-registry` (no
+  PEP 514 entries, not even HKCU), `--no-bin` (no shim in the service profile's shared
+  `~/.local/bin`), into `<runner tool cache>\context-engine-python` — per runner, repo-named, KEPT
+  for reuse (a warm runner reinstalls nothing), guarded by uv's own directory lock. uv's download
+  cache goes to `runner.temp`, which the runner wipes after each job. `tools/check_ci_python.py` (in
+  `ci-config-gate`) reds any job that runs a step before installing its Python, and any use of
+  `actions/setup-python`.
 * **`cmake/ContextPython.cmake`** (included first in `src/CMakeLists.txt`) pins that interpreter as
   `Python3_EXECUTABLE` and sets `Python3_FIND_REGISTRY=NEVER`, so every one of the tree's
   `find_package(Python3)` calls uses it and none can reach the registry. A pin that names a missing
   file is a `FATAL_ERROR`, not a silent fall-through to the lookup the pin exists to bypass.
-* The step also prints a `::warning::` when the registry's `InstallPath` points at a missing
-  install — a green run tells the box owner the machine is broken for its other tenants, instead of
-  the next tenant's red run doing it.
 
-**Pinning an interpreter on a runner.** If a machine has several Pythons or one in an unusual place,
-add to that runner's `.env` (the same file § 1 uses for `GIT_CONFIG_GLOBAL`), then restart the
-service:
-
-```
-CONTEXT_PYTHON3_EXECUTABLE=C:\Users\<user>\AppData\Local\Programs\Python\Python312\python.exe
-```
-
-A pin that does not run fails the leg loudly (it is a configuration error), and it never falls back
-to the registry.
+**No per-runner Python pin is needed any more.** A `CONTEXT_PYTHON3_EXECUTABLE=` line in a runner's
+`.env` (the 2026-10 stopgap) is overridden by the job-installed interpreter and should be removed;
+a runner needs no Python installed at all.
 
 **What is deliberately NOT done.** CI does not repair the registry: a LocalSystem service could, but
 a CI job writing machine-global state is precisely the class of behaviour that caused the outage,

@@ -41,12 +41,15 @@
 # Only DETERMINISTIC checks — no network, no subprocess, no timing, no ports — may sit in a gate job.
 #
 # ⚠ Scoped honestly: that property holds of the CHECKS these gate jobs RUN (check_licenses.py,
-# check_fleet_manifest.py, check_ci_gating.py are all stdlib-only reads of committed files). It is NOT
-# true of `license-gate` the JOB end to end — it finishes with an `upload-artifact` SBOM step, which is
-# a network call, so a transient upload failure can still red a gate and skip the rollup. That is the
-# one residual way a gate can skip ~39 legs without a real defect; it predates #459 and is left as-is
-# deliberately (the SBOM is wanted on every run). Do not read the determinism claim as broader than
-# "the checks", and do not add a NEW network/timing step to either gate job.
+# check_fleet_manifest.py, check_ci_gating.py, check_ci_python.py are all stdlib-only reads of
+# committed files). It is NOT true of the gate JOBS end to end, for two deliberate reasons: (1)
+# `license-gate` finishes with an `upload-artifact` SBOM step (predates #459; the SBOM is wanted on
+# every run), and (2) both gates begin with `.github/actions/python`, which DOWNLOADS uv + CPython —
+# the owner rule that every job installs its own Python rather than trusting the machine's applies to
+# the gates too (uv retries transient download failures itself). A transient failure in either can
+# still red a gate and skip the rollup; those are the only residual ways a gate can skip ~39 legs
+# without a real defect. Do not read the determinism claim as broader than "the checks", and do not
+# add any OTHER network/timing step to either gate job.
 # tools/check_ci_gating.py enforces the resulting topology in BOTH directions: it reds if a
 # timing-dependent job re-enters a `needs:` list, AND it reds if the retained fail-fast is quietly
 # deleted from a job (deleting gating is the opposite failure, and the gating is here for a reason).
@@ -95,6 +98,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Run license gate
         run: python3 tools/check_licenses.py
 
@@ -116,6 +124,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       # R-QA-012: CI CONSUMES the fleet manifest — validate it against the live workflows every run
       # (self-consistency + the advisory-until-provisioned rule + tier-aware ci_job_id sync across
       # BOTH the per-PR rollup and the nightly benchmark workflow + the M9 x11 prose status-claim
@@ -130,6 +143,11 @@ jobs:
       - name: Validate CI gating topology
         run: python3 tools/check_ci_gating.py --repo-root .
 
+      # Owner rule: every job installs its OWN Python (.github/actions/python) before it runs
+      # anything, and nothing uses actions/setup-python (docs/self-hosted-runners.md § 6).
+      - name: Validate every job installs its own Python
+        run: python3 tools/check_ci_python.py --repo-root .
+
   # Pytest over the repo's Python tooling (R-QA-013 retroactive coverage): tools/tests (the gate
   # scripts) + bench/tests (seeded corpus generator).
   #
@@ -143,8 +161,15 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
+      # uv-managed Pythons are marked EXTERNALLY-MANAGED (PEP 668), so install through uv and say so.
+      # Safe here: this is an ephemeral GitHub-hosted VM, never a self-hosted runner's kept install.
       - name: Install pytest
-        run: python3 -m pip install pytest
+        run: uv pip install --python "$CONTEXT_PYTHON3_EXECUTABLE" --break-system-packages pytest
 
       - name: Run Python test suites
         run: python3 -m pytest tools/tests bench/tests -v
@@ -164,6 +189,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -176,13 +206,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -419,6 +442,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -431,13 +459,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -484,6 +505,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -527,6 +553,11 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -658,6 +689,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -736,6 +772,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -811,6 +852,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -823,13 +869,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -890,6 +929,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -902,13 +946,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -966,6 +1003,11 @@ jobs:
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1041,6 +1083,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -1053,13 +1100,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1155,6 +1195,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -1227,6 +1272,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -1239,13 +1289,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1330,6 +1373,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Install emsdk (latest)
         # Retry/backoff (Context-Engine#129): the git clone + `emsdk install latest` both download
         # from GitHub, which was part of the 504 outage wave. rm -rf before each attempt so a
@@ -1389,6 +1437,11 @@ jobs:
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1500,6 +1553,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Install emsdk (latest)
         # Retry/backoff (Context-Engine#129): the git clone + `emsdk install latest` both download
         # from GitHub. rm -rf before each attempt so a retried clone into an existing dir does not fail.
@@ -1600,6 +1658,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -1667,6 +1730,11 @@ jobs:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       # Apply the same per-job toolchain + build-environment composites every other build-capable
       # job uses (build, bench-baseline, spike-*, render): on the BLOCKING Linux leg pinned-toolchain
@@ -1834,6 +1902,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -1846,13 +1919,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -1947,6 +2013,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Set up MSVC (self-hosted Windows — cmake 3.29 cannot drive the VS-18 generator; use Ninja + cl)
         if: runner.os == 'Windows' && runner.environment == 'self-hosted'
         shell: pwsh
@@ -1959,13 +2030,6 @@ jobs:
             if ($line) { $line | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8 }
           }
           "CMAKE_GENERATOR=Ninja","CC=cl","CXX=cl" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-
-      # Python for this leg, resolved WITHOUT the Windows registry (docs/self-hosted-runners.md § 6):
-      # exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake, which pins it and turns
-      # FindPython3's registry lookup off. Runs on every Windows leg (self-hosted or GitHub-hosted),
-      # so the two never resolve Python by different rules.
-      - name: Python (Windows, registry-independent)
-        uses: ./.github/actions/windows-python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
@@ -2188,6 +2252,11 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
+
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain
 
@@ -2284,6 +2353,11 @@ jobs:
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
+
+      # This job's OWN Python, installed by the workflow — never probed for on the machine
+      # (docs/self-hosted-runners.md § 6). Exports CONTEXT_PYTHON3_EXECUTABLE for cmake/ContextPython.cmake.
+      - name: Python (installed by the workflow)
+        uses: ./.github/actions/python
 
       - name: Toolchain (L-42 manifest)
         uses: ./.github/actions/pinned-toolchain

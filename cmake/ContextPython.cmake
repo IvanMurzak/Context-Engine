@@ -13,9 +13,9 @@
 #   CONTEXT_PYTHON3_EXECUTABLE=<path to python.exe>
 #
 # When it is set, that interpreter is pinned as `Python3_EXECUTABLE` and the registry lookup is turned
-# OFF for the whole configure, so the machine's registry state can no longer reach this build. CI's
-# Windows legs set it from `.github/actions/windows-python`, which locates and RUNS a Python >= 3.12
-# through directory scans only (never the registry, never the `py` launcher, which reads it). A
+# OFF for the whole configure, so the machine's registry state can no longer reach this build. Every
+# CI job sets it from `.github/actions/python`, which INSTALLS the job's own uv-managed Python >= 3.12
+# (no registry writes, nothing machine-global) instead of trusting whatever the runner has. A
 # developer never needs to set it — with the variable absent this module changes nothing.
 #
 # Fail-closed on a bad pin: a path that does not exist is a configuration error worth a legible
