@@ -107,8 +107,10 @@ Note `^cli-` does NOT match `client-`.
   advisory), the opt-in-toggle jobs (`spike-*`, `wasm-runner`, `cef-substrate`, `editor-cef-smoke`),
   `editor-boundary` (see `src/editor/AGENTS.md`). Bench jobs must run green; their numbers are
   advisory until the perf runner exists (`docs/perf-gate-methodology.md`).
-- **There is deliberately NO Windows-native GPU render leg — never add one.**
-- Windows legs of heavy jobs use a self-hosted MSVC runner (`docs/self-hosted-runners.md`).
+- **There is deliberately NO Windows-native GPU render leg — never add one** (Session-0
+  native-render teardown crashes; Windows coverage comes from the MSVC compile/link legs).
+- Windows legs of heavy jobs use a self-hosted MSVC runner for same-repo PRs
+  (`docs/self-hosted-runners.md`).
   `bench-nightly.yml` is schedule-only and never in the PR rollup.
 - `docs/ci-fleet-manifest.json` registers every gate and is validated against the live workflows
   on every run — gate changes update it too.

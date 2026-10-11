@@ -11,9 +11,8 @@ Every CMake/preset/lint file is here; run build and ctest presets from this fold
 - `cli/` — the `context` CLI, a pure projection of the one contract registry (CLI ≡ RPC ≡ MCP ≡ introspection)
 - `testing/` — fault-injection harness; `tests/integration/` — milestone exit gates, samples-corpus, game smokes, the editor-session drill; `tests/concurrency/` — co-edit/merge concurrency tests
 
-Each module keeps the `include/` + `src/` +
-`tests/` + `CMakeLists.txt` shape of its neighbours and is wired in by an `add_subdirectory` in
-`src/CMakeLists.txt` (`editor/`, `runtime/`, `packages/` have no intermediate CMake list; `render/` does).
+Each module keeps the `include/` + `src/` + `tests/` + `CMakeLists.txt` shape of its neighbours and
+is wired in by an `add_subdirectory` in `src/CMakeLists.txt` (`editor/`, `runtime/`, `packages/` have no intermediate CMake list; `render/` does).
 
 ## C++ rules
 
