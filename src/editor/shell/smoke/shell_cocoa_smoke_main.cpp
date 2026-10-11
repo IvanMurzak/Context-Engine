@@ -882,6 +882,19 @@ int main(int argc, char** argv)
                stats.double_clicks >= caption_before.double_clicks + 1;
     });
     COCOA_CHECK(zoom_consumed, "the double-click reached the pump's caption consult");
+    {
+        // TEMP DIAGNOSTIC (macOS 26.6 investigation).
+        shell::CocoaCaptionStats s;
+        (void)shell::cocoa_caption_stats(*backend, s);
+        const shell::WindowPlacement p = backend->placement();
+        std::fprintf(stderr,
+                     "[diag] zoom drill: client=%ux%u press=(%d,%d) stats d=%zu dc=%zu y=%zu "
+                     "placement=(%d,%d %ux%u max=%d) browser_samples_since=%zu\n",
+                     chrome_client.width, chrome_client.height, zoom_press.pointer.position.x,
+                     zoom_press.pointer.position.y, s.drags, s.double_clicks, s.yields, p.x, p.y,
+                     p.width, p.height, p.maximized ? 1 : 0,
+                     browser->pointers().size() - chrome_samples_baseline);
+    }
     const bool zoom_observed =
         pump_until(manager, clock_us, [&] { return backend->placement().maximized; });
     COCOA_CHECK(zoom_observed,
@@ -896,6 +909,16 @@ int main(int argc, char** argv)
     const bool settled_after_zoom =
         pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
     COCOA_CHECK(settled_after_zoom, "the geometry came to rest after the zoom round trip");
+    {
+        // TEMP DIAGNOSTIC (macOS 26.6 investigation).
+        const shell::WindowPlacement p = backend->placement();
+        std::fprintf(stderr,
+                     "[diag] after unzoom: placement=(%d,%d %ux%u max=%d) client=%ux%u "
+                     "capture=%d browser_samples_since=%zu\n",
+                     p.x, p.y, p.width, p.height, p.maximized ? 1 : 0, backend->client_size().width,
+                     backend->client_size().height, editor->input().has_pointer_capture() ? 1 : 0,
+                     browser->pointers().size() - chrome_samples_baseline);
+    }
 
     // --- a single caption press hands the drag to the OS, consumed WHOLE -------------------------
     const render::Extent2D drag_client = backend->client_size();
@@ -920,6 +943,31 @@ int main(int argc, char** argv)
     });
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
+    {
+        // TEMP DIAGNOSTIC (macOS 26.6 investigation).
+        shell::CocoaCaptionStats s;
+        (void)shell::cocoa_caption_stats(*backend, s);
+        const shell::WindowPlacement p = backend->placement();
+        std::fprintf(stderr,
+                     "[diag] drag drill: client=%ux%u dpi=%.3f press=(%d,%d) caption_h=%u "
+                     "stats before d=%zu dc=%zu y=%zu now d=%zu dc=%zu y=%zu capture=%d "
+                     "placement=(%d,%d %ux%u max=%d)\n",
+                     drag_client.width, drag_client.height,
+                     static_cast<double>(backend->dpi().factor()), drag_press.pointer.position.x,
+                     drag_press.pointer.position.y, drag_client.height / 2u, caption_before.drags,
+                     caption_before.double_clicks, caption_before.yields, s.drags,
+                     s.double_clicks, s.yields, editor->input().has_pointer_capture() ? 1 : 0,
+                     p.x, p.y, p.width, p.height, p.maximized ? 1 : 0);
+        const std::vector<shell::PointerEvent>& all = browser->pointers();
+        for (std::size_t i = chrome_samples_baseline; i < all.size(); ++i)
+        {
+            std::fprintf(stderr, "[diag]   browser sample %zu: action=%d button=%d pos=(%d,%d) "
+                                 "clicks=%d marked=%d\n",
+                         i, static_cast<int>(all[i].action), static_cast<int>(all[i].button),
+                         all[i].position.x, all[i].position.y, all[i].click_count,
+                         smoke::has_marker(all[i].modifiers) ? 1 : 0);
+        }
+    }
     // The matching release is NOT consumed: it flows through ordinary arbitration (the caption
     // region claims it, the native arm drops it) — the positive half of "for THAT press only".
     const int dispatches_before_release = editor->input().pointer_dispatches();
