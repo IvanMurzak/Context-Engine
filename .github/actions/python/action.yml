@@ -42,6 +42,7 @@ runs:
     - name: Install uv
       uses: astral-sh/setup-uv@v10.3.0
       env:
+        # setup-uv exports this (GITHUB_ENV) for the steps below: the one place the install dir is set.
         UV_PYTHON_INSTALL_DIR: ${{ runner.tool_cache }}/context-engine-python
       with:
         # Pinned (not `latest`): this setup-uv release embeds the checksum of this uv version, so the
@@ -56,7 +57,6 @@ runs:
       if: runner.os == 'Windows'
       shell: pwsh
       env:
-        UV_PYTHON_INSTALL_DIR: ${{ runner.tool_cache }}/context-engine-python
         PYTHON_REQUEST: ${{ inputs.python-version }}
       run: |
         $ErrorActionPreference = 'Stop'
@@ -77,7 +77,6 @@ runs:
       if: runner.os != 'Windows'
       shell: bash
       env:
-        UV_PYTHON_INSTALL_DIR: ${{ runner.tool_cache }}/context-engine-python
         PYTHON_REQUEST: ${{ inputs.python-version }}
       run: |
         set -euo pipefail
