@@ -1,0 +1,54 @@
+src/render/AGENTS.md
+  s_e19ebe83cb6110::t_1b1178ae6690bd 1-18
+tools/AGENTS.md
+  s_e19ebe83cb6110::t_bf90afc4bad1d2 1-20
+src/editor/AGENTS.md
+  s_e19ebe83cb6110::t_fe7d89f52e3b3a 1-28
+src/runtime/AGENTS.md
+  s_e19ebe83cb6110::t_bae2ba84749d22 1-10,12-19
+  s_e19ebe83cb6110::t_f12b7631c48847 11
+  s_e19ebe83cb6110::t_8dd396561c39e1 20
+AGENTS.md
+  s_e19ebe83cb6110::t_0a848afed77678 1-59,62-145,160-166
+  s_e19ebe83cb6110::t_4292512428139c 60-61
+  s_e19ebe83cb6110::t_0d9f30061270ea 146-159
+src/AGENTS.md
+  s_e19ebe83cb6110::t_458c14120d3ee0 1-14,17-30
+  s_e19ebe83cb6110::t_ae6c7302b6d334 15
+  s_e19ebe83cb6110::t_ba7e76ce14bb4e 16
+src/packages/AGENTS.md
+  s_e19ebe83cb6110::t_f884c2ff618c99 17-19
+  s_e19ebe83cb6110::t_50860a7ac51a0c 1-16
+.github/workflows/ci.yml
+  s_e19ebe83cb6110::t_32e84b119a1381 38
+.gitignore
+  s_e19ebe83cb6110::t_c0f768d9686bc3 36-38
+.pipeline/.hooks/worktree-create.py
+  s_e19ebe83cb6110::t_2874973d7c5f55 118
+.pipeline/workflows/implement-task/_shared/worktree-preamble.md
+  s_e19ebe83cb6110::t_dbc1b11ad4f3ec 34,50
+.pipeline/workflows/implement-task/steps/implement.md
+  s_e19ebe83cb6110::t_1d86d5e223e85d 16,35,40
+docs/shell.md
+  s_e19ebe83cb6110::t_557b9a1ddb0039 1423
+src/editor/shell/include/context/editor/shell/osr_drag.h
+  s_e19ebe83cb6110::t_d6f7df184bbf16 38
+src/editor/webui/CMakeLists.txt
+  s_e19ebe83cb6110::t_c3b28bd069b28f 281
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "52940fbc4103e3804eee91e1e8ac5ec1370b98c7",
+  "prompts": {},
+  "sessions": {
+    "s_e19ebe83cb6110": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "514df444-7709-4c0d-be94-41a9023e64ee",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
