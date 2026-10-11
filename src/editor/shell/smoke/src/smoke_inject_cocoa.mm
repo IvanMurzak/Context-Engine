@@ -262,8 +262,7 @@ void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
         NSWindow* window = cocoa_window_of(backend);
         if (window == nil)
         {
-            std::fprintf(stderr, "[diag2] %s: no window
-", tag);
+            std::fprintf(stderr, "[diag2] %s: no window\n", tag);
             return;
         }
         const NSRect frame = [window frame];
@@ -296,8 +295,7 @@ void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
         const NSPoint back = [probe locationInWindow];
         std::fprintf(stderr,
                      "[diag2] %.3f %s: frame=(%.1f,%.1f %.1fx%.1f) view=%.1fx%.1f "
-                     "cg=(%.1f,%.1f %.1fx%.1f) zoomed=%d liveResize=%d probe(100,100)->(%.1f,%.1f)
-",
+                     "cg=(%.1f,%.1f %.1fx%.1f) zoomed=%d liveResize=%d probe(100,100)->(%.1f,%.1f)\n",
                      [[NSProcessInfo processInfo] systemUptime], tag, frame.origin.x,
                      frame.origin.y, frame.size.width, frame.size.height, bounds.size.width,
                      bounds.size.height, cg.origin.x, cg.origin.y, cg.size.width, cg.size.height,

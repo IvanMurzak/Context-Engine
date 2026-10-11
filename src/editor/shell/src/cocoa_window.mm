@@ -996,8 +996,7 @@ bool CocoaWindowBackend::handle(NSEvent* event)
             const NSRect fr = [window_ frame];
             std::fprintf(stderr,
                          "[diag3] %.3f decode %s: locationInWindow=(%.1f,%.1f) in_view=(%.1f,%.1f) "
-                         "frame=(%.1f,%.1f %.1fx%.1f) geom_h=%.1f evt_ts=%.3f
-",
+                         "frame=(%.1f,%.1f %.1fx%.1f) geom_h=%.1f evt_ts=%.3f\n",
                          [[NSProcessInfo processInfo] systemUptime],
                          type == NSEventTypeLeftMouseDown ? "down" : "up", liw.x, liw.y, in_view.x,
                          in_view.y, fr.origin.x, fr.origin.y, fr.size.width, fr.size.height,
