@@ -44,6 +44,7 @@
 
 #import <AppKit/AppKit.h>
 #import <QuartzCore/QuartzCore.h>
+#include <cstdio>
 
 namespace context::editor::shell::smoke
 {
@@ -252,6 +253,57 @@ namespace
 }
 
 } // namespace
+
+// TEMP DIAGNOSTIC (macOS 26.6 investigation): AppKit's frame vs the window server's bounds.
+void diag_cocoa_window(const IWindowBackend& backend, const char* tag)
+{
+    @autoreleasepool
+    {
+        NSWindow* window = cocoa_window_of(backend);
+        if (window == nil)
+        {
+            std::fprintf(stderr, "[diag2] %s: no window
+", tag);
+            return;
+        }
+        const NSRect frame = [window frame];
+        const NSRect bounds = [[window contentView] bounds];
+        CGRect cg = CGRectZero;
+        CFArrayRef info = CGWindowListCopyWindowInfo(kCGWindowListOptionIncludingWindow,
+                                                     static_cast<CGWindowID>([window windowNumber]));
+        if (info != nullptr && CFArrayGetCount(info) > 0)
+        {
+            NSDictionary* entry = (__bridge NSDictionary*)CFArrayGetValueAtIndex(info, 0);
+            CFDictionaryRef b = (__bridge CFDictionaryRef)entry[(__bridge NSString*)kCGWindowBounds];
+            if (b != nullptr)
+            {
+                (void)CGRectMakeWithDictionaryRepresentation(b, &cg);
+            }
+        }
+        if (info != nullptr)
+        {
+            CFRelease(info);
+        }
+        NSEvent* probe = [NSEvent mouseEventWithType:NSEventTypeMouseMoved
+                                            location:NSMakePoint(100, 100)
+                                       modifierFlags:0
+                                           timestamp:[[NSProcessInfo processInfo] systemUptime]
+                                        windowNumber:[window windowNumber]
+                                             context:nil
+                                         eventNumber:0
+                                          clickCount:1
+                                            pressure:0];
+        const NSPoint back = [probe locationInWindow];
+        std::fprintf(stderr,
+                     "[diag2] %.3f %s: frame=(%.1f,%.1f %.1fx%.1f) view=%.1fx%.1f "
+                     "cg=(%.1f,%.1f %.1fx%.1f) zoomed=%d liveResize=%d probe(100,100)->(%.1f,%.1f)
+",
+                     [[NSProcessInfo processInfo] systemUptime], tag, frame.origin.x,
+                     frame.origin.y, frame.size.width, frame.size.height, bounds.size.width,
+                     bounds.size.height, cg.origin.x, cg.origin.y, cg.size.width, cg.size.height,
+                     [window isZoomed] ? 1 : 0, [window inLiveResize] ? 1 : 0, back.x, back.y);
+    }
+}
 
 bool inject_cocoa_event(const IWindowBackend& backend, const ShellEvent& event)
 {

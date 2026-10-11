@@ -41,6 +41,7 @@
 #include "context/editor/shell/menu_model.h"
 
 #import <AppKit/AppKit.h>
+#include <cstdio>
 #import <CoreGraphics/CoreGraphics.h>
 #import <QuartzCore/QuartzCore.h>
 
@@ -988,6 +989,20 @@ bool CocoaWindowBackend::handle(NSEvent* event)
         // -locationInWindow is in WINDOW coordinates; the seam speaks VIEW coordinates, and the two
         // differ by the titlebar. Converting here (an AppKit call) keeps the flip + scale pure.
         const NSPoint in_view = [view_ convertPoint:[event locationInWindow] fromView:nil];
+        if (type == NSEventTypeLeftMouseDown || type == NSEventTypeLeftMouseUp)
+        {
+            // TEMP DIAGNOSTIC (macOS 26.6 investigation).
+            const NSPoint liw = [event locationInWindow];
+            const NSRect fr = [window_ frame];
+            std::fprintf(stderr,
+                         "[diag3] %.3f decode %s: locationInWindow=(%.1f,%.1f) in_view=(%.1f,%.1f) "
+                         "frame=(%.1f,%.1f %.1fx%.1f) geom_h=%.1f evt_ts=%.3f
+",
+                         [[NSProcessInfo processInfo] systemUptime],
+                         type == NSEventTypeLeftMouseDown ? "down" : "up", liw.x, liw.y, in_view.x,
+                         in_view.y, fr.origin.x, fr.origin.y, fr.size.width, fr.size.height,
+                         geometry_.height_points, [event timestamp]);
+        }
         flat.location_x = static_cast<double>(in_view.x);
         flat.location_y = static_cast<double>(in_view.y);
         flat.modifier_flags = static_cast<std::uint64_t>([event modifierFlags]);

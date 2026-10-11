@@ -87,6 +87,14 @@ namespace
 
 int g_failures = 0;
 
+} // namespace
+namespace context::editor::shell::smoke
+{
+void diag_cocoa_window(const IWindowBackend& backend, const char* tag); // TEMP DIAGNOSTIC
+}
+namespace
+{
+
 void check(bool condition, const char* what, int line)
 {
     if (condition)
@@ -899,6 +907,12 @@ int main(int argc, char** argv)
         pump_until(manager, clock_us, [&] { return backend->placement().maximized; });
     COCOA_CHECK(zoom_observed,
                 "the pinned Maximize preference really zoomed - placement().maximized flipped true");
+    smoke::diag_cocoa_window(*backend, "zoom observed");
+    for (int i = 0; i < 12; ++i) // TEMP DIAGNOSTIC: does the window server lag AppKit's frame?
+    {
+        (void)pump_until(manager, clock_us, [] { return false; }, std::chrono::milliseconds(100));
+        smoke::diag_cocoa_window(*backend, "zoomed +100ms");
+    }
 
     // Restore the frame before the drag drill, so its caption rect is published against a settled
     // geometry (a posted location is resolved against the frame at DEQUEUE time — claim 2).
@@ -909,6 +923,7 @@ int main(int argc, char** argv)
     const bool settled_after_zoom =
         pump_until_stable(manager, clock_us, [&] { return backend->placement(); });
     COCOA_CHECK(settled_after_zoom, "the geometry came to rest after the zoom round trip");
+    smoke::diag_cocoa_window(*backend, "unzoom settled");
     {
         // TEMP DIAGNOSTIC (macOS 26.6 investigation).
         const shell::WindowPlacement p = backend->placement();
@@ -932,6 +947,7 @@ int main(int argc, char** argv)
     drag_press.pointer.position =
         shell::PointI{static_cast<std::int32_t>(drag_client.width / 2u),
                       static_cast<std::int32_t>(drag_client.height / 4u)};
+    smoke::diag_cocoa_window(*backend, "before drag press");
     COCOA_CHECK(smoke::inject_event(*backend, smoke::WindowMode::real, drag_press),
                 "a single caption press was accepted for injection");
     // `caption_before` is still the drag baseline: the only drill since that read was the zoom
@@ -943,6 +959,7 @@ int main(int argc, char** argv)
     });
     COCOA_CHECK(drag_consumed,
                 "the caption press was handed to performWindowDragWithEvent: by the pump");
+    smoke::diag_cocoa_window(*backend, "after drag drill");
     {
         // TEMP DIAGNOSTIC (macOS 26.6 investigation).
         shell::CocoaCaptionStats s;
