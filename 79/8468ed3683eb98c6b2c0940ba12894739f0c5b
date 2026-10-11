@@ -1,0 +1,42 @@
+.github/actions/python/action.yml
+  s_e19ebe83cb6110::t_b9bace0ca75263 1-90
+tools/check_ci_python.py
+  s_e19ebe83cb6110::t_b01d695a67ccfc 1-143
+  s_e19ebe83cb6110::t_5633847adfd2e8 144-148
+tools/tests/test_ci_python.py
+  s_e19ebe83cb6110::t_45c687bee1159e 1-110
+cmake/ContextPython.cmake
+  s_e19ebe83cb6110::t_ef89fbaef1e6a1 16-18
+.github/actions/pinned-toolchain/action.yml
+  s_e19ebe83cb6110::t_28173be0feddd2 130-132,135
+.github/actions/setup-build-env/action.yml
+  s_e19ebe83cb6110::t_effbd8928df14e 80
+.github/workflows/bench-nightly.yml
+  s_e19ebe83cb6110::t_70e1edca47f982 33-37,147-151
+.github/workflows/ci.yml
+  s_e19ebe83cb6110::t_15ff03d244b40f 44-52,101-105,127-131,146-150,164-170,172,192-196,445-449,508-512,557-561,692-696,775-779,855-859,932-936,1007-1011,1086-1090,1198-1202,1275-1279,1376-1380,1441-1445,1556-1560,1661-1665,1734-1738,1905-1909,2016-2020,2255-2259,2357-2361
+.github/workflows/release-sign.yml
+  s_e19ebe83cb6110::t_bad136ed8a2259 50-54,139-143,168,174,254-258
+docs/ci-fleet-manifest.json
+  s_e19ebe83cb6110::t_5f4818ea8eb7fc 904-913
+docs/ci-fleet-manifest.md
+  s_e19ebe83cb6110::t_a0a705becbd8f2 92,197,200-202
+docs/self-hosted-runners.md
+  s_e19ebe83cb6110::t_78ba382a88c6f2 89-91,139-158,164-166
+---
+{
+  "schema_version": "authorship/3.0.0",
+  "git_ai_version": "1.7.5",
+  "base_commit_sha": "798468ed3683eb98c6b2c0940ba12894739f0c5b",
+  "prompts": {},
+  "sessions": {
+    "s_e19ebe83cb6110": {
+      "agent_id": {
+        "tool": "claude",
+        "id": "514df444-7709-4c0d-be94-41a9023e64ee",
+        "model": "claude-opus-5-5"
+      },
+      "human_author": "Ivan Murzak <Ivan.D.Murzak@gmail.com>"
+    }
+  }
+}
