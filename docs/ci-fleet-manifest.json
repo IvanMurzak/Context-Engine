@@ -6,7 +6,7 @@
   "tiers": ["per-PR", "nightly"],
   "runner_classes": {
     "gh-ubuntu-shared": {
-      "os": "ubuntu-24.04 (jobs applying the L-42 pinned toolchain), ubuntu-latest (toolchain-free jobs)",
+      "os": "ubuntu-24.04 (jobs applying the L-42 pinned toolchain), ubuntu-latest (jobs not applying it: gates, python-tests, emsdk web jobs)",
       "hardware": "github-hosted (shared)",
       "gpu": false,
       "isolation": "shared",

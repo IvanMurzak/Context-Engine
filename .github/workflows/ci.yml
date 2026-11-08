@@ -11,9 +11,10 @@
 # reality); Windows stays on documented MSVC — clang-cl adoption is a staged follow-up recorded
 # in the manifest.
 #
-# Runner image: jobs applying pinned-toolchain run on ubuntu-24.04, not ubuntu-latest: the L-42 pin
-# needs an apt.llvm.org suite for the image's codename, and resolute (26.04) has no LLVM 20 suite.
-# Move the image together with the manifest pin. Toolchain-free jobs may keep floating.
+# Runner image: Linux jobs and legs applying pinned-toolchain run on ubuntu-24.04, not ubuntu-latest:
+# the L-42 pin needs an apt.llvm.org suite for the image's codename, and resolute (26.04) has no LLVM
+# 20 suite. Move the image together with the manifest pin. Jobs that do not apply it (the gates,
+# python-tests, the emsdk web jobs) may keep floating.
 #
 # Compiler caching: sccache on the ubuntu/macos legs via a LOCAL-disk cache dir — the churny
 # GitHub-Actions cache backend stays OFF (SCCACHE_GHA_ENABLED=false; see the env: block). The
