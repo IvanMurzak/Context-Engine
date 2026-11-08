@@ -30,10 +30,11 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 LIVE_CI = REPO_ROOT / ".github" / "workflows" / "ci.yml"
 
 
-def workflow(*, heavy_needs: str = "[license-gate, ci-config-gate]",
-             gate_needs: str = "", extra: str = "") -> str:
-    """A minimal but structurally REAL ci.yml: the two gates, the non-gating pytest job, one heavy
-    job. `gate_needs` / `heavy_needs` / `extra` are the plant seams."""
+def workflow(*, heavy_needs: str = "[changes, license-gate, ci-config-gate]",
+             heavy_if: str = check_ci_gating.HEAVY_JOB_IF, gate_needs: str = "",
+             extra: str = "") -> str:
+    """A minimal but structurally REAL ci.yml: the classifier, the two gates, the non-gating pytest
+    job, one heavy job. `gate_needs` / `heavy_needs` / `heavy_if` / `extra` are the plant seams."""
     gate_line = f"    needs: {gate_needs}\n" if gate_needs else ""
     return (
         "name: CI\n"
@@ -45,6 +46,12 @@ def workflow(*, heavy_needs: str = "[license-gate, ci-config-gate]",
         "  FOO: bar\n"
         "\n"
         "jobs:\n"
+        "  changes:\n"
+        "    if: github.event_name == 'pull_request'\n"
+        "    runs-on: ubuntu-latest\n"
+        "    steps:\n"
+        "      - uses: actions/checkout@v7\n"
+        "\n"
         "  license-gate:\n"
         "    name: dependency-license gate\n"
         "    runs-on: ubuntu-latest\n"
@@ -67,6 +74,7 @@ def workflow(*, heavy_needs: str = "[license-gate, ci-config-gate]",
         "  build:\n"
         "    name: build (${{ matrix.os }})\n"
         f"    needs: {heavy_needs}\n"
+        f"    if: {heavy_if}\n"
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
         "      - uses: actions/checkout@v7\n"
@@ -81,8 +89,8 @@ def workflow(*, heavy_needs: str = "[license-gate, ci-config-gate]",
 
 def test_parse_jobs_reads_flow_and_absent_needs():
     jobs = parse_jobs(workflow())
-    assert set(jobs) == {"license-gate", "ci-config-gate", "python-tests", "build"}
-    assert jobs["build"] == ["license-gate", "ci-config-gate"]
+    assert set(jobs) == {"changes", "license-gate", "ci-config-gate", "python-tests", "build"}
+    assert jobs["build"] == ["changes", "license-gate", "ci-config-gate"]
     assert jobs["license-gate"] == []
 
 
@@ -105,7 +113,7 @@ def test_parse_jobs_ignores_env_keys_and_stops_at_column_zero():
     """
     jobs = parse_jobs(workflow() + "\ndefaults:\n  run:\n    shell: bash\n")
     assert "run" not in jobs and "FOO" not in jobs
-    assert set(jobs) == {"license-gate", "ci-config-gate", "python-tests", "build"}
+    assert set(jobs) == {"changes", "license-gate", "ci-config-gate", "python-tests", "build"}
 
 
 def test_parse_jobs_reads_quoted_and_commented_block_items():
@@ -152,17 +160,22 @@ def test_rule1_dangling_needs_edge_is_flagged():
 def test_rule2_a_non_gating_job_may_not_gate_anything():
     """THE defect this gate exists for: re-adding the timing-dependent pytest job to a `needs:`."""
     errors = validate(parse_jobs(
-        workflow(heavy_needs="[license-gate, ci-config-gate, python-tests]")))
+        workflow(heavy_needs="[changes, license-gate, ci-config-gate, python-tests]")))
     assert any("must NOT declare `needs: python-tests`" in e for e in errors)
 
 
 def test_rule3_a_deleted_fail_fast_edge_is_flagged():
     """The OPPOSITE failure: quietly dropping the gating that is there for a real reason."""
-    errors = validate(parse_jobs(workflow(heavy_needs="[ci-config-gate]")))
+    errors = validate(parse_jobs(workflow(heavy_needs="[changes, ci-config-gate]")))
     assert any("missing the fail-fast gate edge(s) ['license-gate']" in e for e in errors)
 
-    errors = validate(parse_jobs(workflow(heavy_needs="[license-gate]")))
+    errors = validate(parse_jobs(workflow(heavy_needs="[changes, license-gate]")))
     assert any("missing the fail-fast gate edge(s) ['ci-config-gate']" in e for e in errors)
+
+
+def test_rule3_a_heavy_job_without_the_classifier_edge_is_flagged():
+    errors = validate(parse_jobs(workflow(heavy_needs="[license-gate, ci-config-gate]")))
+    assert any("missing the 'changes' edge" in e for e in errors)
 
 
 def test_rule3_an_undeclared_gate_is_flagged():
@@ -172,7 +185,7 @@ def test_rule3_an_undeclared_gate_is_flagged():
              "    steps:\n"
              "      - uses: actions/checkout@v7\n")
     errors = validate(parse_jobs(
-        workflow(heavy_needs="[license-gate, ci-config-gate, smoke-gate]", extra=extra)))
+        workflow(heavy_needs="[changes, license-gate, ci-config-gate, smoke-gate]", extra=extra)))
     assert any("unexpected `needs:` entr" in e and "smoke-gate" in e for e in errors)
 
 
@@ -189,14 +202,41 @@ def test_rule5_a_renamed_declared_job_cannot_silently_pass():
     assert any("does not exist in the workflow" in e and "python-tests" in e for e in errors)
 
 
+@pytest.mark.parametrize("heavy_if", [
+    # Runs past a red gate: the fail-fast is gone, and `needs:` still looks right.
+    "${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}",
+    # Silently skips on a `train/` PR or a failed classifier: the implicit success() is back.
+    "${{ needs.changes.outputs.docs_only != 'true' }}",
+    "${{ !cancelled() && needs.license-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}",
+])
+def test_rule6_a_heavy_job_with_any_other_if_is_flagged(heavy_if):
+    text = workflow(heavy_if=heavy_if)
+    assert any("its `if:` must be exactly" in e
+               for e in check_ci_gating.validate_ifs(parse_jobs(text), check_ci_gating.parse_job_ifs(text)))
+
+
+def test_rule6_a_heavy_job_with_no_if_is_flagged_and_step_ifs_do_not_count():
+    text = workflow().replace(f"    if: {check_ci_gating.HEAVY_JOB_IF}\n", "")
+    text += f"      - run: echo\n        if: {check_ci_gating.HEAVY_JOB_IF}\n"
+    assert check_ci_gating.parse_job_ifs(text).get("build") is None
+    assert check_ci_gating.validate_ifs(parse_jobs(text), check_ci_gating.parse_job_ifs(text))
+
+
+def test_rule4_the_classifier_may_not_wait_for_anything():
+    text = workflow().replace("  changes:\n", "  changes:\n    needs: [license-gate]\n")
+    assert any("must declare no `needs:`" in e for e in validate(parse_jobs(text)))
+
+
 # ---------------------------------------------------------------------------
 # The LIVE workflow
 # ---------------------------------------------------------------------------
 
 
 def test_live_ci_yml_topology_is_valid():
-    jobs = parse_jobs(LIVE_CI.read_text(encoding="utf-8"))
+    text = LIVE_CI.read_text(encoding="utf-8")
+    jobs = parse_jobs(text)
     assert validate(jobs) == []
+    assert check_ci_gating.validate_ifs(jobs, check_ci_gating.parse_job_ifs(text)) == []
 
 
 def test_live_ci_yml_is_actually_gated_and_the_reader_saw_it():
@@ -220,7 +260,7 @@ def test_live_ci_yml_is_actually_gated_and_the_reader_saw_it():
     for name in (*GATE_JOBS, *NON_GATING_JOBS):
         assert name in jobs, f"{name} missing from the live workflow"
     fronted = [j for j, n in jobs.items() if set(GATE_JOBS) <= set(n)]
-    declared_edges = len(re.findall(r"(?m)^    needs: \[license-gate, ci-config-gate\]\s*$", text))
+    declared_edges = len(re.findall(r"(?m)^    needs: \[changes, license-gate, ci-config-gate\]\s*$", text))
     assert declared_edges >= 15, (
         f"only {declared_edges} gate-edge line(s) found textually in {LIVE_CI.name} — either the "
         f"rollup shrank drastically or this test's pattern no longer matches how they are written")
@@ -238,18 +278,23 @@ def test_planted_violations_in_the_LIVE_workflow_are_caught():
     fail-open below survive.
     """
     live = LIVE_CI.read_text(encoding="utf-8")
-    gate_edge = "    needs: [license-gate, ci-config-gate]\n"
+    gate_edge = "    needs: [changes, license-gate, ci-config-gate]\n"
     assert gate_edge in live, "the live gate-edge spelling changed; update this plant"
     for label, planted, needle in (
         ("re-add the non-gating job to a needs:",
-         live.replace(gate_edge, "    needs: [license-gate, ci-config-gate, python-tests]\n", 1),
+         live.replace(gate_edge, "    needs: [changes, license-gate, ci-config-gate, python-tests]\n", 1),
          "must NOT declare `needs: python-tests`"),
         ("delete a retained fail-fast edge",
-         live.replace(gate_edge, "    needs: [license-gate]\n", 1),
+         live.replace(gate_edge, "    needs: [changes, license-gate]\n", 1),
          "missing the fail-fast gate edge(s) ['ci-config-gate']"),
     ):
         assert planted != live, label
         assert any(needle in e for e in validate(parse_jobs(planted))), label
+
+    gate_if = f"    if: {check_ci_gating.HEAVY_JOB_IF}\n"
+    assert gate_if in live, "the live `if:` spelling changed; update this plant"
+    planted = live.replace(gate_if, "    if: ${{ !cancelled() }}\n", 1)
+    assert check_ci_gating.validate_ifs(parse_jobs(planted), check_ci_gating.parse_job_ifs(planted))
 
 
 @pytest.mark.parametrize("spelling", [
@@ -305,11 +350,15 @@ def test_main_exit_codes(tmp_path):
     assert check_ci_gating.main(["--workflow", str(ok)]) == 0
 
     bad = tmp_path / "bad.yml"
-    bad.write_text(workflow(heavy_needs="[license-gate, ci-config-gate, python-tests]"),
+    bad.write_text(workflow(heavy_needs="[changes, license-gate, ci-config-gate, python-tests]"),
                    encoding="utf-8")
     assert check_ci_gating.main(["--workflow", str(bad)]) == 1
 
     assert check_ci_gating.main(["--workflow", str(tmp_path / "nope.yml")]) == 2
+
+    bad_if = tmp_path / "bad_if.yml"
+    bad_if.write_text(workflow(heavy_if="${{ !cancelled() }}"), encoding="utf-8")
+    assert check_ci_gating.main(["--workflow", str(bad_if)]) == 1
 
     garbage = tmp_path / "garbage.yml"
     garbage.write_text("name: CI\n", encoding="utf-8")

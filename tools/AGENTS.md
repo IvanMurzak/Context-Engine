@@ -1,6 +1,7 @@
 # tools/ — repo and CI tooling (Python, not engine code)
 
 - `check_*.py` — CI gates (licenses, CI gating, fleet manifest, toolchain, source pins, include graph, a11y/webui/boundary checks)
+- `docs_only.py` — classifies a change as documentation only for `ci.yml`'s `changes` job; its path list is what to edit
 - `fetch_*.py` + `*-prebuilt.json` / `*-toolchain.json` / `*-source.json` — SHA-pinned, verify-before-use, fail-closed fetchers and their pins
 - `license-allowlist.json` — the deny-by-default license map; `trust-root/` — pinned Ed25519 release signers (`docs/signing.md`)
 - `gen_*.py` — generators for committed artifacts; `tests/` — pytest for every tool (plus `fixtures/`, test-only signing material)
