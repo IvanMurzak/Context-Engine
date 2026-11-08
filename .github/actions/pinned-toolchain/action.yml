@@ -1,6 +1,9 @@
 # Applies the L-42 pinned-toolchain manifest (cmake/toolchain-versions.json) to a CI job.
 #   Linux   — installs the pinned clang from apt.llvm.org, STRICTLY verifies it against the
 #             manifest pin, and exports CC/CXX so every subsequent step compiles with it.
+#             llvm.sh picks the apt suite from the image's codename, so the calling job must run
+#             on an image apt.llvm.org publishes this major for: ubuntu-24.04 (noble), never a
+#             floating ubuntu-latest (resolute has no LLVM 20 suite).
 #   macOS   — advisory-verifies the runner's Apple clang against the recorded version
 #             (drift = a ::warning:: annotation + a manifest update, never a red build).
 #   Windows — prints the documented reality (runner MSVC; clang-cl adoption is a staged

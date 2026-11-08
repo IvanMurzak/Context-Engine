@@ -5,7 +5,7 @@
 # and the N-daemons-on-one-box scenario (R-FILE-011 composed budgets; the R-FILE-010
 # multi-worktree scenario home — its shared-cache contention measurement activates at M2).
 #
-# Runner-class honesty (R-QA-009 / R-QA-012): ubuntu-latest is SHARED, not the perf-isolated
+# Runner-class honesty (R-QA-009 / R-QA-012): ubuntu-24.04 is SHARED, not the perf-isolated
 # `perf-linux-bare-metal` class docs/ci-fleet-manifest.json names for the 100k floor — so this
 # whole workflow is ADVISORY/TREND: results are archived as artifacts + the perf-gate time series,
 # drift stays visible, and nothing here red-Xs a merge. When the perf box is provisioned the
@@ -25,7 +25,7 @@ on:
 jobs:
   bench-100k-nightly:
     name: bench nightly (100k real pipeline, ubuntu, advisory trend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 300
     steps:
       - uses: actions/checkout@v7
@@ -139,7 +139,7 @@ jobs:
   # floors + methodology in bench/density-targets.json + docs/density-targets.md).
   density-nightly:
     name: density nightly (packed instances, full ladder, ubuntu, advisory trend)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@v7

@@ -22,7 +22,7 @@
                 "method": "apt.llvm.org (llvm.sh)",
                 "major": 20
             },
-            "notes": "llvm.sh installs the latest 20.x from apt.llvm.org; the whole LLVM 20 series is 20.1.x, so the major.minor pin is stable across point releases. If upstream ever ships 20.2 the strict gate fails loudly — that is the drift alarm working, not a bug."
+            "notes": "llvm.sh installs the latest 20.x from apt.llvm.org; the whole LLVM 20 series is 20.1.x, so the major.minor pin is stable across point releases. If upstream ever ships 20.2 the strict gate fails loudly — that is the drift alarm working, not a bug. Requires a runner image whose codename apt.llvm.org publishes LLVM 20 for, so CI jobs applying this entry pin ubuntu-24.04 (noble); resolute (26.04) has only 21+."
         },
         "macos-arm64": {
             "compiler": "apple-clang",
