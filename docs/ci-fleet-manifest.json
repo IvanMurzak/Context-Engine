@@ -899,7 +899,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "ci-config-gate",
-      "description": "tools/check_ci_gating.py pins WHICH jobs may front the rollup via needs: (issue #459). Reds in both directions - if a timing-dependent job such as python-tests re-enters a needs: list, and if the retained deterministic fail-fast is deleted from a heavy job."
+      "description": "tools/check_ci_gating.py pins WHICH jobs may front the rollup via needs: (issue #459). Reds in both directions - if a timing-dependent job such as python-tests re-enters a needs: list, and if the retained deterministic fail-fast is deleted from a heavy job. Also pins the one if: every heavy job carries (the docs-only skip from tools/docs_only.py, which must not run past a red gate)."
     },
     {
       "id": "ci-self-installed-python",

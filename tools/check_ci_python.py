@@ -36,7 +36,7 @@ _USES = re.compile(r"""^\s+(?:-\s+)?uses:\s*['"]?(?P<ref>[^\s'"#]+)""")
 _RUN = re.compile(r"^\s+(?:-\s+)?run:")
 _SETUP_PYTHON = re.compile(r"""^\s*(?:-\s+)?uses:\s*['"]?actions/setup-python@""", re.M)
 
-# Sanity floor for the repo's own workflows (24 + 2 + 3 jobs today): catches a reader COLLAPSE, not a
+# Sanity floor for the repo's own workflows (25 + 2 + 3 jobs today): catches a reader COLLAPSE, not a
 # job being added or removed.
 MIN_JOBS = 20
 

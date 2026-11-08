@@ -2,7 +2,7 @@
 """CI gating-topology gate: which jobs may FRONT the rollup via `needs:` (issue #459).
 
 WHY THIS EXISTS. `.github/workflows/ci.yml` fronts 21 heavyweight job definitions (39 of the rollup's
-42 checks, after the OS matrices) behind a couple of ~10-second gate jobs via `needs:`, so an obviously
+43 checks, after the OS matrices) behind a couple of ~10-second gate jobs via `needs:`, so an obviously
 broken tree stops before it burns the runner pool. That fail-fast is worth keeping. What is NOT safe is
 putting a job with TIMING flake surface in that position: a `needs:` edge does not merely red the
 rollup, it SKIPS every dependent job, and the only recovery is a full rerun of all ~39.
@@ -23,18 +23,25 @@ So the invariant this gate pins is not "less gating" — it is a DECLARED split:
                      reviewed allowlist here rather than "whatever ci.yml happens to say".
   * NON_GATING_JOBS — jobs that MUST NOT appear in any `needs:`. They stay blocking required checks,
                      so a red still reds the run; it just costs a 1-job rerun instead of 39.
-  * every other job — must carry EXACTLY the GATE_JOBS edges, so the fail-fast cannot be silently
-                     deleted job-by-job either. Deleting gating is the opposite failure of over-gating
-                     and this gate refuses both directions.
+  * SCOPE_JOB      — the docs-only classifier (tools/docs_only.py). It fronts every heavy job too, but
+                     its result stops nothing: only its explicit `docs_only=true` output skips a job.
+  * every other job — must carry EXACTLY the GATE_JOBS and SCOPE_JOB edges and HEAVY_JOB_IF, so the
+                     fail-fast cannot be silently deleted job-by-job either. Deleting gating is the
+                     opposite failure of over-gating and this gate refuses both directions.
 
 Rules (each violation names the job and the fix):
   1. Every name in any `needs:` is a real job in the file (typo guard — GitHub silently never runs a
      job whose `needs:` names nothing, so a typo here is invisible).
   2. No job's `needs:` contains a NON_GATING_JOBS member.
-  3. Every job that is neither a gate nor non-gating carries exactly the GATE_JOBS set.
-  4. A gate job itself declares no `needs:` (a gate behind a gate is not a fail-fast).
-  5. Both declared sets exist in the file, so a rename cannot turn a rule into a no-op — the vacuity
+  3. Every other job carries exactly the GATE_JOBS set plus SCOPE_JOB.
+  4. A gate job or SCOPE_JOB itself declares no `needs:` (a gate behind a gate is not a fail-fast).
+  5. All declared jobs exist in the file, so a rename cannot turn a rule into a no-op — the vacuity
      failure mode for a gate keyed on names.
+  6. Every job rule 3 covers has exactly HEAVY_JOB_IF. Its `!cancelled()` replaces the implicit
+     success() that gave the fail-fast, so a job missing the gates' results would run past a red gate,
+     and a job missing `!cancelled()` would silently skip whenever SCOPE_JOB is skipped or fails.
+     SCOPE_JOB has exactly SCOPE_JOB_IF, because a `train/` pull request runs in full. The gates and
+     NON_GATING_JOBS have no `if:`, because a skipped gate skips every job behind it.
 
 Exit 0 = topology valid. Exit 1 = violations (listed on stdout). Exit 2 = configuration error
 (unreadable workflow, no `jobs:` block) — never a silent pass.
@@ -64,6 +71,18 @@ GATE_JOBS = ("license-gate", "ci-config-gate")
 # Jobs forbidden from EVER appearing in a `needs:` list, because they do have timing flake surface.
 NON_GATING_JOBS = ("python-tests",)
 
+# The docs-only classifier, its `if:`, and the one `if:` of every heavy job (rule 6). Only an explicit
+# `true` skips.
+SCOPE_JOB = "changes"
+SCOPE_JOB_IF = ("${{ (github.event_name == 'pull_request' || github.event_name == 'push') && "
+                "!contains(format(' {0}', join(github.event.pull_request.labels.*.name, ' ')), ' train/') }}")
+HEAVY_JOB_IF = ("${{ !cancelled() && needs.license-gate.result == 'success' && "
+                "needs.ci-config-gate.result == 'success' && "
+                "needs.changes.outputs.docs_only != 'true' }}")
+
+# Every job the heavy-job rule 3 does not cover.
+DECLARED_JOBS = (*GATE_JOBS, *NON_GATING_JOBS, SCOPE_JOB)
+
 
 # The reader's recognised spellings. Each tolerates an optional trailing `# comment` and optional
 # quoting, because BOTH are legal YAML that a future edit will plausibly use — and an unrecognised
@@ -75,6 +94,7 @@ _NEEDS_SCALAR = re.compile(r"""^\s+needs:\s*(?P<one>['"]?[A-Za-z0-9_-]+['"]?)\s*
 _NEEDS_EMPTY = re.compile(r"^\s+needs:\s*(?:#.*)?$")
 _NEEDS_ANY = re.compile(r"^\s+needs\s*:")
 _BLOCK_ITEM = re.compile(r"""^\s+-\s*(?P<one>['"]?[A-Za-z0-9_-]+['"]?)\s*(?:#.*)?$""")
+_JOB_IF = re.compile(r"^    if:\s*(?P<expr>.*?)\s*$")
 
 
 def parse_jobs(text: str) -> dict[str, list[str]]:
@@ -174,6 +194,34 @@ def parse_jobs(text: str) -> dict[str, list[str]]:
     return jobs
 
 
+def parse_job_ifs(text: str) -> dict[str, str]:
+    """Map each job id to its job-level `if:` text. Any other spelling reads as a mismatch in rule 6,
+    so this narrow reader fails closed (a step-level `if:` is indented deeper and never matches)."""
+    ifs: dict[str, str] = {}
+    current: str | None = None
+    for line in text[re.search(r"(?m)^jobs:\s*$", text).end():].splitlines():
+        if re.match(r"^[^\s#]", line):  # a column-0 key ends the jobs block
+            break
+        job = _JOB_KEY.match(line)
+        if job:
+            current = job.group("id")
+        elif current is not None and (expr := _JOB_IF.match(line)):
+            ifs[current] = expr.group("expr")
+    return ifs
+
+
+def validate_ifs(jobs: dict[str, list[str]], ifs: dict[str, str]) -> list[str]:
+    """Rule 6: the violations among job-level `if:`s (empty == valid)."""
+    def expected(job: str) -> str | None:
+        if job == SCOPE_JOB:
+            return SCOPE_JOB_IF
+        return None if job in DECLARED_JOBS else HEAVY_JOB_IF
+
+    return [f"job {job!r}: its `if:` must be exactly {expected(job)!r} (found {ifs.get(job)!r}) — see "
+            f"rule 6 in tools/check_ci_gating.py."
+            for job in jobs if ifs.get(job) != expected(job)]
+
+
 def validate(jobs: dict[str, list[str]]) -> list[str]:
     """Return a list of human-readable violations (empty == valid)."""
     errors: list[str] = []
@@ -181,7 +229,7 @@ def validate(jobs: dict[str, list[str]]) -> list[str]:
     non_gating = set(NON_GATING_JOBS)
 
     # Rule 5 FIRST: a renamed job would otherwise turn rules 2-4 into silent no-ops.
-    for name in (*GATE_JOBS, *NON_GATING_JOBS):
+    for name in DECLARED_JOBS:
         if name not in jobs:
             errors.append(
                 f"declared job {name!r} does not exist in the workflow — this gate's rules would "
@@ -201,7 +249,7 @@ def validate(jobs: dict[str, list[str]]) -> list[str]:
                 f"so that edge lets one flaky test SKIP this job (issue #459). Keep {dep!r} a "
                 f"blocking check with no dependents.")
 
-        if job in gates:
+        if job in gates or job == SCOPE_JOB:
             # Rule 4: gates front everything and wait for nothing.
             if needs:
                 errors.append(
@@ -213,11 +261,15 @@ def validate(jobs: dict[str, list[str]]) -> list[str]:
 
         # Rule 3: the retained fail-fast must be present, and nothing else may gate.
         missing = gates - set(needs)
-        extra = set(needs) - gates
+        extra = set(needs) - gates - {SCOPE_JOB}
         if missing:
             errors.append(
                 f"job {job!r}: missing the fail-fast gate edge(s) {sorted(missing)} — every heavy "
                 f"job is fronted by {sorted(gates)} so a broken tree cannot burn the runner pool.")
+        if SCOPE_JOB not in needs:
+            errors.append(
+                f"job {job!r}: missing the {SCOPE_JOB!r} edge — a heavy job without it runs on a "
+                f"documentation-only change, and its `if:` cannot read the classifier's output.")
         if extra:
             errors.append(
                 f"job {job!r}: unexpected `needs:` entr(y/ies) {sorted(extra)} — only the "
@@ -240,7 +292,7 @@ def validate(jobs: dict[str, list[str]]) -> list[str]:
 # vacuous gate while only the non-gating pytest went red. A gate whose own emptiness is a PASS is the
 # exact vacuity class this file exists to prevent.
 #
-# Deliberately slack (the real figures are 24 / 21): these catch a COLLAPSE, not a job being added or
+# Deliberately slack (the real figures are 25 / 21): these catch a COLLAPSE, not a job being added or
 # removed. Raise them if the rollup ever shrinks below them legitimately.
 MIN_JOBS = 20
 MIN_FRONTED = 15
@@ -272,14 +324,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"[{TAG}] ERROR: {path}: {exc}", file=sys.stderr)
         return 2
 
-    errors = validate(jobs)
+    errors = validate(jobs) + validate_ifs(jobs, parse_job_ifs(text))
     if errors:
         for err in errors:
             print(f"[{TAG}] FINDING: {err}", file=sys.stderr)
         print(f"[{TAG}] FAIL: {len(errors)} gating-topology violation(s) in {path}", file=sys.stderr)
         return 1
-    declared = set(GATE_JOBS) | set(NON_GATING_JOBS)
-    gated = sum(1 for j, n in jobs.items() if (j not in declared) and n)
+    gated = sum(1 for j, n in jobs.items() if (j not in DECLARED_JOBS) and n)
     # The floors apply to the REAL workflow only; the synthetic fixtures the tests pass via --workflow
     # are legitimately tiny.
     if args.workflow is None and (len(jobs) < MIN_JOBS or gated < MIN_FRONTED):

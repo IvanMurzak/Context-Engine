@@ -101,7 +101,11 @@ Note `^cli-` does NOT match `client-`.
   `check_ci_python.py` enforces it (`docs/self-hosted-runners.md` § 6).
 - `python-tests` is a blocking check that **gates nothing** (issue #459): it has timing flake
   surface, and a `needs:` edge would skip every dependent job. `check_ci_gating.py` enforces this.
-- Counts: 24 job definitions (3 unfronted + 21 fronted, expanding to 39 of the rollup's 42 checks).
+- **Documentation-only changes skip the 21 heavy definitions** (`changes` job, `tools/docs_only.py`);
+  `license-gate`, `ci-config-gate` and `python-tests` still run. Only an explicit `docs_only=true`
+  skips; a `train/` PR or any doubt runs everything. A build or test that starts reading a file under
+  `docs/` adds it to `READ_BY_CI` there, or a change to that file alone will not run it.
+- Counts: 25 job definitions (4 unfronted + 21 fronted, expanding to 39 of the rollup's 43 checks).
   Keep these in step with `ci.yml`'s header comment and `check_ci_gating.py` when adding a job/leg.
 - Blocking: `build` (3 OS: dev build + general step + every named gate step), `deterministic`
   (3 OS, cross-platform golden state-hash), `sanitize` (ASan+UBSan, TSan; Linux/clang — V8

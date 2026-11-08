@@ -185,6 +185,14 @@ Context does NOT compete on raw samples/sec (the acknowledged-gaps row). The nor
 live in [`density-targets.md`](density-targets.md); the machine-readable copy is
 `bench/density-targets.json`.
 
+## Documentation-only changes
+
+"Per-PR" means every PR that can affect the gate. A change that touches only the paths listed in
+`tools/docs_only.py` skips the fronted heavy jobs (the `changes` job classifies it); `license-gate`,
+`ci-config-gate` and `python-tests` still run, so this manifest stays validated, and a change to the
+manifest itself is off that list. Only an explicit `docs_only=true` skips: a skipped row is not a
+degraded gate, because nothing it builds or reads changed.
+
 ## How CI consumes it (the R-QA-012 tie)
 
 `tools/check_fleet_manifest.py` runs in the `ci-config-gate` job on every PR (it moved out of

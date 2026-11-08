@@ -37,11 +37,11 @@
 # time looking cheap because a rerun cleared it. It stays a BLOCKING required check, so a red still
 # reds the run; it just gates nothing, and a flake now costs a 1-job rerun instead of 39.
 #
-# Counts, recounted against this file's own `jobs:` list (2026-07-27): 24 job definitions — 3 that
-# gate nothing behind them (`license-gate`, `ci-config-gate`, `python-tests`) + 21 fronted heavyweight
-# definitions, which expand through the OS matrices to 39 of the rollup's 42 checks. Keep these two
-# figures in step with AGENTS.md § CI structure and tools/check_ci_gating.py's docstring when a job
-# or a matrix leg is added.
+# Counts, recounted against this file's own `jobs:` list: 25 job definitions — 4 that nothing fronts
+# (`changes`, `license-gate`, `ci-config-gate`, `python-tests`) + 21 fronted heavyweight definitions,
+# which expand through the OS matrices to 39 of the rollup's 43 checks. Keep these two figures in step
+# with AGENTS.md § CI structure and tools/check_ci_gating.py's docstring when a job or a matrix leg is
+# added.
 #
 # Only DETERMINISTIC checks — no network, no subprocess, no timing, no ports — may sit in a gate job.
 #
@@ -97,6 +97,45 @@ env:
   GIT_CONFIG_VALUE_0: "*"
 
 jobs:
+  # Is this change documentation only? Then the 21 heavy definitions skip, and the run stays green
+  # through this job, the two gates and python-tests, which all still run. The rule and its path list
+  # live in tools/docs_only.py; only an explicit `true` skips, so a failed step, a skipped job (a
+  # `train/` PR) or any doubt runs everything. Why each heavy job's `if:` is spelled the way it is:
+  # rule 6 in tools/check_ci_gating.py.
+  #
+  # No `paths-ignore`: the run must keep a green check. ubuntu-latest, so a fork PR's copy of the script
+  # never runs on the owner's machines. This is not one of the GATE_JOBS (those stop the rollup when
+  # red); its result stops nothing, so its git subprocess cannot skip a job.
+  changes:
+    name: Detect docs-only changes
+    if: ${{ (github.event_name == 'pull_request' || github.event_name == 'push') && !contains(format(' {0}', join(github.event.pull_request.labels.*.name, ' ')), ' train/') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    outputs:
+      docs_only: ${{ steps.classify.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v7
+        continue-on-error: true
+        timeout-minutes: 3
+        with:
+          fetch-depth: 2 # the commit and its parents: docs_only.py diffs HEAD^1..HEAD
+          persist-credentials: false # it reads local trees only
+
+      # This job's OWN Python, installed by the workflow (docs/self-hosted-runners.md § 6).
+      - name: Python (installed by the workflow)
+        continue-on-error: true
+        timeout-minutes: 3
+        uses: ./.github/actions/python
+
+      - id: classify
+        continue-on-error: true
+        timeout-minutes: 1
+        env:
+          PUSH_BEFORE: ${{ github.event.before }}
+        run: python3 tools/docs_only.py
+
   license-gate:
     name: dependency-license gate (deny-by-default)
     runs-on: ubuntu-latest
@@ -181,7 +220,8 @@ jobs:
 
   build:
     name: build (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -434,7 +474,8 @@ jobs:
   # matrix + self-hosted-Windows/MSVC setup as `build`. Gated behind the cheap gates like the others.
   deterministic:
     name: deterministic (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -490,7 +531,8 @@ jobs:
   # scheduler).
   sanitize:
     name: ${{ matrix.name }}
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -545,7 +587,8 @@ jobs:
   # build matrix above stays vcpkg-free.
   bench-baseline:
     name: bench baseline (10k corpus, ubuntu)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     env:
@@ -682,7 +725,8 @@ jobs:
   # which keeps the M0 parse-bench FILE-FORMAT baseline + canonical-fixpoint smoke.
   bench-attach-10k:
     name: bench attach proxy (10k, real pipeline, ubuntu)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -765,7 +809,8 @@ jobs:
   # floor (docs/build-time-budget-table.md; docs/ci-fleet-manifest.json build-time-budget gate).
   build-time-bench:
     name: build-time bench (warm cache, ubuntu)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -841,7 +886,8 @@ jobs:
   # spikes/wasm/FINDINGS.md).
   spike-wasm:
     name: spike-wasm (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -915,7 +961,8 @@ jobs:
   # executable to the build step below too, or the new test reports "Not Run" -> RED here.
   wasm-runner:
     name: wasm-runner (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -991,7 +1038,8 @@ jobs:
   # run on all three OS legs of the `build` job — this job adds the clean-host tarball boot.
   linux-export:
     name: linux-export (both flavors, clean-host boot)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1070,7 +1118,8 @@ jobs:
   # links only the GPU-free render abstraction (CONTEXT_BUILD_RENDER_WGPU stays OFF).
   windows-export:
     name: windows-export (both flavors, clean-host boot + signing report)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ${{ (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || 'windows-latest' }}
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1179,7 +1228,8 @@ jobs:
   # (CONTEXT_BUILD_RENDER_WGPU stays OFF). Blocking, per PR.
   macos-export:
     name: macos-export (both flavors, clean-host boot + signing report)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: macos-latest
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1250,7 +1300,8 @@ jobs:
   # windows, the paravirtual Metal device on macos) and SKIPs cleanly (exit 77) where none does.
   spike-webgpu:
     name: spike webgpu (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1355,7 +1406,8 @@ jobs:
   # staged follow-up that lands with the first non-spike web build target.
   spike-webgpu-web:
     name: spike webgpu (web, emscripten)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1415,7 +1467,8 @@ jobs:
   # dependency path.
   render:
     name: render (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1535,7 +1588,8 @@ jobs:
   # the spike-webgpu-web leg — pinning emsdk is a staged follow-up.
   render-web:
     name: render (web, emscripten)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -1639,7 +1693,8 @@ jobs:
   # (its --target list) AND runs `ctest -R "^webui-ts-"` (its named step) — both halves are load-bearing.
   webui-tests:
     name: webui-tests (editor-core TS T1, headless Chromium)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1692,7 +1747,8 @@ jobs:
   # the PR. Default-OFF means the main `build` matrix + the local dev gate never resolve this toolchain.
   shader-crosscompile:
     name: shader-crosscompile (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1879,7 +1935,8 @@ jobs:
   # (version-keyed cache) so CI cost stays bounded — the download hardening the issue asks for.
   cef-substrate:
     name: cef-substrate (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -1971,7 +2028,8 @@ jobs:
   # per-PID root_cache_path + version-keyed cache), so the two jobs share the fetched CEF cache.
   editor-cef-smoke:
     name: editor-cef-smoke (${{ matrix.os }})
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     strategy:
       fail-fast: false
       matrix:
@@ -2227,7 +2285,8 @@ jobs:
   # this job is careful to avoid). The consumer target grows as e04/e05 land; e17 asserts its final shape.
   editor-boundary:
     name: editor-boundary (out-of-tree consumer + include-graph)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -2329,7 +2388,8 @@ jobs:
   # blocking flip is a FUTURE step gated on ops1.
   density-bench:
     name: density bench (packed instances, ubuntu)
-    needs: [license-gate, ci-config-gate]
+    needs: [changes, license-gate, ci-config-gate]
+    if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
