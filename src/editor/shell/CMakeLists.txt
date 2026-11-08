@@ -475,7 +475,7 @@ set_tests_properties(editor-shell-smoke-session0 PROPERTIES TIMEOUT 120)
 # nothing but a build.
 #
 # Linux-only by construction, and it SKIPS (ctest SKIP_RETURN_CODE 77) when there is no display —
-# which is the ordinary state of `build (ubuntu-latest)` and both `sanitize` legs, where it must not
+# which is the ordinary state of `build (ubuntu-24.04)` and both `sanitize` legs, where it must not
 # fail. That skip is NOT allowed to become permanent: the editor-cef-smoke Linux leg (which has
 # xvfb) runs the executable directly with --require-x11 --require-display, under which a compiled-out
 # X11 path or a missing display is a hard failure. Registered in the non-gate `editor-shell-` family,

@@ -74,7 +74,7 @@ traceFold  = 0xDD9DC8456413FCA4
 
 Because the trajectory is pure integer arithmetic and the fold is fixed-endian, these goldens are
 **portable**. The test joins the `determinism-*` family, so the **blocking CI "Determinism gate"**
-(`ctest -R "^determinism-"`) runs it on **all three build-matrix legs** — ubuntu-latest (Linux-x64),
+(`ctest -R "^determinism-"`) runs it on **all three build-matrix legs** — ubuntu-24.04 (Linux-x64),
 windows-latest (Win-x64, self-hosted headless), macos-latest (macOS-ARM64). If any leg computes a
 different hash, THAT leg goes red: that is the wedge-matrix byte-identity proof, live from day one of
 M6, before a single physics package exists. Locally (GCC) the gate passes under both the default and

@@ -11,6 +11,11 @@
 # reality); Windows stays on documented MSVC — clang-cl adoption is a staged follow-up recorded
 # in the manifest.
 #
+# Runner image: Linux jobs and legs applying pinned-toolchain run on ubuntu-24.04, not ubuntu-latest:
+# the L-42 pin needs an apt.llvm.org suite for the image's codename, and resolute (26.04) has no LLVM
+# 20 suite. Move the image together with the manifest pin. Jobs that do not apply it (the gates,
+# python-tests, the emsdk web jobs) may keep floating.
+#
 # Compiler caching: sccache on the ubuntu/macos legs via a LOCAL-disk cache dir — the churny
 # GitHub-Actions cache backend stays OFF (SCCACHE_GHA_ENABLED=false; see the env: block). The
 # setup-build-env composite action (.github/actions/setup-build-env) restores the dir via
@@ -220,7 +225,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     # CI toolchain-resilience fix: a backstop so a stalled external dependency (apt.llvm.org, …)
     # can NEVER again run this leg to the runner's 6h default ceiling. Real green wall-clock here
@@ -295,7 +300,7 @@ jobs:
         working-directory: src
 
       # The M3 DETERMINISM GATE (R-QA-005 / L-54, issue #74) — a BLOCKING per-PR check whose matrix
-      # NAMES its platforms: this build job runs on ubuntu-latest (Linux-x64), windows-latest
+      # NAMES its platforms: this build job runs on ubuntu-24.04 (Linux-x64), windows-latest
       # (Win-x64), and macos-latest (macOS-ARM64, Apple Silicon), so the `determinism-*` ctest family
       # — a fixed seed + fixed input stream stepped to a fixed tick count, asserted against a
       # cross-platform GOLDEN hierarchical state-hash — runs on all three, and ANY per-platform
@@ -474,7 +479,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -536,7 +541,7 @@ jobs:
             name: sanitize (ASan+UBSan, ubuntu)
           - preset: tsan
             name: sanitize (TSan, ubuntu)
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
@@ -584,7 +589,7 @@ jobs:
     name: bench baseline (10k corpus, ubuntu)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     env:
       VCPKG_DEFAULT_BINARY_CACHE: ${{ github.workspace }}/.vcpkg-bincache
@@ -722,7 +727,7 @@ jobs:
     name: bench attach proxy (10k, real pipeline, ubuntu)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
@@ -806,7 +811,7 @@ jobs:
     name: build-time bench (warm cache, ubuntu)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
@@ -886,7 +891,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -961,7 +966,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     timeout-minutes: 45  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1035,7 +1040,7 @@ jobs:
     name: linux-export (both flavors, clean-host boot)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
@@ -1300,7 +1305,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     env:
@@ -1446,7 +1451,7 @@ jobs:
   #
   # Policy (M4 visual-equivalence method, ROADMAP §1): Linux-Vulkan is the BLOCKING correctness gate;
   # other backends are advisory. lavapipe (Mesa's software Vulkan rasterizer) gives the ubuntu leg a
-  # real adapter, so `render (ubuntu-latest)` runs the real offscreen render/readback and is the
+  # real adapter, so `render (ubuntu-24.04)` runs the real offscreen render/readback and is the
   # authoritative gate. macOS is kept as an advisory desktop signal. Windows native render is
   # INTENTIONALLY NOT run in this job: it is already covered by the `build (windows-latest)` MSVC
   # compile+link leg and the `spike webgpu (windows-latest)` probe, and running the native wgpu-native
@@ -1467,7 +1472,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest]
+        os: [ubuntu-24.04, macos-latest]
     runs-on: ${{ matrix.os }}
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -1690,7 +1695,7 @@ jobs:
     name: webui-tests (editor-core TS T1, headless Chromium)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
@@ -1747,9 +1752,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'ubuntu-latest' }}
+    continue-on-error: ${{ !startsWith(matrix.os, 'ubuntu-') }}
     # 75, up from the 30 the sibling toolchain jobs use, and DERIVED not picked (issue #476): a
     # runner-image roll rolls the default MSVC/AppleClang and with it vcpkg's ABI hash, so the first
     # run after a roll legitimately rebuilds glslang + SPIRV-Cross + SPIRV-Tools from source.
@@ -1935,7 +1940,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
@@ -2028,7 +2033,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        os: [ubuntu-latest, macos-latest, windows-latest]
+        os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ (matrix.os == 'windows-latest' && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)) && fromJSON('["self-hosted","Windows","X64","context-engine"]') || matrix.os }}
     # 60, up from the 45 this job shared with the heavy build/sanitize legs, and DERIVED not picked: the eleven ctests this
     # job runs declare TIMEOUT budgets summing to 3120 s = 52 min (180x3 + 240x2 + 300x3 + 360 + 420x2 — M9 b1's
@@ -2282,7 +2287,7 @@ jobs:
     name: editor-boundary (out-of-tree consumer + include-graph)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
@@ -2385,7 +2390,7 @@ jobs:
     name: density bench (packed instances, ubuntu)
     needs: [changes, license-gate, ci-config-gate]
     if: ${{ !cancelled() && needs.license-gate.result == 'success' && needs.ci-config-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 30  # CI toolchain-resilience backstop (see the `build` job's comment)
     steps:
       - uses: actions/checkout@v7
