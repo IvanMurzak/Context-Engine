@@ -47,7 +47,7 @@ def workflow(*, heavy_needs: str = "[changes, license-gate, ci-config-gate]",
         "\n"
         "jobs:\n"
         "  changes:\n"
-        "    if: github.event_name == 'pull_request'\n"
+        f"    if: {check_ci_gating.SCOPE_JOB_IF}\n"
         "    runs-on: ubuntu-latest\n"
         "    steps:\n"
         "      - uses: actions/checkout@v7\n"
@@ -221,8 +221,18 @@ def test_rule6_a_heavy_job_with_no_if_is_flagged_and_step_ifs_do_not_count():
     assert check_ci_gating.validate_ifs(parse_jobs(text), check_ci_gating.parse_job_ifs(text))
 
 
-def test_an_if_outside_the_jobs_block_is_not_read_as_a_jobs():
-    text = workflow() + "\ndefaults:\n  run:\n    if: stray\n"
+def test_rule6_the_classifier_keeps_its_train_exclusion_and_the_gates_stay_unconditional():
+    for text in (
+        workflow().replace(f"    if: {check_ci_gating.SCOPE_JOB_IF}\n", ""),
+        workflow().replace("  license-gate:\n", "  license-gate:\n    if: false\n"),
+        workflow().replace("  python-tests:\n", "  python-tests:\n    if: false\n"),
+    ):
+        assert check_ci_gating.validate_ifs(parse_jobs(text), check_ci_gating.parse_job_ifs(text))
+
+
+def test_an_if_outside_the_jobs_block_is_not_read_as_a_jobs_if():
+    # No 2-space key after `defaults:`, so without the column-0 stop `stray` would overwrite build's.
+    text = workflow() + "\ndefaults:\n    if: stray\n"
     assert check_ci_gating.parse_job_ifs(text)["build"] == check_ci_gating.HEAVY_JOB_IF
 
 
@@ -297,8 +307,11 @@ def test_planted_violations_in_the_LIVE_workflow_are_caught():
 
     gate_if = f"    if: {check_ci_gating.HEAVY_JOB_IF}\n"
     assert gate_if in live, "the live `if:` spelling changed; update this plant"
-    planted = live.replace(gate_if, "    if: ${{ !cancelled() }}\n", 1)
-    assert check_ci_gating.validate_ifs(parse_jobs(planted), check_ci_gating.parse_job_ifs(planted))
+    scope_if = f"    if: {check_ci_gating.SCOPE_JOB_IF}\n"
+    assert scope_if in live, "the live classifier `if:` spelling changed; update this plant"
+    for planted in (live.replace(gate_if, "    if: ${{ !cancelled() }}\n", 1), live.replace(scope_if, "", 1)):
+        assert planted != live
+        assert check_ci_gating.validate_ifs(parse_jobs(planted), check_ci_gating.parse_job_ifs(planted))
 
 
 @pytest.mark.parametrize("spelling", [

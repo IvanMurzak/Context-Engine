@@ -89,7 +89,7 @@ class Repo:
 
     def git(self, *args: str) -> str:
         return subprocess.run(
-            ("git", "-c", "user.name=t", "-c", "user.email=t@t", *args),
+            ("git", "-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false", *args),
             cwd=self.path, check=True, capture_output=True, encoding="utf-8").stdout.strip()
 
     def write(self, path: str) -> None:

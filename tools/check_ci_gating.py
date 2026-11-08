@@ -2,7 +2,7 @@
 """CI gating-topology gate: which jobs may FRONT the rollup via `needs:` (issue #459).
 
 WHY THIS EXISTS. `.github/workflows/ci.yml` fronts 21 heavyweight job definitions (39 of the rollup's
-42 checks, after the OS matrices) behind a couple of ~10-second gate jobs via `needs:`, so an obviously
+43 checks, after the OS matrices) behind a couple of ~10-second gate jobs via `needs:`, so an obviously
 broken tree stops before it burns the runner pool. That fail-fast is worth keeping. What is NOT safe is
 putting a job with TIMING flake surface in that position: a `needs:` edge does not merely red the
 rollup, it SKIPS every dependent job, and the only recovery is a full rerun of all ~39.
@@ -40,6 +40,8 @@ Rules (each violation names the job and the fix):
   6. Every job rule 3 covers has exactly HEAVY_JOB_IF. Its `!cancelled()` replaces the implicit
      success() that gave the fail-fast, so a job missing the gates' results would run past a red gate,
      and a job missing `!cancelled()` would silently skip whenever SCOPE_JOB is skipped or fails.
+     SCOPE_JOB has exactly SCOPE_JOB_IF, because a `train/` pull request runs in full. The gates and
+     NON_GATING_JOBS have no `if:`, because a skipped gate skips every job behind it.
 
 Exit 0 = topology valid. Exit 1 = violations (listed on stdout). Exit 2 = configuration error
 (unreadable workflow, no `jobs:` block) — never a silent pass.
@@ -69,13 +71,16 @@ GATE_JOBS = ("license-gate", "ci-config-gate")
 # Jobs forbidden from EVER appearing in a `needs:` list, because they do have timing flake surface.
 NON_GATING_JOBS = ("python-tests",)
 
-# The docs-only classifier, and the one `if:` of every heavy job (rule 6). Only an explicit `true` skips.
+# The docs-only classifier, its `if:`, and the one `if:` of every heavy job (rule 6). Only an explicit
+# `true` skips.
 SCOPE_JOB = "changes"
+SCOPE_JOB_IF = ("${{ (github.event_name == 'pull_request' || github.event_name == 'push') && "
+                "!contains(format(' {0}', join(github.event.pull_request.labels.*.name, ' ')), ' train/') }}")
 HEAVY_JOB_IF = ("${{ !cancelled() && needs.license-gate.result == 'success' && "
                 "needs.ci-config-gate.result == 'success' && "
                 "needs.changes.outputs.docs_only != 'true' }}")
 
-# Every job the heavy-job rules (3 and 6) do not cover.
+# Every job the heavy-job rule 3 does not cover.
 DECLARED_JOBS = (*GATE_JOBS, *NON_GATING_JOBS, SCOPE_JOB)
 
 
@@ -207,9 +212,14 @@ def parse_job_ifs(text: str) -> dict[str, str]:
 
 def validate_ifs(jobs: dict[str, list[str]], ifs: dict[str, str]) -> list[str]:
     """Rule 6: the violations among job-level `if:`s (empty == valid)."""
-    return [f"job {job!r}: its `if:` must be exactly {HEAVY_JOB_IF} (found {ifs.get(job)!r}) — anything "
-            f"else runs past a red gate or silently skips when {SCOPE_JOB!r} is skipped or fails."
-            for job in jobs if job not in DECLARED_JOBS and ifs.get(job) != HEAVY_JOB_IF]
+    def expected(job: str) -> str | None:
+        if job == SCOPE_JOB:
+            return SCOPE_JOB_IF
+        return None if job in DECLARED_JOBS else HEAVY_JOB_IF
+
+    return [f"job {job!r}: its `if:` must be exactly {expected(job)!r} (found {ifs.get(job)!r}) — see "
+            f"rule 6 in tools/check_ci_gating.py."
+            for job in jobs if ifs.get(job) != expected(job)]
 
 
 def validate(jobs: dict[str, list[str]]) -> list[str]:
