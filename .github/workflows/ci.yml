@@ -11,11 +11,9 @@
 # reality); Windows stays on documented MSVC — clang-cl adoption is a staged follow-up recorded
 # in the manifest.
 #
-# Runner image: every job that applies pinned-toolchain runs on ubuntu-24.04, NOT ubuntu-latest. The
-# L-42 pin needs an apt.llvm.org suite for the image's codename, and resolute (26.04, which
-# ubuntu-latest began rolling to in 2026-11) has no LLVM 20 suite. Moving the image is a reviewed
-# change alongside the manifest pin. Toolchain-free jobs may keep floating. An ubuntu label also names
-# the blocking leg of shader-crosscompile (its continue-on-error compares against it).
+# Runner image: jobs applying pinned-toolchain run on ubuntu-24.04, not ubuntu-latest: the L-42 pin
+# needs an apt.llvm.org suite for the image's codename, and resolute (26.04) has no LLVM 20 suite.
+# Move the image together with the manifest pin. Toolchain-free jobs may keep floating.
 #
 # Compiler caching: sccache on the ubuntu/macos legs via a LOCAL-disk cache dir — the churny
 # GitHub-Actions cache backend stays OFF (SCCACHE_GHA_ENABLED=false; see the env: block). The
@@ -1699,7 +1697,7 @@ jobs:
       matrix:
         os: [ubuntu-24.04, macos-latest, windows-latest]
     runs-on: ${{ matrix.os }}
-    continue-on-error: ${{ matrix.os != 'ubuntu-24.04' }}
+    continue-on-error: ${{ !startsWith(matrix.os, 'ubuntu-') }}
     # 75, up from the 30 the sibling toolchain jobs use, and DERIVED not picked (issue #476): a
     # runner-image roll rolls the default MSVC/AppleClang and with it vcpkg's ABI hash, so the first
     # run after a roll legitimately rebuilds glslang + SPIRV-Cross + SPIRV-Tools from source.
