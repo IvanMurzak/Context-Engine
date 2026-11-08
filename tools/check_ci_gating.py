@@ -75,6 +75,9 @@ HEAVY_JOB_IF = ("${{ !cancelled() && needs.license-gate.result == 'success' && "
                 "needs.ci-config-gate.result == 'success' && "
                 "needs.changes.outputs.docs_only != 'true' }}")
 
+# Every job the heavy-job rules (3 and 6) do not cover.
+DECLARED_JOBS = (*GATE_JOBS, *NON_GATING_JOBS, SCOPE_JOB)
+
 
 # The reader's recognised spellings. Each tolerates an optional trailing `# comment` and optional
 # quoting, because BOTH are legal YAML that a future edit will plausibly use — and an unrecognised
@@ -192,6 +195,8 @@ def parse_job_ifs(text: str) -> dict[str, str]:
     ifs: dict[str, str] = {}
     current: str | None = None
     for line in text[re.search(r"(?m)^jobs:\s*$", text).end():].splitlines():
+        if re.match(r"^[^\s#]", line):  # a column-0 key ends the jobs block
+            break
         job = _JOB_KEY.match(line)
         if job:
             current = job.group("id")
@@ -202,10 +207,9 @@ def parse_job_ifs(text: str) -> dict[str, str]:
 
 def validate_ifs(jobs: dict[str, list[str]], ifs: dict[str, str]) -> list[str]:
     """Rule 6: the violations among job-level `if:`s (empty == valid)."""
-    exempt = {*GATE_JOBS, *NON_GATING_JOBS, SCOPE_JOB}
     return [f"job {job!r}: its `if:` must be exactly {HEAVY_JOB_IF} (found {ifs.get(job)!r}) — anything "
             f"else runs past a red gate or silently skips when {SCOPE_JOB!r} is skipped or fails."
-            for job in jobs if job not in exempt and ifs.get(job) != HEAVY_JOB_IF]
+            for job in jobs if job not in DECLARED_JOBS and ifs.get(job) != HEAVY_JOB_IF]
 
 
 def validate(jobs: dict[str, list[str]]) -> list[str]:
@@ -215,7 +219,7 @@ def validate(jobs: dict[str, list[str]]) -> list[str]:
     non_gating = set(NON_GATING_JOBS)
 
     # Rule 5 FIRST: a renamed job would otherwise turn rules 2-4 into silent no-ops.
-    for name in (*GATE_JOBS, *NON_GATING_JOBS, SCOPE_JOB):
+    for name in DECLARED_JOBS:
         if name not in jobs:
             errors.append(
                 f"declared job {name!r} does not exist in the workflow — this gate's rules would "
@@ -316,8 +320,7 @@ def main(argv: list[str] | None = None) -> int:
             print(f"[{TAG}] FINDING: {err}", file=sys.stderr)
         print(f"[{TAG}] FAIL: {len(errors)} gating-topology violation(s) in {path}", file=sys.stderr)
         return 1
-    declared = {*GATE_JOBS, *NON_GATING_JOBS, SCOPE_JOB}
-    gated = sum(1 for j, n in jobs.items() if (j not in declared) and n)
+    gated = sum(1 for j, n in jobs.items() if (j not in DECLARED_JOBS) and n)
     # The floors apply to the REAL workflow only; the synthetic fixtures the tests pass via --workflow
     # are legitimately tiny.
     if args.workflow is None and (len(jobs) < MIN_JOBS or gated < MIN_FRONTED):

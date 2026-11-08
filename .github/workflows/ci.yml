@@ -95,10 +95,8 @@ jobs:
   # Is this change documentation only? Then the 21 heavy definitions skip, and the run stays green
   # through this job, the two gates and python-tests, which all still run. The rule and its path list
   # live in tools/docs_only.py; only an explicit `true` skips, so a failed step, a skipped job (a
-  # `train/` PR) or any doubt runs everything. Each heavy job's `if:` also names the two gates' results
-  # because `!cancelled()` replaces the implicit success() that gave the fail-fast, and it must be that
-  # `!cancelled()` because a skipped or failed `changes` would otherwise skip the job. check_ci_gating.py
-  # pins that exact `if:`.
+  # `train/` PR) or any doubt runs everything. Why each heavy job's `if:` is spelled the way it is:
+  # rule 6 in tools/check_ci_gating.py.
   #
   # No `paths-ignore`: the run must keep a green check. ubuntu-latest, so a fork PR's copy of the script
   # never runs on the owner's machines. This is not one of the GATE_JOBS (those stop the rollup when

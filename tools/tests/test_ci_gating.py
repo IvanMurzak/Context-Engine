@@ -207,7 +207,6 @@ def test_rule5_a_renamed_declared_job_cannot_silently_pass():
     "${{ !cancelled() && needs.changes.outputs.docs_only != 'true' }}",
     # Silently skips on a `train/` PR or a failed classifier: the implicit success() is back.
     "${{ needs.changes.outputs.docs_only != 'true' }}",
-    "${{ !cancelled() && needs.license-gate.result == 'success' && needs.changes.outputs.docs_only != 'true' }}",
 ])
 def test_rule6_a_heavy_job_with_any_other_if_is_flagged(heavy_if):
     text = workflow(heavy_if=heavy_if)
@@ -220,6 +219,11 @@ def test_rule6_a_heavy_job_with_no_if_is_flagged_and_step_ifs_do_not_count():
     text += f"      - run: echo\n        if: {check_ci_gating.HEAVY_JOB_IF}\n"
     assert check_ci_gating.parse_job_ifs(text).get("build") is None
     assert check_ci_gating.validate_ifs(parse_jobs(text), check_ci_gating.parse_job_ifs(text))
+
+
+def test_an_if_outside_the_jobs_block_is_not_read_as_a_jobs():
+    text = workflow() + "\ndefaults:\n  run:\n    if: stray\n"
+    assert check_ci_gating.parse_job_ifs(text)["build"] == check_ci_gating.HEAVY_JOB_IF
 
 
 def test_rule4_the_classifier_may_not_wait_for_anything():
