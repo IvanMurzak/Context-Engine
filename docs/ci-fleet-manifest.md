@@ -18,7 +18,7 @@ marked **advisory until provisioned** — visibly degraded, never silently green
 
 | Runner class | OS / hardware | Isolation | GPU | Provisioned |
 |---|---|---|---|---|
-| `gh-ubuntu-shared` | ubuntu-latest, GitHub-hosted | shared | no | ✅ |
+| `gh-ubuntu-shared` | ubuntu-24.04 (jobs applying the L-42 pinned toolchain), ubuntu-latest (jobs not applying it: gates, python-tests, emsdk web jobs), GitHub-hosted | shared | no | ✅ |
 | `gh-macos-shared` | macos-latest, GitHub-hosted | shared | no | ✅ |
 | `gh-windows-shared` | windows-latest, GitHub-hosted | shared | no | ✅ |
 | `perf-linux-bare-metal` | Linux-x64, bare-metal perf box | **perf-isolated** | no | ❌ (R-QA-009 v1) |

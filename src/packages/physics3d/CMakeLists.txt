@@ -70,7 +70,7 @@ endforeach()
 # context_physics3d package, its per-tick hierarchical state hash (hash_world over sim_components())
 # folded and asserted against a cross-platform GOLDEN. Joins the `determinism-*` ctest family, so the
 # blocking CI "Determinism gate" step (-R "^determinism-") runs it on all three build-matrix legs —
-# ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — with no new CI
+# ubuntu-24.04 (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — with no new CI
 # job: any per-platform divergence turns that leg red. Integer-only sim state + fixed-endian hashing
 # make the golden portable.
 add_executable(context_physics3d_determinism_scene tests/determinism_physics_scene.cpp)

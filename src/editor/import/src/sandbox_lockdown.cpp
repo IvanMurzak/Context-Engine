@@ -14,7 +14,7 @@
 // in-process slice.
 //
 // NOTE: each platform body is compiled ONLY on its own CI leg — the Linux seccomp body only on
-// `build (ubuntu-latest)`, the macOS body only on `build (macos-latest)`; the local Windows
+// `build (ubuntu-24.04)`, the macOS body only on `build (macos-latest)`; the local Windows
 // Strawberry-GCC gate preprocesses BOTH out (the platform-#if blind spot documented in test.md), so CI
 // is the authoritative gate for either primitive. Keep each self-contained and heavily reviewed; the
 // permit/deny behaviour is proven by the syscall/operation assertions in tests/test_sandbox.cpp (per-OS

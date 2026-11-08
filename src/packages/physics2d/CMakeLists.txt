@@ -76,7 +76,7 @@ endforeach()
 # context_physics2d package, its per-tick hierarchical state hash (hash_world over sim_components())
 # folded and asserted against a cross-platform GOLDEN. Joins the `determinism-*` ctest family, so the
 # blocking CI "Determinism gate" step (-R "^determinism-") runs it on all three build-matrix legs —
-# ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — with no new CI
+# ubuntu-24.04 (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — with no new CI
 # job. It is ALSO added to the strict-FP `deterministic` job's EXPLICIT --target list in
 # .github/workflows/ci.yml (that job builds only a hand-maintained target list, unlike the `build`
 # job's regex, so an unregistered determinism-* ctest would report "Not Run" → RED). Integer-only sim

@@ -6,7 +6,7 @@
   "tiers": ["per-PR", "nightly"],
   "runner_classes": {
     "gh-ubuntu-shared": {
-      "os": "ubuntu-latest",
+      "os": "ubuntu-24.04 (jobs applying the L-42 pinned toolchain), ubuntu-latest (jobs not applying it: gates, python-tests, emsdk web jobs)",
       "hardware": "github-hosted (shared)",
       "gpu": false,
       "isolation": "shared",
@@ -43,7 +43,7 @@
       "gpu": false,
       "isolation": "shared",
       "provisioned": true,
-      "notes": "R-QA-005 / L-54 state-hash determinism matrix (min Linux-x64, Win-x64, macOS-ARM64). Realized on the GitHub-hosted shared trio: ubuntu-latest=Linux-x64, windows-latest=Win-x64, macos-latest=macOS-ARM64 (macos-latest is Apple Silicon). The determinism gate runs as a blocking named step in the 3-OS build job; the integer-only sim state + fixed-endian hashing make the golden hash portable, so a per-platform divergence turns that leg red. Provisioned M3 entry (issue #74)."
+      "notes": "R-QA-005 / L-54 state-hash determinism matrix (min Linux-x64, Win-x64, macOS-ARM64). Realized on the GitHub-hosted shared trio: ubuntu-24.04=Linux-x64, windows-latest=Win-x64, macos-latest=macOS-ARM64 (macos-latest is Apple Silicon). The determinism gate runs as a blocking named step in the 3-OS build job; the integer-only sim state + fixed-endian hashing make the golden hash portable, so a per-platform divergence turns that leg red. Provisioned M3 entry (issue #74)."
     },
     "gpu-runner": {
       "os": "linux-x64",
@@ -969,7 +969,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "build",
-      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-latest (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split. Since M6-F0a (issue #170) the family also carries determinism-physics-wedge (a fixed-point physics-shaped step, the physics-core determinism proof), and since M6 P1 (issue #174) determinism-physics3d-scene (a REAL physics-active scene — dynamic spheres + a rotated box ramp on a static floor — stepped through the context_physics3d package) — all run in this same blocking Determinism gate step."
+      "description": "R-QA-005 / L-54 headless-session state-hash determinism (issue #74): a fixed seed + fixed injected input stream, stepped a fixed tick count, asserted against a cross-platform GOLDEN hierarchical state-hash (root + per-system + per-archetype + trace). Runs as the blocking 'Determinism gate' named step of the build job on ALL THREE build-matrix legs — ubuntu-24.04 (Linux-x64), windows-latest (Win-x64), macos-latest (macOS-ARM64) — so any per-platform divergence turns that leg red (ctest determinism-state-hash). The bisect/triage `context determinism diff` auto-triage is the reserved follow-up split. Since M6-F0a (issue #170) the family also carries determinism-physics-wedge (a fixed-point physics-shaped step, the physics-core determinism proof), and since M6 P1 (issue #174) determinism-physics3d-scene (a REAL physics-active scene — dynamic spheres + a rotated box ramp on a static floor — stepped through the context_physics3d package) — all run in this same blocking Determinism gate step."
     },
     {
       "id": "deterministic-attestation",
@@ -979,7 +979,7 @@
       "tier": "per-PR",
       "red_x_policy": "blocking",
       "ci_job_id": "deterministic",
-      "description": "R-SIM-005 / L-54 opt-in deterministic BUILD FLAVOR (M6-F0a, issue #170), anchored in R-SEC-009. The dedicated `deterministic` job proves the `deterministic` CMake preset CONFIGURES + BUILDS on the wedge trio — ubuntu-latest (Linux-x64, clang), macos-latest (macOS-ARM64, Apple clang), windows-latest (Win-x64, MSVC) — with the correct per-compiler strict-FP spellings (-ffp-contract=off vs /fp:strict), and that the build PRODUCES a verified deterministic:true attestation from the ACTUALLY-APPLIED flags (never a self-declared bit; the tamper/missing-flag paths fail closed with a determinism.attestation_* code). Runs the determinism-* family under strict-FP as the blocking 'Deterministic attestation + determinism gates' step: determinism-attestation (produces deterministic:true here vs an honest false on the default `build` job), determinism-state-hash, determinism-physics-wedge, and (since M6 P1, issue #174) determinism-physics3d-scene."
+      "description": "R-SIM-005 / L-54 opt-in deterministic BUILD FLAVOR (M6-F0a, issue #170), anchored in R-SEC-009. The dedicated `deterministic` job proves the `deterministic` CMake preset CONFIGURES + BUILDS on the wedge trio — ubuntu-24.04 (Linux-x64, clang), macos-latest (macOS-ARM64, Apple clang), windows-latest (Win-x64, MSVC) — with the correct per-compiler strict-FP spellings (-ffp-contract=off vs /fp:strict), and that the build PRODUCES a verified deterministic:true attestation from the ACTUALLY-APPLIED flags (never a self-declared bit; the tamper/missing-flag paths fail closed with a determinism.attestation_* code). Runs the determinism-* family under strict-FP as the blocking 'Deterministic attestation + determinism gates' step: determinism-attestation (produces deterministic:true here vs an honest false on the default `build` job), determinism-state-hash, determinism-physics-wedge, and (since M6 P1, issue #174) determinism-physics3d-scene."
     },
     {
       "id": "samples-corpus",
