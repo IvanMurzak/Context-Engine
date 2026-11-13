@@ -4,7 +4,7 @@
 
 <br/>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Context-Engine/ci.yml?branch=main&label=CI&style=for-the-badge&logo=githubactions&logoColor=white&labelColor=0F172A)](https://github.com/IvanMurzak/Context-Engine/actions/workflows/ci.yml) ![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-6D28D9?style=for-the-badge&labelColor=0F172A&logoColor=white) ![C++20](https://img.shields.io/badge/C%2B%2B-20-0E7490?style=for-the-badge&labelColor=0F172A&logoColor=white&logo=cplusplus) ![CMake 3.25+](https://img.shields.io/badge/CMake-3.25%2B-0E7490?style=for-the-badge&labelColor=0F172A&logoColor=white&logo=cmake) [![License: Context Engine EULA (draft)](https://img.shields.io/badge/license-EULA%20%28draft%29-047857?style=for-the-badge&labelColor=0F172A&logoColor=white)](LICENSE.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Context-Engine/ci.yml?branch=main&label=CI&style=for-the-badge&logo=githubactions&logoColor=white&labelColor=0F172A&color=15803D)](https://github.com/IvanMurzak/Context-Engine/actions/workflows/ci.yml) ![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-2F6F9F?style=for-the-badge&labelColor=0F172A&logoColor=white) ![C++20](https://img.shields.io/badge/C%2B%2B-20-0E7490?style=for-the-badge&labelColor=0F172A&logoColor=white&logo=cplusplus) ![CMake 3.25+](https://img.shields.io/badge/CMake-3.25%2B-0E7490?style=for-the-badge&labelColor=0F172A&logoColor=white&logo=cmake) [![License: Context Engine EULA (draft)](https://img.shields.io/badge/license-EULA%20%28draft%29-047857?style=for-the-badge&labelColor=0F172A&logoColor=white)](LICENSE.md) <a href="https://stand-with-ukraine.pp.ua"><img src="https://raw.githubusercontent.com/IvanMurzak/IvanMurzak/main/images/ukraine/flag-square.svg" height="28" alt="Stand with Ukraine" title="Stand with Ukraine"></a>
 
 </div>
 
@@ -95,7 +95,3 @@ Source-available under the **Context Engine EULA** ([LICENSE.md](LICENSE.md)). T
 ## Contributing
 
 External pull requests cannot be merged until a CLA exists; see [CONTRIBUTING.md](.github/CONTRIBUTING.md). Issues, bug reports and design discussion are welcome. Security reports: [SECURITY.md](SECURITY.md).
-
-<div align="center">
-  <a href="https://stand-with-ukraine.pp.ua"><img src="https://raw.githubusercontent.com/IvanMurzak/IvanMurzak/main/images/ukraine/flag-rounded.svg" width="28" height="28" alt="Stand with Ukraine" title="Stand with Ukraine"></a>
-</div>

@@ -17,7 +17,7 @@ def out(name):
 # --- hero: the microkernel with packages around it ------------------------------------------------------
 def kernel_visual():
     cx, cy = 970, 190
-    parts = [K.mark(cx, cy, 64)]
+    parts = [K.mark(cx, cy, 64)]  # the app logo with orbit rings
     pkgs = [("physics", 0, -130), ("audio", 150, -64), ("input", 150, 64),
             ("ui", 0, 130), ("animation", -150, 64), ("particles", -150, -64)]
     for name, dx, dy in pkgs:
