@@ -1,0 +1,118 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1200" height="440" viewBox="0 0 1200 440" role="img" aria-label="Architecture: project files on disk are the source of truth. The headless EditorKernel daemon keeps a live derived index over them and serves one contract registry. The editor app, the context CLI and AI agents are equal clients of that daemon. The RuntimeKernel runs deterministic fixed-tick sessions and the WebGPU renderer draws them.">
+  <defs>
+    <linearGradient id="bg" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#0b1020"/>
+      <stop offset="0.6" stop-color="#111a33"/>
+      <stop offset="1" stop-color="#1a1238"/>
+    </linearGradient>
+    <linearGradient id="core" x1="0" y1="0" x2="1" y2="1">
+      <stop offset="0" stop-color="#22d3ee"/>
+      <stop offset="0.5" stop-color="#8b5cf6"/>
+      <stop offset="1" stop-color="#e879f9"/>
+    </linearGradient>
+    <clipPath id="frame"><rect width="1200" height="440" rx="20"/></clipPath>
+  </defs>
+  <style>
+    .sans { font-family: "Segoe UI", Inter, -apple-system, BlinkMacSystemFont, Helvetica, Arial, sans-serif; }
+    .mono { font-family: "JetBrains Mono", "Cascadia Code", Consolas, Menlo, monospace; }
+    .hdr  { font-family: "JetBrains Mono", "Cascadia Code", Consolas, Menlo, monospace; font-size: 11px; letter-spacing: 1.5px; fill: #64748b; }
+    .box  { fill: #111a33; stroke: #334155; }
+    .wire { stroke: #a5b4fc; stroke-opacity: .35; stroke-width: 1.5; fill: none; }
+    .fwd  { animation: fwd 2.4s linear infinite; }
+    .back { animation: back 2.4s linear infinite; }
+    .down { animation: down 2s linear infinite; }
+    .t2 { animation-delay: .8s; } .t3 { animation-delay: 1.6s; }
+    @keyframes fwd  { from { transform: translateX(0); } to { transform: translateX(120px); } }
+    @keyframes back { from { transform: translateX(0); } to { transform: translateX(-120px); } }
+    @keyframes down { from { transform: translateY(0); } to { transform: translateY(46px); } }
+    .glow { animation: glow 3s ease-in-out infinite alternate; }
+    @keyframes glow { from { stroke-opacity: .5; } to { stroke-opacity: 1; } }
+    @media (prefers-reduced-motion: reduce) { * { animation: none !important; } }
+  </style>
+
+  <g clip-path="url(#frame)">
+    <rect width="1200" height="440" fill="url(#bg)"/>
+
+    <!-- column headers -->
+    <text class="hdr" x="40" y="48">PROJECT FILES · SOURCE OF TRUTH</text>
+    <text class="hdr" x="600" y="48" text-anchor="middle">HEADLESS PROJECT DAEMON</text>
+    <text class="hdr" x="1160" y="48" text-anchor="end">EQUAL CLIENTS</text>
+
+    <!-- left: real files from samples/platformer-2d -->
+    <g class="mono" font-size="13" fill="#e2e8f0">
+      <rect class="box" x="40" y="70" width="270" height="34" rx="8"/>
+      <text x="58" y="92">project.json</text>
+      <rect class="box" x="40" y="114" width="270" height="34" rx="8"/>
+      <text x="58" y="136">scenes/level-1.scene.json</text>
+      <rect class="box" x="40" y="158" width="270" height="34" rx="8"/>
+      <text x="58" y="180">scripts/movement.ts</text>
+      <rect class="box" x="40" y="202" width="270" height="34" rx="8"/>
+      <text x="58" y="224">tilemaps/level-1.tilemap.json</text>
+    </g>
+    <text x="40" y="262" class="sans" font-size="12" fill="#64748b">canonical JSON · stable ids · TypeScript</text>
+
+    <!-- wires files <-> kernel -->
+    <path class="wire" d="M318 132 H438"/>
+    <path class="wire" d="M318 176 H438"/>
+    <circle class="fwd" cx="318" cy="132" r="3.5" fill="#67e8f9"/>
+    <circle class="back t2" cx="438" cy="176" r="3.5" fill="#e879f9"/>
+    <text x="378" y="122" text-anchor="middle" class="mono" font-size="10" fill="#67e8f9">index</text>
+    <text x="378" y="196" text-anchor="middle" class="mono" font-size="10" fill="#e879f9">file write</text>
+
+    <!-- center: EditorKernel -->
+    <rect class="glow" x="446" y="70" width="308" height="166" rx="14" fill="#0b1020" stroke="url(#core)" stroke-width="2"/>
+    <text x="600" y="104" text-anchor="middle" class="sans" font-size="21" font-weight="700" fill="#e2e8f0">EditorKernel</text>
+    <text x="600" y="128" text-anchor="middle" class="sans" font-size="13" fill="#94a3b8">live derived index over the files</text>
+    <text x="600" y="148" text-anchor="middle" class="sans" font-size="13" fill="#94a3b8">no GPU · no GUI required</text>
+    <line x1="470" y1="166" x2="730" y2="166" stroke="#334155"/>
+    <text x="600" y="186" text-anchor="middle" class="mono" font-size="11" fill="#64748b">ONE CONTRACT REGISTRY</text>
+    <g class="mono" font-size="12" text-anchor="middle">
+      <rect x="476" y="198" width="70" height="24" rx="12" fill="#111a33" stroke="#67e8f9" stroke-opacity=".7"/>
+      <text x="511" y="214" fill="#67e8f9">CLI</text>
+      <rect x="565" y="198" width="70" height="24" rx="12" fill="#111a33" stroke="#a5b4fc" stroke-opacity=".7"/>
+      <text x="600" y="214" fill="#a5b4fc">RPC</text>
+      <rect x="654" y="198" width="70" height="24" rx="12" fill="#111a33" stroke="#e879f9" stroke-opacity=".7"/>
+      <text x="689" y="214" fill="#e879f9">MCP</text>
+    </g>
+
+    <!-- wires kernel <-> clients -->
+    <path class="wire" d="M762 102 H882"/>
+    <path class="wire" d="M762 153 H882"/>
+    <path class="wire" d="M762 204 H882"/>
+    <circle class="fwd" cx="762" cy="102" r="3.5" fill="#67e8f9"/>
+    <circle class="back t2" cx="882" cy="153" r="3.5" fill="#a5b4fc"/>
+    <circle class="fwd t3" cx="762" cy="204" r="3.5" fill="#e879f9"/>
+
+    <!-- right: clients -->
+    <g class="sans">
+      <rect class="box" x="890" y="78" width="270" height="48" rx="10"/>
+      <text x="908" y="99" font-size="15" font-weight="600" fill="#e2e8f0">Editor app</text>
+      <text x="908" y="117" font-size="12" fill="#94a3b8">native shell · web UI panels</text>
+      <rect class="box" x="890" y="129" width="270" height="48" rx="10"/>
+      <text x="908" y="150" font-size="15" font-weight="600" fill="#e2e8f0">context CLI</text>
+      <text x="908" y="168" font-size="12" fill="#94a3b8">one-shot verbs · JSON envelopes</text>
+      <rect class="box" x="890" y="180" width="270" height="48" rx="10"/>
+      <text x="908" y="201" font-size="15" font-weight="600" fill="#e2e8f0">AI agent</text>
+      <text x="908" y="219" font-size="12" fill="#94a3b8">the same verbs as a human</text>
+    </g>
+
+    <!-- down: kernel -> runtime -->
+    <path class="wire" d="M520 244 V290"/>
+    <circle class="down" cx="520" cy="244" r="3.5" fill="#a5b4fc"/>
+    <text x="532" y="272" class="mono" font-size="10" fill="#a5b4fc">play · session</text>
+
+    <!-- bottom row -->
+    <g class="sans">
+      <rect class="box" x="40" y="298" width="555" height="96" rx="12"/>
+      <text x="62" y="328" font-size="17" font-weight="700" fill="#e2e8f0">RuntimeKernel</text>
+      <text x="62" y="352" font-size="13" fill="#94a3b8">fixed-tick sessions · canonical state hash · replays</text>
+      <text x="62" y="374" font-size="13" fill="#94a3b8">gameplay in TypeScript on V8 · C++/WASM native tier</text>
+
+      <rect class="box" x="605" y="298" width="555" height="96" rx="12"/>
+      <text x="627" y="328" font-size="17" font-weight="700" fill="#e2e8f0">Renderer</text>
+      <text x="627" y="352" font-size="13" fill="#94a3b8">WebGPU · native (wgpu-native) and browser (Emscripten)</text>
+      <text x="627" y="374" font-size="13" fill="#94a3b8">2D is first-class · golden-scene image tests</text>
+    </g>
+  </g>
+  <rect x="0.5" y="0.5" width="1199" height="439" rx="20" fill="none" stroke="#ffffff" stroke-opacity="0.08"/>
+</svg>
