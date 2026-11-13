@@ -1,8 +1,6 @@
 # docs/
 
-Engineering notes that live with the code: how this repository implements the design. **Design
-authority is not here.** Requirements (`R-*`), locked decisions (`L-*`), architecture and roadmap
-live in [`.taskflow/2026-07-01-context-engine/core/`](../.taskflow/2026-07-01-context-engine/core).
+Engineering notes that live with the code: how this repository implements the design. **Design authority is not here.** Requirements (`R-*`), locked decisions (`L-*`), architecture and roadmap live in the [`.taskflow/` design records](../.taskflow/2026-07-01-context-engine/core).
 
 ## Files, data and the contract
 
