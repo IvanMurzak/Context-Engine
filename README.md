@@ -4,11 +4,11 @@
 
 <br/>
 
-[![CI](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Context-Engine/ci.yml?branch=main&style=flat-square&label=CI)](https://github.com/IvanMurzak/Context-Engine/actions/workflows/ci.yml)
-![Status](https://img.shields.io/badge/status-pre--alpha-fbbf24?style=flat-square)
-![C++20](https://img.shields.io/badge/C%2B%2B-20-22d3ee?style=flat-square)
-![CMake](https://img.shields.io/badge/CMake-%E2%89%A5%203.25-8b5cf6?style=flat-square)
-[![License: Context Engine EULA](https://img.shields.io/badge/license-Context%20Engine%20EULA%20(draft)-e879f9?style=flat-square)](LICENSE.md)
+[![CI](https://img.shields.io/github/actions/workflow/status/IvanMurzak/Context-Engine/ci.yml?branch=main&label=CI&style=for-the-badge&logo=githubactions&logoColor=white&labelColor=0F172A)](https://github.com/IvanMurzak/Context-Engine/actions/workflows/ci.yml)
+![Status: pre-alpha](https://img.shields.io/badge/status-pre--alpha-6D28D9?style=for-the-badge&labelColor=0F172A&logoColor=white)
+![C++20](https://img.shields.io/badge/C%2B%2B-20-0E7490?style=for-the-badge&labelColor=0F172A&logoColor=white&logo=cplusplus)
+![CMake 3.25+](https://img.shields.io/badge/CMake-3.25%2B-0E7490?style=for-the-badge&labelColor=0F172A&logoColor=white&logo=cmake)
+[![License: Context Engine EULA (draft)](https://img.shields.io/badge/license-Context%20EULA%20(draft)-047857?style=for-the-badge&labelColor=0F172A&logoColor=white)](LICENSE.md)
 
 </div>
 
@@ -28,16 +28,14 @@ clients of one contract. The whole authoring loop runs with no GPU and no GUI.
 
 ## What is in the repository today
 
-| | |
-|---|---|
-| **Microkernel + packages** | Every feature is a package: physics (2D and 3D), animation, particles, audio, input, UI, spatial queries, splines |
-| **File-authoritative data** | Canonical JSON with stable ids, schema migration (`context migrate`), structural three-way merge (`context merge-file`) |
-| **One contract** | Each verb is defined once and projected to a CLI command, an RPC method and an MCP tool definition; `context describe` prints all of it as JSON |
-| **Gameplay code** | TypeScript on an embedded V8; a C++/WASM native tier for hot paths |
-| **Rendering** | WebGPU, native (wgpu-native) and in the browser (Emscripten); 2D is first-class |
-| **Determinism** | Fixed-tick headless sessions, a canonical state hash and replays, checked across Windows, Linux and macOS in CI |
-| **Builds** | `context build --target linux \| windows \| macos \| web`, headless |
-| **Editor** | A windowed editor (native shell + web UI): dockable panels, command palette, themes, multi-window tear-out |
+- ✅ **Every feature is a package** — physics, animation, particles, audio, input, UI on a microkernel
+- ✅ **File-authoritative** — canonical JSON, stable ids, schema migration, structural 3-way merge
+- ✅ **One contract** — each verb is a CLI command, an RPC method and an MCP tool definition
+- ✅ **TypeScript gameplay** — on an embedded V8, with a C++/WASM tier for hot paths
+- ✅ **WebGPU rendering** — native and in the browser; 2D is first-class
+- ✅ **Deterministic sessions** — fixed ticks, state hash and replays, checked on 3 OSes in CI
+- ✅ **Headless builds** — `context build --target linux`, `windows`, `macos` or `web`
+- ✅ **Windowed editor** — dockable panels, command palette, themes, multi-window tear-out
 
 ## Build the engine and the CLI
 
