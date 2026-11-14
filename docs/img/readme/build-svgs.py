@@ -68,11 +68,11 @@ ENVELOPE = [("muted", '{"ok":'), ("ok", "true"), ("muted", ',"data":{"simTick":'
             ("muted", ',"stateHash":{"root":'), ("str", '"…"'), ("muted", ',…}},…}')]
 K.write(out("terminal.svg"), K.terminal(title="context — no GPU, no GUI", lines=[
     {"cmd": "context new my-game"},
-    {"cmd": "context session new run.state --seed 7"},
+    {"cmd": "context session new run.state --seed 7 --scenario demo"},
     {"cmd": "context session step run.state --ticks 600 --json"},
     {"out": ENVELOPE, "note": "600 fixed ticks"},
     {"cmd": "context session hash run.state --json"},
     {"out": ENVELOPE, "note": "same seed + inputs, same hash"},
-], label="Terminal: context new my-game; context session new run.state --seed 7; context session step run.state "
+], label="Terminal: context new my-game; context session new run.state --seed 7 --scenario demo; context session step run.state "
           "--ticks 600 --json returns an ok envelope with simTick 600 and the state hash; context session hash "
           "run.state --json returns the same state hash."))

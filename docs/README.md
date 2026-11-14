@@ -5,11 +5,11 @@ Engineering notes that live with the code: how this repository implements the de
 ## Files, data and the contract
 
 - [query-language.md](query-language.md) — the project query language (R-CLI-012)
-- [deprecation-policy.md](deprecation-policy.md) — the frozen `protocolMajor 1` and how verbs are deprecated
+- [deprecation-policy.md](deprecation-policy.md) — the protocol freeze and how verbs are deprecated
 - [client-sdk.md](client-sdk.md) — `context_client`, the client SDK, and the editor boundary
 - [chunk-pack-format.md](chunk-pack-format.md) — the chunked content-pack format (frozen spec)
 - [asset-delete-and-restore.md](asset-delete-and-restore.md) — asset delete, quarantine and restore
-- [test-vector-corpus.md](test-vector-corpus.md) — canonical-serialization test vectors (reservation)
+- [test-vector-corpus.md](test-vector-corpus.md) — the canonical-serialization test-vector corpus
 
 ## Editor and daemon
 

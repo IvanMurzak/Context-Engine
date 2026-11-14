@@ -15,7 +15,7 @@
 </p>
 
 > [!WARNING]
-> **Pre-alpha.** There are no versioned releases yet: `main` is the only supported line, and things change without notice. The [roadmap](.taskflow/2026-07-01-context-engine/core/ROADMAP.md) shows which milestones are done.
+> **Pre-alpha.** Build from `main`; things change without notice. The [roadmap](.taskflow/2026-07-01-context-engine/core/ROADMAP.md) shows which milestones are done.
 
 ## What is in the repository
 
@@ -25,7 +25,7 @@
 ✅ <b>One contract</b> — each verb is a CLI command, an RPC method and an MCP tool definition<br>
 ✅ <b>TypeScript gameplay</b> — on an embedded V8, with a C++/WASM tier for hot paths<br>
 ✅ <b>WebGPU rendering</b> — native and in the browser; 2D is first-class<br>
-✅ <b>Deterministic sessions</b> — fixed ticks, state hash and replays, checked on 3 OSes in CI<br>
+✅ <b>Deterministic sessions</b> — fixed ticks, state hash and replays, checked across the CI OS matrix<br>
 ✅ <b>Headless builds</b> — <code>context build --target linux</code>, <code>windows</code>, <code>macos</code> or <code>web</code><br>
 ✅ <b>Windowed editor</b> — dockable panels, command palette, themes, multi-window tear-out<br>
 </p>
@@ -45,15 +45,15 @@ The build lands in `src/build/dev/`, the CLI at `src/build/dev/cli/context`. Oth
 
 ## Use the CLI
 
-<img src="docs/img/readme/terminal.svg" alt="context new my-game; context session new run.state --seed 7; context session step run.state --ticks 600 --json and context session hash run.state --json return an ok envelope with simTick 600 and the state hash" width="100%"/>
+<img src="docs/img/readme/terminal.svg" alt="context new my-game; context session new run.state --seed 7 --scenario demo; context session step run.state --ticks 600 --json and context session hash run.state --json return an ok envelope with simTick 600 and the state hash" width="100%"/>
 
 ```sh
-context new my-game                                   # a runnable project skeleton
-context describe --json                               # the whole contract as JSON
-context session new run.state --seed 7                # a headless deterministic session
-context session step run.state --ticks 600 --json     # advance 600 fixed ticks
-context session hash run.state --json                 # the canonical state hash
-context doctor --target all                           # check the toolchain for every build target
+context new my-game                                     # a runnable project skeleton
+context describe --json                                 # the whole contract as JSON
+context session new run.state --seed 7 --scenario demo  # a headless deterministic session
+context session step run.state --ticks 600 --json       # advance 600 fixed ticks
+context session hash run.state --json                   # the canonical state hash
+context doctor --target all                             # check the toolchain for every build target
 ```
 
 With `--json`, every verb answers with one envelope: `{"ok": …, "data": …}`, or an `error` with a stable code. Runnable examples live in [`samples/`](samples/README.md), for instance the `platformer-2d` and `roll-3d` games; CI keeps every sample valid.
@@ -85,7 +85,7 @@ Without `--project` the editor opens its welcome screen. `--devtools` enables th
 
 ## License
 
-Source-available under the **Context Engine EULA** ([LICENSE.md](LICENSE.md)). The text is a **draft that has not been reviewed by counsel yet**. In short:
+Source-available under the **Context Engine EULA** ([LICENSE.md](LICENSE.md)). The banner at the top of LICENSE.md states its review status. In short:
 
 - You may use, modify and build the engine to develop games, and ship its runtime inside them.
 - Royalty, per product and calendar year: none on the first **$200,000** of gross revenue, then **2% of the gross revenue above $200,000**.
@@ -94,4 +94,4 @@ Source-available under the **Context Engine EULA** ([LICENSE.md](LICENSE.md)). T
 
 ## Contributing
 
-External pull requests cannot be merged until a CLA exists; see [CONTRIBUTING.md](.github/CONTRIBUTING.md). Issues, bug reports and design discussion are welcome. Security reports: [SECURITY.md](SECURITY.md).
+External pull requests need a signed CLA; see [CONTRIBUTING.md](.github/CONTRIBUTING.md) for its status. Issues, bug reports and design discussion are welcome. Security reports: [SECURITY.md](SECURITY.md).
