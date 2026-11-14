@@ -22,7 +22,7 @@ def kernel_visual():
             ("ui", 0, 130), ("animation", -150, 64), ("particles", -150, -64)]
     for name, dx, dy in pkgs:
         w = round(len(name) * 9.8 + 32)
-        s, _ = K.pill(round(cx + dx - w / 2), cy + dy - 17, name)
+        s, _ = K.pill(round(cx + dx - w / 2), cy + dy - 17, name, w=w)
         parts.append(s)
     parts.append(f'<text x="{cx}" y="{cy + 186}" text-anchor="middle" class="s" font-size="16" fill="{K.MUTED}">'
                  'every feature is a package</text>')
@@ -64,15 +64,15 @@ K.write(out("architecture.svg"), K.panel(1200, 450, body,
     "runs deterministic fixed-tick sessions; the WebGPU renderer draws them natively and in the browser."))
 
 # --- terminal: real commands; output abbreviated with … -------------------------------------------------
+ENVELOPE = [("muted", '{"ok":'), ("ok", "true"), ("muted", ',"data":{"simTick":'), ("num", "600"),
+            ("muted", ',"stateHash":{"root":'), ("str", '"…"'), ("muted", ',…}},…}')]
 K.write(out("terminal.svg"), K.terminal(title="context — no GPU, no GUI", lines=[
     {"cmd": "context new my-game"},
     {"cmd": "context session new run.state --seed 7"},
     {"cmd": "context session step run.state --ticks 600 --json"},
-    {"out": [("muted", '{"ok":'), ("ok", "true"), ("muted", ',"data":{"simTick":'), ("num", "600"),
-             ("muted", ',"stateHash":{"root":'), ("str", '"…"'), ("muted", ',…}},…}')], "note": "600 fixed ticks"},
+    {"out": ENVELOPE, "note": "600 fixed ticks"},
     {"cmd": "context session hash run.state --json"},
-    {"out": [("muted", '{"ok":'), ("ok", "true"), ("muted", ',"data":{"simTick":'), ("num", "600"),
-             ("muted", ',"stateHash":{"root":'), ("str", '"…"'), ("muted", ',…}},…}')], "note": "same seed + inputs, same hash"},
+    {"out": ENVELOPE, "note": "same seed + inputs, same hash"},
 ], label="Terminal: context new my-game; context session new run.state --seed 7; context session step run.state "
           "--ticks 600 --json returns an ok envelope with simTick 600 and the state hash; context session hash "
           "run.state --json returns the same state hash."))
