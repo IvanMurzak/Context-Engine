@@ -15,9 +15,9 @@
 </p>
 
 > [!WARNING]
-> **Pre-alpha.** There are no versioned releases yet: `main` is the only supported line, and things change without notice. Milestones M0–M8.5 of the [roadmap](.taskflow/2026-07-01-context-engine/core/ROADMAP.md) are done; M9, the interactive editor application, is in progress.
+> **Pre-alpha.** There are no versioned releases yet: `main` is the only supported line, and things change without notice. The [roadmap](.taskflow/2026-07-01-context-engine/core/ROADMAP.md) shows which milestones are done.
 
-## What is in the repository today
+## What is in the repository
 
 <p>
 ✅ <b>Every feature is a package</b> — physics, animation, particles, audio, input, UI on a microkernel<br>
@@ -85,7 +85,7 @@ Without `--project` the editor opens its welcome screen. `--devtools` enables th
 
 ## License
 
-Source-available under the **Context Engine EULA** ([LICENSE.md](LICENSE.md)). The current text is **draft v0.2 and has not been reviewed by counsel yet**. In short:
+Source-available under the **Context Engine EULA** ([LICENSE.md](LICENSE.md)). The text is a **draft that has not been reviewed by counsel yet**. In short:
 
 - You may use, modify and build the engine to develop games, and ship its runtime inside them.
 - Royalty, per product and calendar year: none on the first **$200,000** of gross revenue, then **2% of the gross revenue above $200,000**.
