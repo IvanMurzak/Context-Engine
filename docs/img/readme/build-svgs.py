@@ -33,7 +33,7 @@ K.write(out("hero.svg"), K.hero(
     title="Context ", accent="Engine", eyebrow_text="AI-first game engine · pre-alpha",
     subtitle=["Project files are the single source of truth.", "GUI, CLI and AI agents are equal clients."],
     chip_items=["C++20", "TypeScript", "WebGPU", "headless"],
-    right=kernel_visual(), h=400,
+    right=kernel_visual(), h=400, accent_fx="flow",
     label="Context Engine — an AI-first, file-authoritative game engine (pre-alpha). Project files are the single "
           "source of truth; GUI, CLI and AI agents are equal clients. Every feature is a package on a microkernel."))
 
